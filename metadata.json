@@ -1,0 +1,6 @@
+{
+  "name": "E-SPPG TMG2 - Sistem Informasi Pemenuhan Gizi",
+  "description": "Sistem ERP terintegrasi Satuan Pelayanan Pemenuhan Gizi (SPPG) Probolinggo Krejengan Temenggungan 2 Yayasan Hafshawaty dalam Program Makan Bergizi Gratis (MBG).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

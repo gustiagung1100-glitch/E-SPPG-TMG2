@@ -1,0 +1,262 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account and role profile for E-SPPG TMG2 staff and volunteers",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "maxLength": 50 },
+        "division": { "type": "string", "maxLength": 50 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Institution": {
+      "title": "Institution",
+      "description": "Recipient school or beneficiary institution for MBG",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 150 },
+        "npsn": { "type": "string", "maxLength": 30 },
+        "level": { "type": "string", "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 255 },
+        "contactPerson": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "smallPortions": { "type": "number" },
+        "largePortions": { "type": "number" },
+        "totalPortions": { "type": "number" },
+        "deliveryRoute": { "type": "string", "maxLength": 50 },
+        "allergiesNote": { "type": "string", "maxLength": 255 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "level", "totalPortions"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Daily nutrition plan and menu item for MBG program",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 20 },
+        "dayName": { "type": "string", "maxLength": 30 },
+        "cycleWeek": { "type": "number" },
+        "stapleFood": { "type": "string", "maxLength": 100 },
+        "animalProtein": { "type": "string", "maxLength": 100 },
+        "plantProtein": { "type": "string", "maxLength": 100 },
+        "vegetable": { "type": "string", "maxLength": 100 },
+        "fruit": { "type": "string", "maxLength": 100 },
+        "milkOrExtra": { "type": "string", "maxLength": 100 },
+        "caloriesSmall": { "type": "number" },
+        "caloriesLarge": { "type": "number" },
+        "proteinGrams": { "type": "number" },
+        "carbGrams": { "type": "number" },
+        "fatGrams": { "type": "number" },
+        "fiberGrams": { "type": "number" },
+        "status": { "type": "string", "maxLength": 30 },
+        "targetPortions": { "type": "number" },
+        "estimatedCost": { "type": "number" },
+        "approvedBy": { "type": "string", "maxLength": 100 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "date", "stapleFood", "animalProtein", "status"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Food ingredients and warehouse stock item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "code": { "type": "string", "maxLength": 30 },
+        "name": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "currentStock": { "type": "number" },
+        "minimumStock": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 20 },
+        "pricePerUnit": { "type": "number" },
+        "storageLocation": { "type": "string", "maxLength": 50 },
+        "supplierName": { "type": "string", "maxLength": 100 },
+        "lastRestocked": { "type": "string", "maxLength": 30 },
+        "expiryDate": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "name", "category", "currentStock", "unit"]
+    },
+    "PurchaseOrder": {
+      "title": "PurchaseOrder",
+      "description": "Procurement purchase order for food ingredients",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "poNumber": { "type": "string", "maxLength": 50 },
+        "date": { "type": "string", "maxLength": 30 },
+        "supplierName": { "type": "string", "maxLength": 100 },
+        "supplierContact": { "type": "string", "maxLength": 50 },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "maxLength": 30 },
+        "qcStatus": { "type": "string", "maxLength": 30 },
+        "deliveryDate": { "type": "string", "maxLength": 30 },
+        "approvedBy": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 255 }
+      },
+      "required": ["id", "poNumber", "supplierName", "totalAmount", "status"]
+    },
+    "DistributionLog": {
+      "title": "DistributionLog",
+      "description": "Food delivery tracking to recipient schools",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 30 },
+        "institutionId": { "type": "string", "maxLength": 64 },
+        "institutionName": { "type": "string", "maxLength": 150 },
+        "smallPortions": { "type": "number" },
+        "largePortions": { "type": "number" },
+        "driverName": { "type": "string", "maxLength": 100 },
+        "vehicleNumber": { "type": "string", "maxLength": 30 },
+        "departureTime": { "type": "string", "maxLength": 20 },
+        "arrivalTime": { "type": "string", "maxLength": 20 },
+        "receivedBy": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "maxLength": 30 },
+        "foodTempAtDispatch": { "type": "number" },
+        "photoEvidenceUrl": { "type": "string", "maxLength": 255 }
+      },
+      "required": ["id", "date", "institutionName", "status"]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "Cash flow and RAB budget expenditure for SPPG operations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "transactionNumber": { "type": "string", "maxLength": 50 },
+        "date": { "type": "string", "maxLength": 30 },
+        "type": { "type": "string", "maxLength": 20 },
+        "category": { "type": "string", "maxLength": 50 },
+        "amount": { "type": "number" },
+        "description": { "type": "string", "maxLength": 255 },
+        "sourceOrRecipient": { "type": "string", "maxLength": 100 },
+        "recordedBy": { "type": "string", "maxLength": 100 },
+        "proofNumber": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "transactionNumber", "date", "type", "amount"]
+    },
+    "VolunteerAttendance": {
+      "title": "VolunteerAttendance",
+      "description": "Volunteer shift and presence log by division",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 30 },
+        "volunteerName": { "type": "string", "maxLength": 100 },
+        "division": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 30 },
+        "shift": { "type": "string", "maxLength": 30 },
+        "healthCheckPassed": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 200 }
+      },
+      "required": ["id", "date", "volunteerName", "division", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System activity and security audit trail",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 40 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 100 },
+        "userRole": { "type": "string", "maxLength": 50 },
+        "action": { "type": "string", "maxLength": 50 },
+        "module": { "type": "string", "maxLength": 50 },
+        "details": { "type": "string", "maxLength": 255 }
+      },
+      "required": ["id", "timestamp", "userName", "action", "module"]
+    },
+    "OfficialLetter": {
+      "title": "OfficialLetter",
+      "description": "Surat Masuk, Surat Keluar, and SPK letters for SPPG",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "letterNumber": { "type": "string", "maxLength": 60 },
+        "type": { "type": "string", "maxLength": 30 },
+        "date": { "type": "string", "maxLength": 30 },
+        "subject": { "type": "string", "maxLength": 150 },
+        "senderOrReceiver": { "type": "string", "maxLength": 100 },
+        "category": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "letterNumber", "type", "date", "subject"]
+    },
+    "SPPGConfig": {
+      "title": "SPPGConfig",
+      "description": "General settings and identity of SPPG unit",
+      "type": "object",
+      "properties": {
+        "sppgName": { "type": "string", "maxLength": 150 },
+        "foundationName": { "type": "string", "maxLength": 100 },
+        "sppgId": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 255 },
+        "headOfSppg": { "type": "string", "maxLength": 100 },
+        "nutritionOfficer": { "type": "string", "maxLength": 100 },
+        "financeOfficer": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 100 },
+        "programName": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["sppgName", "sppgId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Registered users and role profiles"
+    },
+    "/institutions/{institutionId}": {
+      "schema": { "$ref": "#/entities/Institution" },
+      "description": "Beneficiary schools and institutions"
+    },
+    "/menu_items/{menuId}": {
+      "schema": { "$ref": "#/entities/MenuItem" },
+      "description": "Nutritional menus and daily schedules"
+    },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Food ingredients and inventory stock"
+    },
+    "/purchase_orders/{poId}": {
+      "schema": { "$ref": "#/entities/PurchaseOrder" },
+      "description": "Procurement and PO records"
+    },
+    "/distribution_logs/{logId}": {
+      "schema": { "$ref": "#/entities/DistributionLog" },
+      "description": "Daily food delivery logs"
+    },
+    "/financial_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/FinancialTransaction" },
+      "description": "Income, expense, and budget transactions"
+    },
+    "/volunteer_attendance/{attId}": {
+      "schema": { "$ref": "#/entities/VolunteerAttendance" },
+      "description": "Attendance records for volunteers"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "System activity logs"
+    },
+    "/letters/{letterId}": {
+      "schema": { "$ref": "#/entities/OfficialLetter" },
+      "description": "Surat masuk and keluar archive"
+    },
+    "/sppg_settings/general": {
+      "schema": { "$ref": "#/entities/SPPGConfig" },
+      "description": "SPPG organizational identity and configuration"
+    }
+  }
+}
