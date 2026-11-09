@@ -28,13 +28,15 @@ import { VolunteersModule } from './components/modules/VolunteersModule';
 import { LettersModule } from './components/modules/LettersModule';
 import { ReportsModule } from './components/modules/ReportsModule';
 import { SettingsModule } from './components/modules/SettingsModule';
+import { SupplierPortalModule } from './components/modules/SupplierPortalModule';
 
 const moduleTitles: Record<ModuleKey, string> = {
   dashboard: 'Dashboard Terpadu',
   master_data: 'Master Data Terpadu (A-E)',
   institutions: 'Modul Penerima Manfaat & Presensi',
   menu: 'Perencanaan Menu & Gizi',
-  procurement: 'Pengadaan & Purchase Order',
+  procurement: 'Modul PLOK — Operasional (RAB, PO, QC)',
+  supplier_portal: 'Portal Mitra Rekanan Supplier & PO',
   inventory: 'Gudang & Stok Bahan Pangan',
   production: 'Dapur & Produksi MBG',
   distribution: 'Distribusi & Armada Pengiriman',
@@ -46,12 +48,32 @@ const moduleTitles: Record<ModuleKey, string> = {
 };
 
 const MainContent: React.FC = () => {
-  const [activeModule, setActiveModule] = useState<ModuleKey>('dashboard');
+  const { currentUser } = useApp();
+  const [activeModule, setActiveModule] = useState<ModuleKey>(
+    currentUser.role === 'Supplier / Mitra Pangan' ? 'supplier_portal' : 'dashboard'
+  );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
 
+  // Auto redirect if supplier switches role
+  React.useEffect(() => {
+    if (currentUser.role === 'Supplier / Mitra Pangan') {
+      if (activeModule !== 'supplier_portal' && activeModule !== 'settings') {
+        setActiveModule('supplier_portal');
+      }
+    }
+  }, [currentUser.role, activeModule]);
+
   const renderModule = () => {
+    // Strict RBAC boundary: suppliers are restricted to supplier_portal and settings
+    if (currentUser.role === 'Supplier / Mitra Pangan') {
+      if (activeModule === 'settings') {
+        return <SettingsModule />;
+      }
+      return <SupplierPortalModule />;
+    }
+
     switch (activeModule) {
       case 'dashboard':
         return <DashboardModule onNavigate={mod => setActiveModule(mod)} />;
@@ -63,6 +85,8 @@ const MainContent: React.FC = () => {
         return <NutritionMenuModule />;
       case 'procurement':
         return <ProcurementModule />;
+      case 'supplier_portal':
+        return <SupplierPortalModule />;
       case 'inventory':
         return <InventoryModule />;
       case 'production':

@@ -23,6 +23,17 @@ import {
   MaterialDimensionConversion,
   BeneficiaryAttendanceLog,
   BeneficiaryQuotaHistory,
+  PreparationInspectionRecord,
+  CookingInspectionRecord,
+  PortioningInspectionRecord,
+  DistributionDeliveryRecord,
+  OmprengReturnRecord,
+  FuelLogRecord,
+  WashingWasteRecord,
+  OutgoingDocument,
+  IncomingLetter,
+  VolunteerAbsenceRecord,
+  SupplierDocument,
 } from '../types';
 import {
   initialInstitutionsData,
@@ -34,6 +45,19 @@ import {
   initialBeneficiaryAttendanceData,
   initialQuotaHistoryData,
 } from './mockMasterData';
+import {
+  defaultPrepRecords,
+  defaultCookingRecords,
+  defaultPortioningRecords,
+  defaultDistributionDeliveries,
+  defaultOmprengReturns,
+  defaultFuelLogs,
+  defaultWashingWasteRecords,
+} from './productionData';
+import {
+  defaultOutgoingDocuments,
+  defaultIncomingLetters,
+} from './letterTemplatesData';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -124,21 +148,74 @@ interface AppContextType {
 
   financialTransactions: FinancialTransaction[];
   addTransaction: (tx: Omit<FinancialTransaction, 'id'>) => Promise<void>;
-  deleteTransaction: (id: string) => Promise<void>;
+  updateTransaction: (id: string, tx: Partial<FinancialTransaction>) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<boolean>;
+  approveTransaction: (id: string, approverName: string) => Promise<void>;
+  rejectTransaction: (id: string, reason: string) => Promise<void>;
+  cancelTransaction: (id: string, reason: string, cancelledByName: string) => Promise<void>;
 
   volunteerAttendance: VolunteerAttendance[];
   recordAttendance: (att: Omit<VolunteerAttendance, 'id'>) => Promise<void>;
   updateAttendance: (id: string, att: Partial<VolunteerAttendance>) => Promise<void>;
 
+  // Modul Ketidakhadiran Relawan
+  volunteerAbsences: VolunteerAbsenceRecord[];
+  addVolunteerAbsence: (rec: Omit<VolunteerAbsenceRecord, 'id' | 'createdAt'>) => Promise<void>;
+  updateVolunteerAbsence: (id: string, rec: Partial<VolunteerAbsenceRecord>) => Promise<void>;
+  approveVolunteerAbsence: (id: string, approverName: string) => Promise<void>;
+  rejectVolunteerAbsence: (id: string, reason: string) => Promise<void>;
+  deleteVolunteerAbsence: (id: string) => Promise<void>;
+
+  // Modul Portal Supplier (PO Khusus Supplier Terkait)
+  supplierConfirmPO: (poId: string, estimatedDelivery: string, driverName?: string, driverPhone?: string, vehicleNumber?: string) => Promise<void>;
+  supplierUpdatePOStatus: (poId: string, status: NonNullable<PurchaseOrder['supplierDeliveryStatus']>, notes?: string) => Promise<void>;
+  supplierRejectPO: (poId: string, reason: string) => Promise<void>;
+  supplierUploadDocument: (poId: string, doc: Omit<SupplierDocument, 'id' | 'uploadedAt'>) => Promise<void>;
+
   officialLetters: OfficialLetter[];
   addLetter: (letter: Omit<OfficialLetter, 'id'>) => Promise<void>;
   updateLetter: (id: string, letter: Partial<OfficialLetter>) => Promise<void>;
+
+  // 14. Modul Administrasi Surat (Mailing & Salinan Template)
+  outgoingDocuments: OutgoingDocument[];
+  addOutgoingDocument: (doc: Omit<OutgoingDocument, 'id' | 'createdAt'>) => Promise<void>;
+  updateOutgoingDocument: (id: string, doc: Partial<OutgoingDocument>) => Promise<void>;
+  deleteOutgoingDocument: (id: string) => Promise<void>;
+
+  // 15. Modul Surat Masuk (Register, Disposisi & Scan)
+  incomingLetters: IncomingLetter[];
+  addIncomingLetter: (lettr: Omit<IncomingLetter, 'id'>) => Promise<void>;
+  updateIncomingLetter: (id: string, lettr: Partial<IncomingLetter>) => Promise<void>;
+  deleteIncomingLetter: (id: string) => Promise<void>;
 
   auditLogs: AuditLog[];
   logAudit: (action: AuditLog['action'], module: AuditLog['module'], details: string) => Promise<void>;
 
   kitchenProgress: KitchenProgress;
   updateKitchenProgress: (progress: Partial<KitchenProgress>) => void;
+
+  // 5 Divisi Dapur & Operasional
+  prepRecords: PreparationInspectionRecord[];
+  addPrepRecord: (rec: Omit<PreparationInspectionRecord, 'id'>) => Promise<void>;
+
+  cookingRecords: CookingInspectionRecord[];
+  addCookingRecord: (rec: Omit<CookingInspectionRecord, 'id'>) => Promise<void>;
+
+  portioningRecords: PortioningInspectionRecord[];
+  addPortioningRecord: (rec: Omit<PortioningInspectionRecord, 'id'>) => Promise<void>;
+
+  distributionDeliveries: DistributionDeliveryRecord[];
+  addDistributionDelivery: (rec: Omit<DistributionDeliveryRecord, 'id'>) => Promise<void>;
+  updateDistributionDelivery: (id: string, rec: Partial<DistributionDeliveryRecord>) => Promise<void>;
+
+  omprengReturns: OmprengReturnRecord[];
+  addOmprengReturn: (rec: Omit<OmprengReturnRecord, 'id'>) => Promise<void>;
+
+  fuelLogs: FuelLogRecord[];
+  addFuelLog: (rec: Omit<FuelLogRecord, 'id'>) => Promise<void>;
+
+  washingWasteRecords: WashingWasteRecord[];
+  addWashingWasteRecord: (rec: Omit<WashingWasteRecord, 'id'>) => Promise<void>;
 
   darkMode: boolean;
   toggleDarkMode: () => void;
@@ -185,6 +262,7 @@ const defaultPermissions: RolePermissions = {
   'Relawan Div. Pemorsian': { view: true, create: false, edit: true, delete: false, approve: false, print: false, export: false },
   'Relawan Div. Distribusi': { view: true, create: false, edit: true, delete: false, approve: false, print: true, export: false },
   'Relawan Div. Cuci Ompreng': { view: true, create: false, edit: true, delete: false, approve: false, print: false, export: false },
+  'Supplier / Mitra Pangan': { view: true, create: true, edit: true, delete: false, approve: false, print: true, export: true },
 };
 
 const initialUsers: UserProfile[] = [
@@ -200,6 +278,9 @@ const initialUsers: UserProfile[] = [
   { uid: 'u10', name: 'Nurul Hidayati (Pemorsian)', email: 'pemorsian@sppg-tmg2.id', role: 'Relawan Div. Pemorsian', division: 'Pemorsian', isActive: true },
   { uid: 'u11', name: 'Agus Santoso (Distribusi)', email: 'distribusi@sppg-tmg2.id', role: 'Relawan Div. Distribusi', division: 'Distribusi', isActive: true },
   { uid: 'u12', name: 'Kholifah (Cuci Ompreng)', email: 'cuci@sppg-tmg2.id', role: 'Relawan Div. Cuci Ompreng', division: 'Cuci Ompreng', isActive: true },
+  { uid: 'u13', name: 'H. Suwandi (PT Unggas Barokah)', email: 'supplier.ayam@unggasbarokah.com', role: 'Supplier / Mitra Pangan', supplierId: 'sup-1', supplierName: 'PT Unggas Barokah Probolinggo', isActive: true },
+  { uid: 'u14', name: 'Pak Sugiono (CV Sembako & Bawang)', email: 'supplier.sembako@dringu.id', role: 'Supplier / Mitra Pangan', supplierId: 'sup-2', supplierName: 'Petani Bawang Dringu & CV Sembako', isActive: true },
+  { uid: 'u15', name: 'Moch. Mansur (Kebun Pisang Gending)', email: 'supplier.pisang@gending.id', role: 'Supplier / Mitra Pangan', supplierId: 'sup-3', supplierName: 'Kebun Pisang Gending', isActive: true },
 ];
 
 const initialMenuItems: MenuItem[] = [
@@ -289,6 +370,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BHK-001',
     name: 'Beras Medium Pulen Probolinggo',
     category: 'Bahan Kering',
+    initialStock: 1000,
     currentStock: 1250,
     minimumStock: 400,
     unit: 'kg',
@@ -304,6 +386,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BSG-002',
     name: 'Daging Ayam Broiler Fillet Segar',
     category: 'Bahan Segar',
+    initialStock: 200,
     currentStock: 95,
     minimumStock: 150,
     unit: 'kg',
@@ -319,6 +402,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BSG-003',
     name: 'Telur Ayam Ras Segar Grade A',
     category: 'Bahan Segar',
+    initialStock: 350,
     currentStock: 480,
     minimumStock: 300,
     unit: 'kg',
@@ -334,6 +418,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BSG-004',
     name: 'Wortel Brastagi Segar Manis',
     category: 'Bahan Segar',
+    initialStock: 100,
     currentStock: 120,
     minimumStock: 80,
     unit: 'kg',
@@ -349,6 +434,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BHK-005',
     name: 'Minyak Goreng Sawit Kemasan 2L',
     category: 'Bahan Kering',
+    initialStock: 80,
     currentStock: 140,
     minimumStock: 100,
     unit: 'liter',
@@ -364,6 +450,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BSG-006',
     name: 'Pisang Cavendish Matang Alami',
     category: 'Bahan Segar',
+    initialStock: 3000,
     currentStock: 2900,
     minimumStock: 1000,
     unit: 'butir',
@@ -379,6 +466,7 @@ const initialInventory: InventoryItem[] = [
     code: 'KMH-007',
     name: 'Kotak Ompreng Stainless Steel Food Grade',
     category: 'Kemasan & Higiene',
+    initialStock: 3200,
     currentStock: 3200,
     minimumStock: 3000,
     unit: 'pak',
@@ -394,6 +482,7 @@ const initialInventory: InventoryItem[] = [
     code: 'BMB-008',
     name: 'Bawang Merah Probolinggo Super',
     category: 'Bumbu & Rempah',
+    initialStock: 60,
     currentStock: 32,
     minimumStock: 50,
     unit: 'kg',
@@ -424,6 +513,29 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
     notes: 'Pengiriman batch subuh pukul 03:30 WIB untuk masak porsi SD.',
+    supplierConfirmed: true,
+    supplierConfirmedAt: '2026-11-07 14:00',
+    supplierEstimatedDelivery: '2026-11-08 03:30 WIB',
+    supplierDriverName: 'Budi Santoso',
+    supplierDriverPhone: '0813-8822-1100',
+    supplierVehicleNumber: 'N 8922 UB',
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
+    supplierDocuments: [
+      {
+        id: 'doc-1',
+        type: 'Surat Jalan',
+        fileName: 'Surat_Jalan_UB_0088.pdf',
+        fileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+        uploadedAt: '2026-11-07 15:00:00',
+      },
+      {
+        id: 'doc-2',
+        type: 'Sertifikat Halal',
+        fileName: 'Sertifikat_Halal_RPHU_2026.pdf',
+        fileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+        uploadedAt: '2026-11-07 15:15:00',
+      },
+    ],
   },
   {
     id: 'po-2',
@@ -440,6 +552,13 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     status: 'Menunggu Verifikasi Keuangan',
     qcStatus: 'Belum QC',
     notes: 'Kebutuhan restock bahan dapur yang menipis di gudang.',
+    supplierConfirmed: true,
+    supplierConfirmedAt: '2026-11-08 16:30',
+    supplierEstimatedDelivery: '2026-11-09 06:00 WIB',
+    supplierDriverName: 'Sugiarto',
+    supplierDriverPhone: '0852-9988-1122',
+    supplierVehicleNumber: 'N 8140 DR',
+    supplierDeliveryStatus: 'Sedang Dipersiapkan',
   },
   {
     id: 'po-3',
@@ -458,6 +577,32 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
     notes: 'Distribusi untuk menu hari Minggu dan Senin.',
+    supplierConfirmed: true,
+    supplierConfirmedAt: '2026-11-06 13:00',
+    supplierEstimatedDelivery: '2026-11-07 05:00 WIB',
+    supplierDriverName: 'Moch. Mansur',
+    supplierDriverPhone: '0819-2233-4455',
+    supplierVehicleNumber: 'N 7721 GD',
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
+  },
+  {
+    id: 'po-4',
+    poNumber: 'PO/SPPG-TMG2/2026/XI/0091',
+    date: '2026-11-09',
+    supplierName: 'PT Unggas Barokah Probolinggo',
+    supplierContact: 'H. Suwandi - 0812-7788-9911',
+    deliveryDate: '2026-11-10',
+    items: [
+      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Segar', quantity: 290, unit: 'kg', unitPrice: 38000, subtotal: 11020000 },
+    ],
+    totalAmount: 11020000,
+    status: 'Disetujui Kepala',
+    qcStatus: 'Belum QC',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Kebutuhan pasokan ayam potong segar untuk menu hari Selasa, 10 November 2026. Harap konfirmasi kesanggupan.',
+    supplierConfirmed: false,
+    supplierDeliveryStatus: 'Menunggu Konfirmasi',
   },
 ];
 
@@ -615,7 +760,7 @@ const initialDistributions: DistributionLog[] = [
 const initialTransactions: FinancialTransaction[] = [
   {
     id: 'tx-1',
-    transactionNumber: 'KAS-IN/2026/XI/001',
+    transactionNumber: 'BKM/SPPG-TMG2/2026/XI/001',
     date: '2026-11-01',
     type: 'Pemasukan',
     category: 'Dana Termin BGN',
@@ -623,64 +768,97 @@ const initialTransactions: FinancialTransaction[] = [
     description: 'Pencairan Dana Alokasi MBG BGN Termin I November 2026 (25 Hari Operasi x 2.850 Porsi)',
     sourceOrRecipient: 'KPPN Probolinggo / Badan Gizi Nasional',
     proofNumber: 'SP2D-BGN-09823/2026',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Transfer Bank',
+    bankAccount: 'Bank BRI SPPG Yayasan Hafshawaty (0034-01-00291-53-1)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-01 10:00:00',
+    notes: 'Dana termin BGN resmi masuk rekening giro operasional SPPG.',
   },
   {
     id: 'tx-2',
-    transactionNumber: 'KAS-OUT/2026/XI/0012',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0012',
     date: '2026-11-07',
     type: 'Pengeluaran',
     category: 'Bahan Baku',
     amount: 10640000,
     description: 'Pembayaran PO Daging Ayam Fillet Segar 280 kg untuk Menu Minggu 8 Nov 2026',
     sourceOrRecipient: 'PT Unggas Barokah Probolinggo',
+    supplierName: 'PT Unggas Barokah Probolinggo',
     proofNumber: 'KWT-UB-00912',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Transfer Bank',
+    bankAccount: 'Bank BRI SPPG Yayasan Hafshawaty (0034-01-00291-53-1)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-07 15:30:00',
+    notes: 'Sesuai dengan PO/SPPG-TMG2/2026/XI/0088 yang telah diverifikasi QC gudang.',
   },
   {
     id: 'tx-3',
-    transactionNumber: 'KAS-OUT/2026/XI/0013',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0013',
     date: '2026-11-07',
     type: 'Pengeluaran',
     category: 'Bahan Baku',
     amount: 5220000,
     description: 'Pembelian Buah Pisang Cavendish Segar 2.900 butir',
     sourceOrRecipient: 'Kebun Pisang Gending',
+    supplierName: 'Kebun Pisang Gending',
     proofNumber: 'NOTA-KPG-771',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Tunai',
+    bankAccount: 'Kas Tunai Dapur (Petty Cash)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-07 16:00:00',
+    notes: 'Pembayaran tunai langsung saat buah tiba di gudang SPPG.',
   },
   {
     id: 'tx-4',
-    transactionNumber: 'KAS-OUT/2026/XI/0014',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0014',
     date: '2026-11-07',
     type: 'Pengeluaran',
     category: 'Operasional Dapur',
     amount: 1850000,
     description: 'Refill Tabung Gas LPG 50 kg x 2 Tabung untuk Dapur Pengolahan Utama',
     sourceOrRecipient: 'Agen LPG Pertamina Krejengan',
+    supplierName: 'Agen LPG Pertamina Krejengan',
     proofNumber: 'NOTA-LPG-332',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Tunai',
+    bankAccount: 'Kas Tunai Dapur (Petty Cash)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-07 16:45:00',
+    notes: 'Kebutuhan bahan bakar masak siklus 3 hari ke depan.',
   },
   {
     id: 'tx-5',
-    transactionNumber: 'KAS-OUT/2026/XI/0015',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0015',
     date: '2026-11-08',
     type: 'Pengeluaran',
     category: 'Logistik & Armada',
     amount: 750000,
     description: 'Bahan Bakar Minyak Dexlite 3 Unit Kendaraan Distribusi SPPG TMG2',
-    sourceOrRecipient: 'SPBU Krejengan',
+    sourceOrRecipient: 'SPBU Krejengan Probolinggo',
     proofNumber: 'STRUK-SPBU-88192',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Tunai',
+    bankAccount: 'Kas Operasional Lapangan',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-08 07:30:00',
+    notes: 'Klaim BBM armada box isothermal rute timur dan barat.',
   },
   {
     id: 'tx-6',
-    transactionNumber: 'KAS-OUT/2026/XI/0016',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0016',
     date: '2026-11-08',
     type: 'Pengeluaran',
     category: 'Upah Relawan',
@@ -688,8 +866,32 @@ const initialTransactions: FinancialTransaction[] = [
     description: 'Insentif Harian 28 Relawan Dapur & Distribusi Tanggal 8 November 2026',
     sourceOrRecipient: 'Koordinator Relawan SPPG TMG2',
     proofNumber: 'DAFTAR-INSENTIF-0811',
-    recordedBy: 'M. Farhan, S.E.',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
     paymentMethod: 'Tunai',
+    bankAccount: 'Kas Tunai Dapur (Petty Cash)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    approvedAt: '2026-11-08 14:00:00',
+    notes: 'Diberikan tunai setelah seluruh ompreng selesai dicuci dan disterilisasi.',
+  },
+  {
+    id: 'tx-7',
+    transactionNumber: 'BKK/SPPG-TMG2/2026/XI/0017',
+    date: '2026-11-08',
+    type: 'Pengeluaran',
+    category: 'Perlengkapan',
+    amount: 1450000,
+    description: 'Pembelian Sarung Tangan Nitril Food Grade & Hairnet 10 Boks',
+    sourceOrRecipient: 'CV Berkah Hygiene Mandiri',
+    supplierName: 'CV Berkah Hygiene Mandiri',
+    proofNumber: 'INV-BHM-4401',
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    paymentMethod: 'Transfer Bank',
+    bankAccount: 'Bank Jatim Cab. Kraksaan (0132-99-8812)',
+    proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    approvalStatus: 'Menunggu Persetujuan',
+    notes: 'Pengajuan belanja perlengkapan sanitasi dan APD relawan dapur.',
   },
 ];
 
@@ -793,6 +995,58 @@ const initialVolunteers: VolunteerAttendance[] = [
     healthCheckPassed: true,
     hygieneGearComplete: true,
     notes: 'Proses sterilisasi ompreng kembali dari kloter 1.',
+  },
+];
+
+const defaultVolunteerAbsences: VolunteerAbsenceRecord[] = [
+  {
+    id: 'abs-1',
+    date: '2026-11-08',
+    volunteerId: 'vol-02',
+    volunteerName: 'Siti Rohimah',
+    division: 'Persiapan',
+    reason: 'Sakit',
+    reasonDetails: 'Gejala flu batuk dan demam ringan (suhu 37.8°C)',
+    replacementVolunteerId: 'vol-cad-1',
+    replacementVolunteerName: 'Bu Anisa',
+    replacementDivision: 'Persiapan',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Chef Junaidi Hasan',
+    approvedAt: '2026-11-08 03:15:00',
+    notes: 'Disetujui demi kepatuhan sanitasi higiene pangan dapur MBG.',
+    createdAt: '2026-11-08 03:00:00',
+  },
+  {
+    id: 'abs-2',
+    date: '2026-11-09',
+    volunteerId: 'vol-06',
+    volunteerName: 'Rina Maryana',
+    division: 'Pemorsian',
+    reason: 'Izin Keperluan Keluarga',
+    reasonDetails: 'Menghadiri wisuda adik kandung di Kraksaan',
+    replacementVolunteerId: 'vol-cad-2',
+    replacementVolunteerName: 'Mbak Ririn',
+    replacementDivision: 'Pemorsian',
+    approvalStatus: 'Disetujui',
+    approvedBy: 'Siti Aminah, S.Gz.',
+    approvedAt: '2026-11-08 19:30:00',
+    notes: 'Surat permohonan izin diajukan H-1, pengganti telah konfirmasi sanggup hadir.',
+    createdAt: '2026-11-08 16:00:00',
+  },
+  {
+    id: 'abs-3',
+    date: '2026-11-10',
+    volunteerId: 'vol-04',
+    volunteerName: 'Hariyanto',
+    division: 'Distribusi',
+    reason: 'Kendala Transportasi / Cuaca',
+    reasonDetails: 'Perbaikan motor operasional pribadi',
+    replacementVolunteerId: 'vol-cad-3',
+    replacementVolunteerName: 'Bambang Irawan',
+    replacementDivision: 'Distribusi',
+    approvalStatus: 'Menunggu Persetujuan',
+    notes: 'Menunggu verifikasi Asisten Lapangan & Kepala SPPG.',
+    createdAt: '2026-11-09 08:30:00',
   },
 ];
 
@@ -993,6 +1247,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : initialAuditLogs;
   });
 
+  // 5 Divisi Dapur & Operasional
+  const [prepRecords, setPrepRecords] = useState<PreparationInspectionRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_prep_records');
+    return saved ? JSON.parse(saved) : defaultPrepRecords;
+  });
+
+  const [cookingRecords, setCookingRecords] = useState<CookingInspectionRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_cooking_records');
+    return saved ? JSON.parse(saved) : defaultCookingRecords;
+  });
+
+  const [portioningRecords, setPortioningRecords] = useState<PortioningInspectionRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_portioning_records');
+    return saved ? JSON.parse(saved) : defaultPortioningRecords;
+  });
+
+  const [distributionDeliveries, setDistributionDeliveries] = useState<DistributionDeliveryRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_distribution_deliveries');
+    return saved ? JSON.parse(saved) : defaultDistributionDeliveries;
+  });
+
+  const [omprengReturns, setOmprengReturns] = useState<OmprengReturnRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_ompreng_returns');
+    return saved ? JSON.parse(saved) : defaultOmprengReturns;
+  });
+
+  const [fuelLogs, setFuelLogs] = useState<FuelLogRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_fuel_logs');
+    return saved ? JSON.parse(saved) : defaultFuelLogs;
+  });
+
+  const [washingWasteRecords, setWashingWasteRecords] = useState<WashingWasteRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_washing_waste_records');
+    return saved ? JSON.parse(saved) : defaultWashingWasteRecords;
+  });
+
+  // 14. Modul Administrasi Surat & 15. Modul Surat Masuk
+  const [outgoingDocuments, setOutgoingDocuments] = useState<OutgoingDocument[]>(() => {
+    const saved = localStorage.getItem('esppg_outgoing_docs');
+    return saved ? JSON.parse(saved) : defaultOutgoingDocuments;
+  });
+
+  const [incomingLetters, setIncomingLetters] = useState<IncomingLetter[]>(() => {
+    const saved = localStorage.getItem('esppg_incoming_letters');
+    return saved ? JSON.parse(saved) : defaultIncomingLetters;
+  });
+
+  const [volunteerAbsences, setVolunteerAbsences] = useState<VolunteerAbsenceRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_volunteer_absences');
+    return saved ? JSON.parse(saved) : defaultVolunteerAbsences;
+  });
+
   const [kitchenProgress, setKitchenProgress] = useState<KitchenProgress>(initialKitchenProgress);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('esppg_dark_mode') === 'true';
@@ -1078,6 +1384,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [auditLogs]);
 
   useEffect(() => {
+    localStorage.setItem('esppg_prep_records', JSON.stringify(prepRecords));
+  }, [prepRecords]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_cooking_records', JSON.stringify(cookingRecords));
+  }, [cookingRecords]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_portioning_records', JSON.stringify(portioningRecords));
+  }, [portioningRecords]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_distribution_deliveries', JSON.stringify(distributionDeliveries));
+  }, [distributionDeliveries]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_ompreng_returns', JSON.stringify(omprengReturns));
+  }, [omprengReturns]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_fuel_logs', JSON.stringify(fuelLogs));
+  }, [fuelLogs]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_washing_waste_records', JSON.stringify(washingWasteRecords));
+  }, [washingWasteRecords]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_outgoing_docs', JSON.stringify(outgoingDocuments));
+  }, [outgoingDocuments]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_incoming_letters', JSON.stringify(incomingLetters));
+  }, [incomingLetters]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_volunteer_absences', JSON.stringify(volunteerAbsences));
+  }, [volunteerAbsences]);
+
+  useEffect(() => {
     localStorage.setItem('esppg_dark_mode', String(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -1119,6 +1465,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Permission Check
   const hasPermission = (module: ModuleKey, action: ActionPermission): boolean => {
+    // Supplier role strict data isolation
+    if (currentUser.role === 'Supplier / Mitra Pangan') {
+      if (module === 'supplier_portal') return true;
+      if (module === 'settings' && action === 'view') return true;
+      return false; // Strictly blocked from internal finance, beneficiaries, kitchen, inventory, other supplier POs, etc.
+    }
     if (currentUser.role === 'Admin Utama') return true;
     const roleMap = rolePermissions[currentUser.role];
     if (!roleMap) return false;
@@ -1630,14 +1982,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addTransaction = async (tx: Omit<FinancialTransaction, 'id'>) => {
     const newTx: FinancialTransaction = { ...tx, id: 'tx-' + Date.now() };
     setFinancialTransactions(prev => [newTx, ...prev]);
-    await logAudit('CREATE', 'finance', `Mencatat ${tx.type} Rp ${tx.amount} (${tx.description})`);
-    addToast('success', 'Transaksi Tercatat', `Kas ${tx.type} Rp ${tx.amount.toLocaleString('id-ID')} berhasil disimpan.`);
+    await logAudit('CREATE', 'finance', `Mencatat ${tx.type} Rp ${tx.amount} (${tx.description}) [${tx.approvalStatus}]`);
+    addToast('success', 'Transaksi Tercatat', `Kas ${tx.type} Rp ${tx.amount.toLocaleString('id-ID')} berhasil dicatat.`);
   };
 
-  const deleteTransaction = async (id: string) => {
+  const updateTransaction = async (id: string, update: Partial<FinancialTransaction>) => {
+    setFinancialTransactions(prev => prev.map(t => (t.id === id ? { ...t, ...update } : t)));
+    await logAudit('UPDATE', 'finance', `Memperbarui transaksi kas ID: ${id}`);
+    addToast('info', 'Transaksi Diperbarui', 'Pembaruan data transaksi berhasil disimpan.');
+  };
+
+  const deleteTransaction = async (id: string): Promise<boolean> => {
+    const target = financialTransactions.find(t => t.id === id);
+    if (!target) return false;
+
+    // ATURAN TEGAS: Transaksi yang sudah disetujui tidak boleh dihapus tanpa proses pembatalan dan jejak audit
+    if (target.approvalStatus === 'Disetujui') {
+      addToast('error', 'Hapus Ditolak', 'Transaksi yang berstatus Disetujui tidak boleh dihapus secara permanen. Gunakan prosedur Pembatalan Resmi dengan jejak audit.');
+      return false;
+    }
+
     setFinancialTransactions(prev => prev.filter(t => t.id !== id));
-    await logAudit('DELETE', 'finance', `Menghapus transaksi kas ID: ${id}`);
+    await logAudit('DELETE', 'finance', `Menghapus transaksi draf/ditolak kas ID: ${id} (${target.transactionNumber})`);
     addToast('warning', 'Transaksi Dihapus', 'Pencatatan kas telah dihapus.');
+    return true;
+  };
+
+  const approveTransaction = async (id: string, approverName: string) => {
+    const now = new Date().toLocaleString('id-ID');
+    setFinancialTransactions(prev =>
+      prev.map(t => (t.id === id ? { ...t, approvalStatus: 'Disetujui', approvedBy: approverName, approvedAt: now } : t))
+    );
+    await logAudit('APPROVE', 'finance', `Menyetujui transaksi kas ID: ${id} oleh ${approverName}`);
+    addToast('success', 'Transaksi Disetujui', 'Pencatatan kas resmi disahkan dan mempengaruhi saldo kas.');
+  };
+
+  const rejectTransaction = async (id: string, reason: string) => {
+    setFinancialTransactions(prev =>
+      prev.map(t => (t.id === id ? { ...t, approvalStatus: 'Ditolak', notes: (t.notes ? t.notes + ' | ' : '') + `Ditolak: ${reason}` } : t))
+    );
+    await logAudit('UPDATE', 'finance', `Menolak transaksi kas ID: ${id} alasan: ${reason}`);
+    addToast('warning', 'Transaksi Ditolak', 'Status pengajuan kas telah ditolak.');
+  };
+
+  const cancelTransaction = async (id: string, reason: string, cancelledByName: string) => {
+    const now = new Date().toLocaleString('id-ID');
+    setFinancialTransactions(prev =>
+      prev.map(t =>
+        t.id === id
+          ? {
+              ...t,
+              approvalStatus: 'Dibatalkan',
+              cancellationReason: reason,
+              cancelledBy: cancelledByName,
+              cancelledAt: now,
+            }
+          : t
+      )
+    );
+    await logAudit('DELETE', 'finance', `PEMBATALAN TRANSAKSI RESMI ID: ${id} alasan: "${reason}" oleh: ${cancelledByName}`);
+    addToast('error', 'Transaksi Dibatalkan', 'Transaksi disetujui telah dibatalkan dengan jejak audit permanen.');
   };
 
   // Volunteers Attendance
@@ -1672,6 +2076,283 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateKitchenProgress = (progress: Partial<KitchenProgress>) => {
     setKitchenProgress(prev => ({ ...prev, ...progress }));
     addToast('info', 'Progres Dapur Diperbarui', 'Checklist kesiapan produksi harian dimutakhirkan.');
+  };
+
+  // 5 Divisi Dapur & Operasional Actions
+  const addPrepRecord = async (rec: Omit<PreparationInspectionRecord, 'id'>) => {
+    const newRec: PreparationInspectionRecord = {
+      ...rec,
+      id: `prep-${Date.now()}`,
+    };
+    setPrepRecords(prev => [newRec, ...prev]);
+    addToast('success', 'Data Persiapan Tersimpan', `Pemeriksaan bahan rusak dan suhu oleh ${rec.officerName} berhasil dicatat.`);
+    await logAudit('CREATE', 'production', `Mencatat inspeksi bahan rusak & suhu Divisi Persiapan: ${rec.damagedVegetable.name}`);
+  };
+
+  const addCookingRecord = async (rec: Omit<CookingInspectionRecord, 'id'>) => {
+    const newRec: CookingInspectionRecord = {
+      ...rec,
+      id: `cook-${Date.now()}`,
+    };
+    setCookingRecords(prev => [newRec, ...prev]);
+    addToast('success', 'Data Pengolahan Tersimpan', `Titik kendali kritis (CCP) suhu matang masakan dicatat.`);
+    await logAudit('CREATE', 'production', `Mencatat suhu makanan matang Divisi Pengolahan oleh ${rec.officerName}`);
+  };
+
+  const addPortioningRecord = async (rec: Omit<PortioningInspectionRecord, 'id'>) => {
+    const newRec: PortioningInspectionRecord = {
+      ...rec,
+      id: `port-${Date.now()}`,
+    };
+    setPortioningRecords(prev => [newRec, ...prev]);
+    addToast('success', 'Data Pemorsian Tersimpan', `Penimbangan porsi kecil (${rec.smallPortionWeightGrams}g) & besar (${rec.largePortionWeightGrams}g) dicatat.`);
+    await logAudit('CREATE', 'production', `Mencatat pemorsian ompreng steril oleh ${rec.officerName}`);
+  };
+
+  const addDistributionDelivery = async (rec: Omit<DistributionDeliveryRecord, 'id'>) => {
+    const newRec: DistributionDeliveryRecord = {
+      ...rec,
+      id: `dist-deliv-${Date.now()}`,
+    };
+    setDistributionDeliveries(prev => [newRec, ...prev]);
+    addToast('success', 'Distribusi Terjadwal', `Pengiriman ${rec.totalPortions} porsi ke ${rec.institutionName} berhasil dicatat.`);
+    await logAudit('CREATE', 'distribution', `Mencatat pengiriman makanan ke ${rec.institutionName} via ${rec.vehicleNumber}`);
+  };
+
+  const updateDistributionDelivery = async (id: string, update: Partial<DistributionDeliveryRecord>) => {
+    setDistributionDeliveries(prev => prev.map(d => d.id === id ? { ...d, ...update } : d));
+    addToast('info', 'Status Distribusi Diperbarui', 'Pembaruan data serah terima distribusi berhasil disimpan.');
+    await logAudit('UPDATE', 'distribution', `Memperbarui log distribusi ${id}`);
+  };
+
+  const addOmprengReturn = async (rec: Omit<OmprengReturnRecord, 'id'>) => {
+    const newRec: OmprengReturnRecord = {
+      ...rec,
+      id: `ret-${Date.now()}`,
+    };
+    setOmprengReturns(prev => [newRec, ...prev]);
+    addToast('success', 'Pengembalian Ompreng Dicatat', `Diterima ${rec.totalPortions} ompreng kembali dari ${rec.institutionName}.`);
+    await logAudit('CREATE', 'distribution', `Mencatat pengembalian ${rec.totalPortions} ompreng dari ${rec.institutionName}`);
+  };
+
+  const addFuelLog = async (rec: Omit<FuelLogRecord, 'id'>) => {
+    const newRec: FuelLogRecord = {
+      ...rec,
+      id: `fuel-${Date.now()}`,
+    };
+    setFuelLogs(prev => [newRec, ...prev]);
+    addToast('success', 'Pengisian BBM Tersimpan', `Log BBM ${rec.vehicleNumber} senilai Rp ${rec.nominalCost.toLocaleString('id-ID')} dicatat.`);
+    await logAudit('CREATE', 'distribution', `Mencatat pengisian BBM ${rec.nominalCost} untuk ${rec.vehicleNumber}`);
+  };
+
+  const addWashingWasteRecord = async (rec: Omit<WashingWasteRecord, 'id'>) => {
+    const newRec: WashingWasteRecord = {
+      ...rec,
+      id: `waste-${Date.now()}`,
+    };
+    setWashingWasteRecords(prev => [newRec, ...prev]);
+    addToast('success', 'Food Waste & Cuci Ompreng Dicatat', `Total limbah makanan ${rec.totalWasteWeight} kg berhasil direkam.`);
+    await logAudit('CREATE', 'production', `Mencatat audit sisa makanan (food waste) ${rec.totalWasteWeight} kg`);
+  };
+
+  // 14. Modul Administrasi Surat (Mailing & Salinan Template)
+  const addOutgoingDocument = async (docData: Omit<OutgoingDocument, 'id' | 'createdAt'>) => {
+    const newDoc: OutgoingDocument = {
+      ...docData,
+      id: `out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setOutgoingDocuments(prev => [newDoc, ...prev]);
+    addToast('success', 'Dokumen Berhasil Dibuat', `Salinan dokumen resmi ${newDoc.letterNumber} berhasil di-generate.`);
+    await logAudit('CREATE', 'letters', `Membuat salinan dokumen resmi [${newDoc.type}]: ${newDoc.letterNumber} (${newDoc.subject})`);
+  };
+
+  const updateOutgoingDocument = async (id: string, docData: Partial<OutgoingDocument>) => {
+    setOutgoingDocuments(prev => prev.map(d => d.id === id ? { ...d, ...docData } : d));
+    addToast('success', 'Dokumen Diperbarui', 'Data dokumen resmi berhasil diperbarui.');
+    await logAudit('UPDATE', 'letters', `Memperbarui dokumen resmi ID: ${id}`);
+  };
+
+  const deleteOutgoingDocument = async (id: string) => {
+    const target = outgoingDocuments.find(d => d.id === id);
+    setOutgoingDocuments(prev => prev.filter(d => d.id !== id));
+    addToast('info', 'Dokumen Dihapus', `Dokumen ${target?.letterNumber || id} dihapus dari arsip.`);
+    await logAudit('DELETE', 'letters', `Menghapus arsip dokumen resmi: ${target?.letterNumber || id}`);
+  };
+
+  // 15. Modul Surat Masuk (Register, Disposisi & Scan)
+  const addIncomingLetter = async (lettrData: Omit<IncomingLetter, 'id'>) => {
+    const newLettr: IncomingLetter = {
+      ...lettrData,
+      id: `inc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    };
+    setIncomingLetters(prev => [newLettr, ...prev]);
+    addToast('success', 'Surat Masuk Diregistrasi', `Surat masuk dari ${newLettr.sender} berhasil diregistrasi.`);
+    await logAudit('CREATE', 'letters', `Registrasi surat masuk: ${newLettr.letterNumber} dari ${newLettr.sender}`);
+  };
+
+  const updateIncomingLetter = async (id: string, lettrData: Partial<IncomingLetter>) => {
+    setIncomingLetters(prev => prev.map(l => l.id === id ? { ...l, ...lettrData } : l));
+    addToast('success', 'Surat Masuk Diperbarui', 'Data dan disposisi surat masuk berhasil dimutakhirkan.');
+    await logAudit('UPDATE', 'letters', `Memperbarui status/disposisi surat masuk: ${id}`);
+  };
+
+  const deleteIncomingLetter = async (id: string) => {
+    const target = incomingLetters.find(l => l.id === id);
+    setIncomingLetters(prev => prev.filter(l => l.id !== id));
+    addToast('info', 'Surat Masuk Dihapus', `Surat masuk ${target?.letterNumber || id} dihapus.`);
+    await logAudit('DELETE', 'letters', `Menghapus register surat masuk: ${target?.letterNumber || id}`);
+  };
+
+  // MODUL KETIDAKHADIRAN RELAWAN
+  const addVolunteerAbsence = async (rec: Omit<VolunteerAbsenceRecord, 'id' | 'createdAt'>) => {
+    const newRec: VolunteerAbsenceRecord = {
+      ...rec,
+      id: `abs-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setVolunteerAbsences(prev => [newRec, ...prev]);
+    addToast('success', 'Ketidakhadiran Dicatat', `Pengajuan ketidakhadiran ${newRec.volunteerName} berhasil disimpan.`);
+    await logAudit('CREATE', 'volunteers', `Mencatat ketidakhadiran relawan: ${newRec.volunteerName} (Divisi: ${newRec.division}) -> Pengganti: ${newRec.replacementVolunteerName}`);
+  };
+
+  const updateVolunteerAbsence = async (id: string, rec: Partial<VolunteerAbsenceRecord>) => {
+    setVolunteerAbsences(prev => prev.map(a => a.id === id ? { ...a, ...rec } : a));
+    addToast('success', 'Data Diperbarui', 'Data ketidakhadiran relawan berhasil dimutakhirkan.');
+    await logAudit('UPDATE', 'volunteers', `Memperbarui data ketidakhadiran ID: ${id}`);
+  };
+
+  const approveVolunteerAbsence = async (id: string, approverName: string) => {
+    const target = volunteerAbsences.find(a => a.id === id);
+    if (!target) return;
+
+    const approvedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    setVolunteerAbsences(prev => prev.map(a => a.id === id ? {
+      ...a,
+      approvalStatus: 'Disetujui',
+      approvedBy: approverName,
+      approvedAt,
+    } : a));
+
+    // Otomatis sinkronisasi ke presensi relawan
+    setVolunteerAttendance(prev => {
+      const existing = prev.find(att => att.date === target.date && (att.volunteerName === target.volunteerName || att.volunteerId === target.volunteerId));
+      if (existing) {
+        return prev.map(att => att.id === existing.id ? {
+          ...att,
+          status: target.reason === 'Sakit' ? 'Sakit' : 'Izin',
+          healthCheckPassed: target.reason !== 'Sakit',
+          reason: `${target.reason}: ${target.reasonDetails || ''}`.trim(),
+          replacementVolunteer: target.replacementVolunteerName,
+          notes: `Disetujui oleh ${approverName}. Pengganti: ${target.replacementVolunteerName} (Divisi ${target.replacementDivision})`,
+        } : att);
+      } else {
+        const newAtt: VolunteerAttendance = {
+          id: `att-abs-${Date.now()}`,
+          date: target.date,
+          volunteerId: target.volunteerId,
+          volunteerName: target.volunteerName,
+          division: target.division as any,
+          shift: 'Pagi (03:30 - 08:30)',
+          status: target.reason === 'Sakit' ? 'Sakit' : 'Izin',
+          healthCheckPassed: target.reason !== 'Sakit',
+          hygieneGearComplete: false,
+          replacementVolunteer: target.replacementVolunteerName,
+          reason: target.reason,
+          notes: `Disetujui oleh ${approverName}. Pengganti: ${target.replacementVolunteerName} (Divisi ${target.replacementDivision})`,
+        };
+        return [newAtt, ...prev];
+      }
+    });
+
+    addToast('success', 'Ketidakhadiran Disetujui', `Pergantian relawan ${target.volunteerName} oleh ${target.replacementVolunteerName} disetujui.`);
+    await logAudit('APPROVE', 'volunteers', `Menyetujui ketidakhadiran & pergantian relawan: ${target.volunteerName} -> ${target.replacementVolunteerName}`);
+  };
+
+  const rejectVolunteerAbsence = async (id: string, reason: string) => {
+    const target = volunteerAbsences.find(a => a.id === id);
+    setVolunteerAbsences(prev => prev.map(a => a.id === id ? {
+      ...a,
+      approvalStatus: 'Ditolak',
+      rejectionReason: reason,
+    } : a));
+    addToast('info', 'Ketidakhadiran Ditolak', `Pengajuan ketidakhadiran ${target?.volunteerName || id} ditolak.`);
+    await logAudit('UPDATE', 'volunteers', `Menolak pengajuan ketidakhadiran: ${target?.volunteerName || id} (Alasan: ${reason})`);
+  };
+
+  const deleteVolunteerAbsence = async (id: string) => {
+    const target = volunteerAbsences.find(a => a.id === id);
+    setVolunteerAbsences(prev => prev.filter(a => a.id !== id));
+    addToast('info', 'Data Dihapus', `Catatan ketidakhadiran ${target?.volunteerName || id} dihapus.`);
+    await logAudit('DELETE', 'volunteers', `Menghapus catatan ketidakhadiran ID: ${id}`);
+  };
+
+  // MODUL PORTAL SUPPLIER
+  const supplierConfirmPO = async (poId: string, estimatedDelivery: string, driverName?: string, driverPhone?: string, vehicleNumber?: string) => {
+    const confirmedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    setPurchaseOrders(prev => prev.map(po => po.id === poId ? {
+      ...po,
+      supplierConfirmed: true,
+      supplierConfirmedAt: confirmedAt,
+      supplierEstimatedDelivery: estimatedDelivery,
+      supplierDriverName: driverName,
+      supplierDriverPhone: driverPhone,
+      supplierVehicleNumber: vehicleNumber,
+      supplierDeliveryStatus: 'Dikonfirmasi Supplier',
+    } : po));
+    addToast('success', 'Pesanan Dikonfirmasi', `Pesanan PO berhasil dikonfirmasi. Estimasi pengiriman: ${estimatedDelivery}`);
+    await logAudit('UPDATE', 'procurement', `Supplier mengonfirmasi PO ${poId} (Estimasi: ${estimatedDelivery})`);
+  };
+
+  const supplierUpdatePOStatus = async (poId: string, status: NonNullable<PurchaseOrder['supplierDeliveryStatus']>, notes?: string) => {
+    setPurchaseOrders(prev => prev.map(po => {
+      if (po.id === poId) {
+        let updatedPOStatus = po.status;
+        if (status === 'Dalam Pengiriman') {
+          updatedPOStatus = 'Dikirim ke supplier';
+        }
+        return {
+          ...po,
+          supplierDeliveryStatus: status,
+          status: updatedPOStatus,
+          notes: notes ? `${po.notes ? po.notes + ' | ' : ''}Update Supplier: ${notes}` : po.notes,
+        };
+      }
+      return po;
+    }));
+    addToast('success', 'Status Pesanan Diperbarui', `Status pengiriman PO kini: ${status}`);
+    await logAudit('UPDATE', 'procurement', `Supplier memperbarui status pengiriman PO ${poId} menjadi ${status}`);
+  };
+
+  const supplierRejectPO = async (poId: string, reason: string) => {
+    setPurchaseOrders(prev => prev.map(po => po.id === poId ? {
+      ...po,
+      supplierConfirmed: false,
+      supplierDeliveryStatus: 'Ditolak Supplier',
+      supplierRejectionReason: reason,
+      status: 'Ditolak',
+    } : po));
+    addToast('warning', 'Pesanan Ditolak Supplier', `Pesanan PO ditolak oleh supplier dengan alasan: ${reason}`);
+    await logAudit('UPDATE', 'procurement', `Supplier menolak pesanan PO ${poId}: ${reason}`);
+  };
+
+  const supplierUploadDocument = async (poId: string, doc: Omit<SupplierDocument, 'id' | 'uploadedAt'>) => {
+    const newDoc: SupplierDocument = {
+      ...doc,
+      id: `sdoc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      uploadedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    };
+    setPurchaseOrders(prev => prev.map(po => {
+      if (po.id === poId) {
+        return {
+          ...po,
+          supplierDocuments: [...(po.supplierDocuments || []), newDoc],
+        };
+      }
+      return po;
+    }));
+    addToast('success', 'Dokumen Terunggah', `Dokumen ${doc.type} (${doc.fileName}) berhasil diunggah.`);
+    await logAudit('UPDATE', 'procurement', `Supplier mengunggah dokumen [${doc.type}] untuk PO ${poId}`);
   };
 
   return (
@@ -1736,17 +2417,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateDistributionLog,
         financialTransactions,
         addTransaction,
+        updateTransaction,
         deleteTransaction,
+        approveTransaction,
+        rejectTransaction,
+        cancelTransaction,
         volunteerAttendance,
         recordAttendance,
         updateAttendance,
+        volunteerAbsences,
+        addVolunteerAbsence,
+        updateVolunteerAbsence,
+        approveVolunteerAbsence,
+        rejectVolunteerAbsence,
+        deleteVolunteerAbsence,
+        supplierConfirmPO,
+        supplierUpdatePOStatus,
+        supplierRejectPO,
+        supplierUploadDocument,
         officialLetters,
         addLetter,
         updateLetter,
+        outgoingDocuments,
+        addOutgoingDocument,
+        updateOutgoingDocument,
+        deleteOutgoingDocument,
+        incomingLetters,
+        addIncomingLetter,
+        updateIncomingLetter,
+        deleteIncomingLetter,
         auditLogs,
         logAudit,
         kitchenProgress,
         updateKitchenProgress,
+        prepRecords,
+        addPrepRecord,
+        cookingRecords,
+        addCookingRecord,
+        portioningRecords,
+        addPortioningRecord,
+        distributionDeliveries,
+        addDistributionDelivery,
+        updateDistributionDelivery,
+        omprengReturns,
+        addOmprengReturn,
+        fuelLogs,
+        addFuelLog,
+        washingWasteRecords,
+        addWashingWasteRecord,
         darkMode,
         toggleDarkMode,
         toasts,

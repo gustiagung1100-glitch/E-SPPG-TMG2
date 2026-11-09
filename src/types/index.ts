@@ -16,7 +16,8 @@ export type RoleType =
   | 'Relawan Div. Pengolahan'
   | 'Relawan Div. Pemorsian'
   | 'Relawan Div. Distribusi'
-  | 'Relawan Div. Cuci Ompreng';
+  | 'Relawan Div. Cuci Ompreng'
+  | 'Supplier / Mitra Pangan';
 
 export type ActionPermission = 'view' | 'create' | 'edit' | 'delete' | 'approve' | 'print' | 'export';
 
@@ -33,7 +34,8 @@ export type ModuleKey =
   | 'volunteers'
   | 'letters'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'supplier_portal';
 
 export interface RolePermissions {
   [key: string]: {
@@ -50,6 +52,8 @@ export interface UserProfile {
   phone?: string;
   avatar?: string;
   isActive: boolean;
+  supplierId?: string;
+  supplierName?: string;
 }
 
 export interface SPPGConfig {
@@ -316,11 +320,72 @@ export interface DivisionJobdesk {
   status: 'Belum Mulai' | 'Sedang Berjalan' | 'Selesai Sesuai Standar';
 }
 
+export interface StockBatch {
+  id: string;
+  batchNumber: string;
+  receivedDate: string;
+  expiryDate: string;
+  initialQty: number;
+  remainingQty: number;
+  unitPrice: number;
+  supplierName: string;
+}
+
+export type MutationType =
+  | 'Stok Awal'
+  | 'Barang Masuk'
+  | 'Barang Keluar'
+  | 'Retur Keluar'
+  | 'Retur Masuk'
+  | 'Stok Opname';
+
+export interface StockMutation {
+  id: string;
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  date: string;
+  timestamp: string;
+  type: MutationType;
+  referenceNumber: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  supplierName?: string;
+  unit: string;
+  quantityIn: number;
+  quantityOut: number;
+  balance: number; // Stok Akhir setelah mutasi
+  unitPrice: number;
+  totalPrice: number;
+  notes: string;
+  operatorName: string;
+  recipientOrDepartment?: string;
+}
+
+export interface StockOpnameRecord {
+  id: string;
+  opnameNumber: string;
+  date: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  systemStock: number;
+  physicalStock: number;
+  difference: number; // physical - system
+  unitPrice: number;
+  differenceValuation: number; // difference * unitPrice
+  reason: string;
+  inspectorName: string;
+  status: 'Menunggu Verifikasi' | 'Disetujui' | 'Ditolak';
+  verifiedBy?: string;
+}
+
 export interface InventoryItem {
   id: string;
   code: string;
   name: string;
   category: 'Bahan Segar' | 'Bahan Kering' | 'Bumbu & Rempah' | 'Kemasan & Higiene' | 'Pelengkap';
+  initialStock: number;
   currentStock: number;
   minimumStock: number;
   unit: string;
@@ -330,6 +395,73 @@ export interface InventoryItem {
   lastRestocked: string;
   expiryDate: string;
   qualityStatus: 'Baik' | 'Perlu Pemantauan' | 'Kadaluarsa';
+  batches?: StockBatch[];
+}
+
+// Submodul PLOK: Perencanaan dan Pelaporan Operasional (RAB, PO, QC)
+export type RABCategory = 'RAB Bahan Pangan' | 'RAB Operasional';
+export type RABApprovalStatus = 'Draft' | 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak';
+
+export interface RABItem {
+  id: string;
+  category: RABCategory;
+  budgetCode: string; // e.g. "RAB-BP-2026-001", "RAB-OP-2026-002"
+  planDate: string;   // YYYY-MM-DD
+  periodMonth: string; // e.g. "November 2026"
+  itemName: string;
+  volume: number;
+  unit: string;
+  unitPrice: number;
+  totalBudget: number; // volume * unitPrice
+  notes?: string;
+  status: RABApprovalStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  poCreatedQuantity?: number;
+  poCreatedAmount?: number;
+}
+
+export type POStatusPLOK =
+  | 'Draft'
+  | 'Menunggu persetujuan'
+  | 'Disetujui'
+  | 'Dikirim ke supplier'
+  | 'Sebagian diterima'
+  | 'Selesai diterima'
+  | 'Ditolak'
+  | 'Dibatalkan'
+  | 'Menunggu Verifikasi Keuangan'
+  | 'Disetujui Kepala'
+  | 'Diterima di Gudang';
+
+export type QCStatusPLOK =
+  | 'Diterima'
+  | 'Diterima sebagian'
+  | 'Ditolak'
+  | 'Perlu pemeriksaan ulang'
+  | 'Belum QC'
+  | 'Lolos Penuh'
+  | 'Lolos Sebagian';
+
+export interface QualityControlRecord {
+  id: string;
+  poId: string;
+  poNumber: string;
+  supplierName: string;
+  itemName: string;
+  orderedQuantity: number;
+  unit: string;
+  receivedQuantity: number;
+  condition: 'Baik' | 'Kemasan Cacat' | 'Rusak Ringan' | 'Busuk/Tercemar';
+  qualityGrade: 'Grade A (Sangat Baik)' | 'Grade B (Standar)' | 'Afkir (Tidak Layak)';
+  receivingTemp?: number;
+  expiryDate: string;
+  photoUrl?: string;
+  notes?: string;
+  inspectorName: string;
+  status: QCStatusPLOK;
+  inspectedAt: string;
+  inventoryAdded: boolean;
 }
 
 export interface PurchaseOrderItem {
@@ -339,6 +471,16 @@ export interface PurchaseOrderItem {
   unit: string;
   unitPrice: number;
   subtotal: number;
+  rabId?: string;
+  receivedQuantity?: number;
+}
+
+export interface SupplierDocument {
+  id: string;
+  type: 'Surat Jalan' | 'Faktur' | 'Sertifikat Halal' | 'Hasil Uji Lab' | 'Foto Bahan';
+  fileName: string;
+  fileUrl: string;
+  uploadedAt: string;
 }
 
 export interface PurchaseOrder {
@@ -350,12 +492,23 @@ export interface PurchaseOrder {
   deliveryDate: string;
   items: PurchaseOrderItem[];
   totalAmount: number;
-  status: 'Draft' | 'Menunggu Verifikasi Keuangan' | 'Disetujui Kepala' | 'Ditolak' | 'Diterima di Gudang';
-  qcStatus: 'Belum QC' | 'Lolos Penuh' | 'Lolos Sebagian' | 'Ditolak';
+  status: POStatusPLOK;
+  qcStatus: QCStatusPLOK;
   qcNotes?: string;
   approvedBy?: string;
   verifiedByFinance?: string;
   notes?: string;
+  qcRecords?: QualityControlRecord[];
+  // Portal Supplier Interactive Fields
+  supplierConfirmed?: boolean;
+  supplierConfirmedAt?: string;
+  supplierEstimatedDelivery?: string;
+  supplierDriverName?: string;
+  supplierDriverPhone?: string;
+  supplierVehicleNumber?: string;
+  supplierDeliveryStatus?: 'Menunggu Konfirmasi' | 'Dikonfirmasi Supplier' | 'Sedang Dipersiapkan' | 'Dalam Pengiriman' | 'Telah Tiba di Gudang' | 'Ditolak Supplier';
+  supplierRejectionReason?: string;
+  supplierDocuments?: SupplierDocument[];
 }
 
 export interface DistributionLog {
@@ -380,18 +533,45 @@ export interface DistributionLog {
   notes?: string;
 }
 
+export type FinancialApprovalStatus = 'Draft' | 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak' | 'Dibatalkan';
+
+export type BankAccountType =
+  | 'Bank BRI SPPG Yayasan Hafshawaty (0034-01-00291-53-1)'
+  | 'Bank Jatim Cab. Kraksaan (0132-99-8812)'
+  | 'Kas Tunai Dapur (Petty Cash)'
+  | 'Kas Operasional Lapangan';
+
 export interface FinancialTransaction {
   id: string;
   transactionNumber: string;
   date: string;
   type: 'Pemasukan' | 'Pengeluaran';
-  category: 'Bahan Baku' | 'Operasional Dapur' | 'Upah Relawan' | 'Logistik & Armada' | 'Dana Termin BGN' | 'Dana Talangan Yayasan' | 'Perlengkapan';
+  category:
+    | 'Bahan Baku'
+    | 'Operasional Dapur'
+    | 'Upah Relawan'
+    | 'Logistik & Armada'
+    | 'Dana Termin BGN'
+    | 'Dana Talangan Yayasan'
+    | 'Perlengkapan'
+    | 'Utilitas Listrik/Gas/Air'
+    | 'Higiene & Sanitasi';
   amount: number;
   description: string;
   sourceOrRecipient: string;
+  supplierName?: string;
   proofNumber: string;
   recordedBy: string;
   paymentMethod: 'Transfer Bank' | 'Tunai';
+  bankAccount: BankAccountType;
+  proofFileUrl?: string;
+  approvalStatus: FinancialApprovalStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  cancellationReason?: string;
+  cancelledBy?: string;
+  cancelledAt?: string;
+  notes?: string;
 }
 
 export interface VolunteerAttendance {
@@ -407,6 +587,28 @@ export interface VolunteerAttendance {
   replacementVolunteer?: string;
   reason?: string;
   notes?: string;
+}
+
+export type AbsenceApprovalStatus = 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak';
+
+export interface VolunteerAbsenceRecord {
+  id: string;
+  date: string;
+  volunteerId: string;
+  volunteerName: string;
+  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | string;
+  reason: 'Sakit' | 'Izin Keperluan Keluarga' | 'Tugas Belajar / Kuliah' | 'Kendala Transportasi / Cuaca' | 'Kedukaan' | 'Lainnya';
+  reasonDetails?: string;
+  replacementVolunteerId?: string;
+  replacementVolunteerName: string;
+  replacementDivision: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | string;
+  approvalStatus: AbsenceApprovalStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  attachmentUrl?: string;
+  notes?: string;
+  createdAt: string;
 }
 
 export interface OfficialLetter {
@@ -441,3 +643,244 @@ export interface KitchenProgress {
   tasteCheckDone: boolean;
   temperatureLogged: boolean;
 }
+
+// -------------------------------------------------------------
+// MODUL PRODUKSI DAN OPERASIONAL DAPUR (5 DIVISI)
+// -------------------------------------------------------------
+
+export interface FacilityTemperatures {
+  prepRoomTemp: number; // Ruangan Persiapan (°C)
+  prepRoomPhoto?: string;
+  cookingRoomTemp: number; // Ruang Pengolahan (°C)
+  cookingRoomPhoto?: string;
+  freezer1Temp: number; // Freezer 1 Daging/Ayam (-18 s/d -22°C)
+  freezer1Photo?: string;
+  freezer2Temp: number; // Freezer 2 Ikan/Seafood (-18 s/d -22°C)
+  freezer2Photo?: string;
+  fridge1Temp: number; // Kulkas 1 Telur (4 s/d 7°C)
+  fridge1Photo?: string;
+  fridge2Temp: number; // Kulkas 2 Sayuran (5 s/d 8°C)
+  fridge2Photo?: string;
+  fridge3Temp: number; // Kulkas 3 Buah & Olahan (5 s/d 8°C)
+  fridge3Photo?: string;
+  fridge4Temp: number; // Kulkas 4 Bumbu Basah (4 s/d 6°C)
+  fridge4Photo?: string;
+}
+
+export interface DamagedMaterialItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  temp: number;
+  photoUrl?: string;
+}
+
+// A. Divisi Persiapan
+export interface PreparationInspectionRecord {
+  id: string;
+  date: string;
+  time: string;
+  officerName: string;
+  damagedVegetable: DamagedMaterialItem;
+  damagedAnimal: DamagedMaterialItem;
+  damagedFruit: DamagedMaterialItem;
+  facilityTemps: FacilityTemperatures;
+  notes: string;
+}
+
+// B. Divisi Pengolahan
+export interface CookedFoodItem {
+  temp: number;
+  photoUrl?: string;
+  notes?: string;
+}
+
+export interface CookingInspectionRecord {
+  id: string;
+  date: string;
+  time: string;
+  officerName: string;
+  cookedFoods: {
+    rice: CookedFoodItem;
+    animalProtein: CookedFoodItem;
+    plantProtein: CookedFoodItem;
+    vegetable: CookedFoodItem;
+    fruit: CookedFoodItem;
+  };
+  facilityTemps: FacilityTemperatures;
+  notes: string;
+}
+
+// C. Divisi Pemorsian
+export interface PortioningInspectionRecord {
+  id: string;
+  date: string;
+  time: string;
+  portioningTime: string;
+  officerName: string;
+  foodTemps: {
+    rice: CookedFoodItem;
+    animalProtein: CookedFoodItem;
+    plantProtein: CookedFoodItem;
+    vegetable: CookedFoodItem;
+    fruit: CookedFoodItem;
+  };
+  facilityTemps: FacilityTemperatures;
+  smallPortionWeightGrams: number;
+  largePortionWeightGrams: number;
+  smallPortionPhoto?: string;
+  largePortionPhoto?: string;
+  notes: string;
+}
+
+// D. Divisi Distribusi
+export interface DistributionDeliveryRecord {
+  id: string;
+  date: string;
+  institutionId: string;
+  institutionName: string;
+  smallPortions: number;
+  largePortions: number;
+  totalPortions: number;
+  departureTime: string;
+  arrivalTime: string;
+  driverName: string;
+  vehicleNumber: string;
+  activityPhoto?: string;
+  handoverPhoto?: string;
+  picOrganolepticPhoto?: string;
+  bastNumber: string;
+  picName: string;
+  status: 'Dalam Perjalanan' | 'Tiba di Lokasi' | 'Selesai Serah Terima';
+  notes: string;
+}
+
+export interface OmprengReturnRecord {
+  id: string;
+  date: string;
+  institutionId: string;
+  institutionName: string;
+  smallPortions: number;
+  largePortions: number;
+  totalPortions: number;
+  departureTime: string;
+  arrivalTime: string;
+  driverName: string;
+  vehicleNumber: string;
+  activityPhoto?: string;
+  returnHandoverPhoto?: string;
+  receivedByOfficer: string;
+  conditionStatus: 'Lengkap & Utuh' | 'Ada Selisih' | 'Perlu Perbaikan';
+  notes: string;
+}
+
+export interface FuelLogRecord {
+  id: string;
+  date: string;
+  time: string;
+  vehicleNumber: string;
+  driverName: string;
+  fuelType: 'Pertalite' | 'Pertamax' | 'Dexlite' | 'Solar';
+  nominalCost: number;
+  volumeLiters: number;
+  odometerKm: number;
+  gasStationName: string;
+  activityPhoto?: string;
+  receiptPhoto?: string;
+  notes: string;
+}
+
+// E. Divisi Cuci Ompreng & Food Waste Monitoring
+export interface WasteItem {
+  weight: number;
+  unit: string;
+  photoUrl?: string;
+}
+
+export interface WashingWasteRecord {
+  id: string;
+  date: string;
+  time: string;
+  officerName: string;
+  wasteRice: WasteItem;
+  wasteAnimalProtein: WasteItem;
+  wastePlantProtein: WasteItem;
+  wasteVegetable: WasteItem;
+  wasteFruit: WasteItem;
+  totalWasteWeight: number; // in kg
+  unit: string;
+  notes: string;
+  sterilizationChecked: boolean;
+}
+
+// -------------------------------------------------------------
+// 14. MODUL ADMINISTRASI SURAT & 15. MODUL SURAT MASUK
+// -------------------------------------------------------------
+
+export type OfficialDocumentType =
+  | 'Surat Perjalanan Dinas'
+  | 'Surat Tugas'
+  | 'Berita Acara Serah Terima'
+  | 'Berita Acara Perubahan Penerima Manfaat'
+  | 'Berita Acara Kekurangan Bahan'
+  | 'Berita Acara Lainnya'
+  | 'Surat Undangan'
+  | 'Surat Keterangan';
+
+export interface TemplateFieldConfig {
+  key: string;
+  label: string;
+  placeholder: string;
+  defaultValue?: string;
+  type?: 'text' | 'date' | 'number' | 'textarea';
+}
+
+export interface DocumentTemplate {
+  id: string;
+  type: OfficialDocumentType;
+  codePrefix: string;
+  title: string;
+  description: string;
+  defaultSubject: string;
+  templateBody: string;
+  fields: TemplateFieldConfig[];
+}
+
+export interface OutgoingDocument {
+  id: string;
+  letterCode: string;
+  letterNumber: string;
+  type: OfficialDocumentType;
+  date: string;
+  subject: string;
+  recipientName: string;
+  recipientInstitution?: string;
+  recipientAddress?: string;
+  templateId: string;
+  mergedBody: string; // Salinan surat hasil mail merge (template asli tidak berubah)
+  fieldsData: Record<string, string>;
+  signedBy: string;
+  signedRole: string;
+  status: 'Konsep' | 'Disahkan' | 'Terkirim' | 'Diarsipkan';
+  googleDocUrl?: string;
+  createdAt: string;
+}
+
+export interface IncomingLetter {
+  id: string;
+  letterNumber: string; // Nomor surat asli dari pengirim
+  letterDate: string; // Tanggal surat
+  receivedDate: string; // Tanggal diterima di SPPG
+  sender: string; // Asal surat
+  subject: string; // Perihal
+  category: 'Badan Gizi Nasional (BGN)' | 'Dinas / Pemda' | 'Sekolah / Lembaga' | 'Supplier / Vendor' | 'Yayasan / Internal' | 'Umum';
+  dispositionTo: string; // Disposisi kepada (Kepala SPPG, Pengawas Gizi, Pengawas Keuangan, Aslap, dll.)
+  dispositionInstruction: string; // Instruksi tindak lanjut
+  dispositionNotes?: string; // Catatan disposisi
+  dispositionDate?: string;
+  followUpStatus: 'Diterima' | 'Didisposisikan' | 'Dalam Proses Tindak Lanjut' | 'Selesai Tindak Lanjut' | 'Diarsipkan';
+  scannedDocumentUrl?: string; // Scan dokumen / bukti fisik
+  recordedBy: string;
+}
+
+

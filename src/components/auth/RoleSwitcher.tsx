@@ -16,6 +16,7 @@ import {
   Scale,
   Truck,
   Sparkles,
+  Store,
 } from 'lucide-react';
 
 interface RoleSwitcherProps {
@@ -103,6 +104,12 @@ export const RoleSwitcher: React.FC<RoleSwitcherProps> = ({ isOpen, onClose }) =
       description: 'Pembersihan ompreng kembali, sterilisasi air panas & inventarisasi boks makan.',
       icon: <Sparkles className="w-5 h-5 text-cyan-600" />,
       color: 'border-l-cyan-600 bg-cyan-50/40 dark:bg-cyan-950/20',
+    },
+    {
+      role: 'Supplier / Mitra Pangan',
+      description: 'Portal mandiri mitra rekanan: konfirmasi PO, estimasi & status pengiriman, upload surat jalan/faktur. Data internal terisolasi ketat.',
+      icon: <Store className="w-5 h-5 text-emerald-600" />,
+      color: 'border-l-emerald-600 bg-emerald-50/40 dark:bg-emerald-950/20',
     },
   ];
 

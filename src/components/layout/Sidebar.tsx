@@ -18,6 +18,8 @@ import {
   ChevronRight,
   ShieldCheck,
   Database,
+  Store,
+  PackageCheck,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -37,15 +39,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   onCloseMobile,
 }) => {
-  const { inventory, purchaseOrders, menuItems, volunteerAttendance } = useApp();
+  const { currentUser, inventory, purchaseOrders, volunteerAttendance, volunteerAbsences } = useApp();
 
   // Badges
+  const isSupplier = currentUser.role === 'Supplier / Mitra Pangan';
+  const supplierPOs = purchaseOrders.filter(
+    p => !currentUser.supplierName || p.supplierName === currentUser.supplierName
+  );
+  const pendingSupplierConfirmCount = supplierPOs.filter(
+    p => p.supplierDeliveryStatus === 'Menunggu Konfirmasi'
+  ).length;
+
   const lowStockCount = inventory.filter(i => i.currentStock <= i.minimumStock).length;
   const pendingPOCount = purchaseOrders.filter(
     p => p.status === 'Draft' || p.status === 'Menunggu Verifikasi Keuangan'
   ).length;
-  const absentCount = volunteerAttendance.filter(
-    v => v.status === 'Sakit' || v.status === 'Izin' || v.status === 'Alpa'
+  const pendingAbsenceApprovalCount = volunteerAbsences.filter(
+    v => v.approvalStatus === 'Menunggu Persetujuan'
   ).length;
 
   interface NavItem {
@@ -61,7 +71,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
     items: NavItem[];
   }
 
-  const sections: NavSection[] = [
+  // Strict isolation for supplier role: NO finance, NO institutions/students, NO internal kitchen logs
+  const supplierSections: NavSection[] = [
+    {
+      title: 'PORTAL MITRA REKANAN',
+      items: [
+        {
+          key: 'supplier_portal',
+          label: 'Pesanan & PO Bahan',
+          icon: <PackageCheck className="w-4 h-4 shrink-0 text-emerald-400" />,
+          badge: pendingSupplierConfirmCount > 0 ? pendingSupplierConfirmCount : undefined,
+          badgeColor: 'bg-emerald-500 text-white',
+        },
+      ],
+    },
+    {
+      title: 'AKUN & PENGATURAN',
+      items: [
+        {
+          key: 'settings',
+          label: 'Profil Rekanan & Sandi',
+          icon: <Settings className="w-4 h-4 shrink-0" />,
+        },
+      ],
+    },
+  ];
+
+  const standardSections: NavSection[] = [
     {
       title: 'UTAMA',
       items: [
@@ -97,10 +133,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         {
           key: 'procurement',
-          label: 'Pengadaan & Purchase Order',
+          label: 'Modul PLOK (RAB, PO, QC)',
           icon: <ShoppingCart className="w-4 h-4 shrink-0" />,
           badge: pendingPOCount > 0 ? pendingPOCount : undefined,
           badgeColor: 'bg-amber-500 text-white',
+        },
+        {
+          key: 'supplier_portal',
+          label: 'Portal Mitra Supplier',
+          icon: <Store className="w-4 h-4 shrink-0" />,
+          badge: pendingSupplierConfirmCount > 0 ? pendingSupplierConfirmCount : undefined,
+          badgeColor: 'bg-emerald-500 text-white',
         },
         {
           key: 'inventory',
@@ -136,9 +179,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         {
           key: 'volunteers',
-          label: 'Relawan & Presensi SDM',
+          label: 'Relawan & Ketidakhadiran',
           icon: <Users2 className="w-4 h-4 shrink-0" />,
-          badge: absentCount > 0 ? absentCount : undefined,
+          badge: pendingAbsenceApprovalCount > 0 ? pendingAbsenceApprovalCount : undefined,
           badgeColor: 'bg-orange-500 text-white',
         },
       ],
@@ -164,6 +207,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
   ];
+
+  const sections = isSupplier ? supplierSections : standardSections;
 
   return (
     <>

@@ -1,0 +1,518 @@
+import {
+  PreparationInspectionRecord,
+  CookingInspectionRecord,
+  PortioningInspectionRecord,
+  DistributionDeliveryRecord,
+  OmprengReturnRecord,
+  FuelLogRecord,
+  WashingWasteRecord,
+  FacilityTemperatures,
+} from '../types';
+
+/**
+ * DEFAULT DATA PRODUKSI DAN OPERASIONAL DAPUR (5 DIVISI)
+ * SPPG Probolinggo Krejengan Temenggungan 2 - Yayasan Hafshawaty
+ * Standar Keamanan Pangan & Titik Kritis (CCP) Program MBG Badan Gizi Nasional
+ */
+
+export const defaultFacilityTemperatures: FacilityTemperatures = {
+  prepRoomTemp: 21.5,
+  prepRoomPhoto: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=500&q=80',
+  cookingRoomTemp: 26.0,
+  cookingRoomPhoto: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=500&q=80',
+  freezer1Temp: -19.5,
+  freezer1Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
+  freezer2Temp: -20.2,
+  freezer2Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
+  fridge1Temp: 4.8,
+  fridge1Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+  fridge2Temp: 6.2,
+  fridge2Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+  fridge3Temp: 5.5,
+  fridge3Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+  fridge4Temp: 4.2,
+  fridge4Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+};
+
+// A. Divisi Persiapan
+export const defaultPrepRecords: PreparationInspectionRecord[] = [
+  {
+    id: 'prep-01',
+    date: '2026-11-08',
+    time: '04:15 WIB',
+    officerName: 'Siti Aminah, S.Gz. & Tim Persiapan',
+    damagedVegetable: {
+      name: 'Sawi Putih & Daun Seledri',
+      quantity: 1.5,
+      unit: 'kg',
+      temp: 18.2,
+      photoUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=500&q=80',
+    },
+    damagedAnimal: {
+      name: 'Lemak Berlebih & Kulit Ayam Broiler',
+      quantity: 2.8,
+      unit: 'kg',
+      temp: 3.5,
+      photoUrl: 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?auto=format&fit=crop&w=500&q=80',
+    },
+    damagedFruit: {
+      name: 'Pisang Cavendish Terlalu Lembek/Memar',
+      quantity: 1.2,
+      unit: 'kg',
+      temp: 20.0,
+      photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    },
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      prepRoomTemp: 21.0,
+      cookingRoomTemp: 25.5,
+      freezer1Temp: -19.0,
+      freezer2Temp: -20.5,
+      fridge1Temp: 5.0,
+      fridge2Temp: 6.0,
+      fridge3Temp: 5.2,
+      fridge4Temp: 4.0,
+    },
+    notes: 'Pemilahan bahan segar batch subuh. Ditemukan 1.5 kg sawi menguning pada lapisan luar, disisihkan untuk kompos. Ayam broiler berkualitas baik setelah trimming lemak.',
+  },
+  {
+    id: 'prep-02',
+    date: '2026-11-07',
+    time: '04:30 WIB',
+    officerName: 'Dewi Lestari (Koord. Persiapan)',
+    damagedVegetable: {
+      name: 'Wortel Ujung Layu & Buncis Patah',
+      quantity: 1.0,
+      unit: 'kg',
+      temp: 17.5,
+      photoUrl: 'https://images.unsplash.com/photo-1598170845058-32b9d6a5c317?auto=format&fit=crop&w=500&q=80',
+    },
+    damagedAnimal: {
+      name: 'Fillet Ayam Sisa Sayatan Tipis',
+      quantity: 1.4,
+      unit: 'kg',
+      temp: 2.8,
+      photoUrl: 'https://images.unsplash.com/photo-1604503468506-a8da13d82791?auto=format&fit=crop&w=500&q=80',
+    },
+    damagedFruit: {
+      name: 'Semangka Potong Rusak Ujung',
+      quantity: 0.8,
+      unit: 'kg',
+      temp: 8.5,
+      photoUrl: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=500&q=80',
+    },
+    facilityTemps: { ...defaultFacilityTemperatures },
+    notes: 'Inspeksi pagi berjalan lancar. Pencucian sayur 3 kali air mengalir terverifikasi higienis.',
+  },
+];
+
+// B. Divisi Pengolahan
+export const defaultCookingRecords: CookingInspectionRecord[] = [
+  {
+    id: 'cook-01',
+    date: '2026-11-08',
+    time: '06:15 WIB',
+    officerName: 'Chef Wahyu Ramadhan & Tim Pengolahan',
+    cookedFoods: {
+      rice: {
+        temp: 84.5,
+        photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+        notes: 'Nasi pulen matang tanak steam boiler tekanan tinggi.',
+      },
+      animalProtein: {
+        temp: 82.0,
+        photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+        notes: 'Ayam Fillet Saus Madu matang inti >75°C (Standar BGN tercapai).',
+      },
+      plantProtein: {
+        temp: 78.5,
+        photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+        notes: 'Tempe Bacem Gurih karamelisasi merata bumbu meresap sempurna.',
+      },
+      vegetable: {
+        temp: 76.2,
+        photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+        notes: 'Sop Sayur Berkaldu tidak overcooked, tekstur wortel renyah segar.',
+      },
+      fruit: {
+        temp: 18.0,
+        photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+        notes: 'Pisang Cavendish dipotong bersih dan dilap higienis food grade.',
+      },
+    },
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      cookingRoomTemp: 27.0,
+      freezer1Temp: -19.2,
+      freezer2Temp: -20.0,
+    },
+    notes: 'Seluruh masakan matang sempurna dengan titik kendali kritis (CCP) suhu di atas 75°C untuk hidangan panas. Uji organoleptik rasa seimbang dan rendah garam.',
+  },
+  {
+    id: 'cook-02',
+    date: '2026-11-07',
+    time: '06:20 WIB',
+    officerName: 'Chef Wahyu Ramadhan & Budi Prasetyo',
+    cookedFoods: {
+      rice: {
+        temp: 83.0,
+        photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+        notes: 'Nasi pulen wangi aroma daun pandan alami.',
+      },
+      animalProtein: {
+        temp: 80.5,
+        photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+        notes: 'Telur Balado manis gurih tidak pedas untuk anak usia dini.',
+      },
+      plantProtein: {
+        temp: 77.0,
+        photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+        notes: 'Tahu Goreng Kuning renyah higienis minyak baru.',
+      },
+      vegetable: {
+        temp: 75.8,
+        photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+        notes: 'Tumis Buncis Jagung Manis warna hijau segar alami.',
+      },
+      fruit: {
+        temp: 12.5,
+        photoUrl: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=500&q=80',
+        notes: 'Melon potong dingin higienis dari chiller 3.',
+      },
+    },
+    facilityTemps: { ...defaultFacilityTemperatures },
+    notes: 'Batch subuh terkendali dengan baik, tidak ada keterlambatan pengolahan.',
+  },
+];
+
+// C. Divisi Pemorsian
+export const defaultPortioningRecords: PortioningInspectionRecord[] = [
+  {
+    id: 'port-01',
+    date: '2026-11-08',
+    time: '07:00 WIB',
+    portioningTime: '06:45 - 07:30 WIB',
+    officerName: 'Nurul Hidayah & Tim Pemorsian (8 Relawan)',
+    foodTemps: {
+      rice: {
+        temp: 72.0,
+        photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+        notes: 'Holding cabinet nasi hangat terjaga di atas 65°C.',
+      },
+      animalProtein: {
+        temp: 71.5,
+        photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+        notes: 'Ayam madu porsi tepat 55g porsi kecil & 80g porsi besar.',
+      },
+      plantProtein: {
+        temp: 68.0,
+        photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+        notes: 'Tempe bacem 40g per ompreng.',
+      },
+      vegetable: {
+        temp: 67.5,
+        photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+        notes: 'Sayur sop dimasukkan dalam kompartemen terpisah berpenutup karet silikon.',
+      },
+      fruit: {
+        temp: 18.0,
+        photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+        notes: 'Pisang diletakkan di slot khusus buah agar tidak tertekan.',
+      },
+    },
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      prepRoomTemp: 22.0,
+      cookingRoomTemp: 26.5,
+    },
+    smallPortionWeightGrams: 395, // Standar 380-410g
+    largePortionWeightGrams: 585, // Standar 560-600g
+    smallPortionPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    largePortionPhoto: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=500&q=80',
+    notes: 'Pemorsian menggunakan ompreng stainless susun 4 food grade bersegel. Gramasi ditimbang sampling tiap 25 boks, deviasi di bawah 3%. Relawan menggunakan sarung tangan nitril dan hairnet.',
+  },
+  {
+    id: 'port-02',
+    date: '2026-11-07',
+    time: '07:15 WIB',
+    portioningTime: '06:50 - 07:35 WIB',
+    officerName: 'Nurul Hidayah & Siti Maryam',
+    foodTemps: {
+      rice: { temp: 71.0 },
+      animalProtein: { temp: 70.0 },
+      plantProtein: { temp: 67.5 },
+      vegetable: { temp: 66.0 },
+      fruit: { temp: 15.0 },
+    },
+    facilityTemps: { ...defaultFacilityTemperatures },
+    smallPortionWeightGrams: 390,
+    largePortionWeightGrams: 580,
+    smallPortionPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    largePortionPhoto: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=500&q=80',
+    notes: 'Sampling berat porsi konsisten, ompreng terkunci rapat siap masuk boks termal pengiriman.',
+  },
+];
+
+// D. Divisi Distribusi
+export const defaultDistributionDeliveries: DistributionDeliveryRecord[] = [
+  {
+    id: 'dist-01',
+    date: '2026-11-08',
+    institutionId: 'inst-1',
+    institutionName: 'SDN Temenggungan 1 Krejengan',
+    smallPortions: 180,
+    largePortions: 220,
+    totalPortions: 400,
+    departureTime: '08:15 WIB',
+    arrivalTime: '08:35 WIB',
+    driverName: 'Agus Santoso & Rahmat Hidayat',
+    vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
+    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
+    handoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
+    picOrganolepticPhoto: 'https://images.unsplash.com/photo-1577495508326-19a1b3cf65b7?auto=format&fit=crop&w=500&q=80',
+    bastNumber: 'BAST/MBG-TMG2/2026/11/0401',
+    picName: 'Drs. Slamet Hariyanto (Kepala Sekolah)',
+    status: 'Selesai Serah Terima',
+    notes: 'Penerimaan tepat waktu 40 menit sebelum jam istirahat. PIC melakukan uji organoleptik dengan hasil rasa sangat baik, suhu boks makanan saat tiba 64.5°C.',
+  },
+  {
+    id: 'dist-02',
+    date: '2026-11-08',
+    institutionId: 'inst-2',
+    institutionName: 'MIS Hafshawaty Zainul Hasan',
+    smallPortions: 220,
+    largePortions: 290,
+    totalPortions: 510,
+    departureTime: '08:25 WIB',
+    arrivalTime: '08:42 WIB',
+    driverName: 'Bambang Triatmojo',
+    vehicleNumber: 'N 8412 RB (Armada Box Isothermal 2)',
+    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
+    handoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
+    picOrganolepticPhoto: 'https://images.unsplash.com/photo-1577495508326-19a1b3cf65b7?auto=format&fit=crop&w=500&q=80',
+    bastNumber: 'BAST/MBG-TMG2/2026/11/0402',
+    picName: 'H. Achmad Fauzi, S.Pd.I',
+    status: 'Selesai Serah Terima',
+    notes: 'Porsi lengkap 510 ompreng steril tanpa cacat. Seluruh siswa tertib makan bersama dengan bimbingan wali kelas.',
+  },
+  {
+    id: 'dist-03',
+    date: '2026-11-08',
+    institutionId: 'inst-3',
+    institutionName: 'SMPN 1 Krejengan',
+    smallPortions: 0,
+    largePortions: 620,
+    totalPortions: 620,
+    departureTime: '09:45 WIB',
+    arrivalTime: '10:15 WIB',
+    driverName: 'Agus Santoso',
+    vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
+    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
+    handoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
+    picOrganolepticPhoto: 'https://images.unsplash.com/photo-1577495508326-19a1b3cf65b7?auto=format&fit=crop&w=500&q=80',
+    bastNumber: 'BAST/MBG-TMG2/2026/11/0403',
+    picName: 'Endang Sulistiyani, S.Pd.',
+    status: 'Selesai Serah Terima',
+    notes: 'Kloter kedua SMP porsi besar 620 pack tiba dalam kondisi hangat 62°C.',
+  },
+];
+
+// Pengembalian Ompreng
+export const defaultOmprengReturns: OmprengReturnRecord[] = [
+  {
+    id: 'ret-01',
+    date: '2026-11-08',
+    institutionId: 'inst-1',
+    institutionName: 'SDN Temenggungan 1 Krejengan',
+    smallPortions: 180,
+    largePortions: 220,
+    totalPortions: 400,
+    departureTime: '12:30 WIB',
+    arrivalTime: '13:05 WIB',
+    driverName: 'Agus Santoso',
+    vehicleNumber: 'N 8921 RA',
+    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
+    returnHandoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
+    receivedByOfficer: 'Fahrur Rozi (Div. Cuci Ompreng)',
+    conditionStatus: 'Lengkap & Utuh',
+    notes: '400 ompreng stainless kembali utuh lengkap dengan tutup dan sendok. Siap masuk jalur sterilisasi.',
+  },
+  {
+    id: 'ret-02',
+    date: '2026-11-08',
+    institutionId: 'inst-2',
+    institutionName: 'MIS Hafshawaty Zainul Hasan',
+    smallPortions: 220,
+    largePortions: 290,
+    totalPortions: 510,
+    departureTime: '12:45 WIB',
+    arrivalTime: '13:20 WIB',
+    driverName: 'Bambang Triatmojo',
+    vehicleNumber: 'N 8412 RB',
+    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
+    returnHandoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
+    receivedByOfficer: 'Fahrur Rozi',
+    conditionStatus: 'Lengkap & Utuh',
+    notes: '510 ompreng diterima dalam keranjang bersegel rapi.',
+  },
+];
+
+// Log Pengisian BBM
+export const defaultFuelLogs: FuelLogRecord[] = [
+  {
+    id: 'fuel-01',
+    date: '2026-11-08',
+    time: '07:15 WIB',
+    vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
+    driverName: 'Agus Santoso',
+    fuelType: 'Dexlite',
+    nominalCost: 250000,
+    volumeLiters: 19.2,
+    odometerKm: 34120,
+    gasStationName: 'SPBU 54.672.03 Krejengan Probolinggo',
+    activityPhoto: 'https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=500&q=80',
+    receiptPhoto: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    notes: 'Pengisian rutin solar dexlite sebelum distribusi rute Krejengan - Pajarakan.',
+  },
+  {
+    id: 'fuel-02',
+    date: '2026-11-07',
+    time: '14:20 WIB',
+    vehicleNumber: 'N 8412 RB (Armada Box Isothermal 2)',
+    driverName: 'Bambang Triatmojo',
+    fuelType: 'Dexlite',
+    nominalCost: 300000,
+    volumeLiters: 23.0,
+    odometerKm: 41850,
+    gasStationName: 'SPBU 54.672.01 Kraksaan Probolinggo',
+    activityPhoto: 'https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=500&q=80',
+    receiptPhoto: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
+    notes: 'Isi tangki penuh pasca distribusi kloter siang & pengembalian ompreng.',
+  },
+];
+
+// E. Divisi Cuci Ompreng & Food Waste Monitoring
+export const defaultWashingWasteRecords: WashingWasteRecord[] = [
+  {
+    id: 'waste-01',
+    date: '2026-11-08',
+    time: '14:15 WIB',
+    officerName: 'Fahrur Rozi & Tim Cuci Ompreng (6 Relawan)',
+    wasteRice: {
+      weight: 12.5,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteAnimalProtein: {
+      weight: 2.1,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+    },
+    wastePlantProtein: {
+      weight: 3.4,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteVegetable: {
+      weight: 7.8,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteFruit: {
+      weight: 1.2,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    },
+    totalWasteWeight: 27.0, // kg
+    unit: 'kg',
+    notes: 'Sisa makanan dari 2.850 porsi = 27 kg (~9.4 gram per siswa / sisa hanya 2.1% dari total produksi). Sisa terbanyak adalah nasi pada porsi kelas 1-2 SD dan kuah sayur sop. Seluruh sisa dipilah untuk pakan ternak warga sekitar (Zero Waste).',
+    sterilizationChecked: true,
+  },
+  {
+    id: 'waste-02',
+    date: '2026-11-07',
+    time: '14:30 WIB',
+    officerName: 'Fahrur Rozi & Siti Maryam',
+    wasteRice: {
+      weight: 14.0,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteAnimalProtein: {
+      weight: 2.5,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+    },
+    wastePlantProtein: {
+      weight: 4.0,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteVegetable: {
+      weight: 8.5,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+    },
+    wasteFruit: {
+      weight: 1.5,
+      unit: 'kg',
+      photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    },
+    totalWasteWeight: 30.5,
+    unit: 'kg',
+    notes: 'Evaluasi menu: Siswa SD kelas bawah kesulitan menghabiskan porsi nasi 150g, diusulkan penyesuaian gramasi nasi menjadi 130g untuk kelas 1-2.',
+    sterilizationChecked: true,
+  },
+  {
+    id: 'waste-03',
+    date: '2026-11-06',
+    time: '14:20 WIB',
+    officerName: 'Fahrur Rozi',
+    wasteRice: { weight: 11.8, unit: 'kg' },
+    wasteAnimalProtein: { weight: 1.8, unit: 'kg' },
+    wastePlantProtein: { weight: 3.1, unit: 'kg' },
+    wasteVegetable: { weight: 6.9, unit: 'kg' },
+    wasteFruit: { weight: 1.0, unit: 'kg' },
+    totalWasteWeight: 24.6,
+    unit: 'kg',
+    notes: 'Lauk ayam katsu habis 98%, disukai siswa.',
+    sterilizationChecked: true,
+  },
+  {
+    id: 'waste-04',
+    date: '2026-11-05',
+    time: '14:25 WIB',
+    officerName: 'Fahrur Rozi',
+    wasteRice: { weight: 13.2, unit: 'kg' },
+    wasteAnimalProtein: { weight: 2.0, unit: 'kg' },
+    wastePlantProtein: { weight: 3.8, unit: 'kg' },
+    wasteVegetable: { weight: 7.5, unit: 'kg' },
+    wasteFruit: { weight: 1.3, unit: 'kg' },
+    totalWasteWeight: 27.8,
+    unit: 'kg',
+    notes: 'Sisa sayur bayam cukup tinggi di tingkat SD.',
+    sterilizationChecked: true,
+  },
+  {
+    id: 'waste-05',
+    date: '2026-11-04',
+    time: '14:10 WIB',
+    officerName: 'Fahrur Rozi',
+    wasteRice: { weight: 15.0, unit: 'kg' },
+    wasteAnimalProtein: { weight: 2.8, unit: 'kg' },
+    wastePlantProtein: { weight: 4.2, unit: 'kg' },
+    wasteVegetable: { weight: 9.0, unit: 'kg' },
+    wasteFruit: { weight: 2.0, unit: 'kg' },
+    totalWasteWeight: 33.0,
+    unit: 'kg',
+    notes: 'Sisa hari pertama evaluasi penerimaan menu baru.',
+    sterilizationChecked: true,
+  },
+];
+
+// Historical Monthly Waste Summary for November 2026 & October 2026
+export const monthlyWasteSummary = [
+  { month: 'November 2026 (Berjalan)', totalPortions: 19950, totalWasteKg: 198.5, avgWastePerStudentGrams: 9.9, wastePercentage: 2.2, zeroWasteReuseKg: 198.5 },
+  { month: 'Oktober 2026', totalPortions: 74100, totalWasteKg: 812.0, avgWastePerStudentGrams: 10.9, wastePercentage: 2.4, zeroWasteReuseKg: 812.0 },
+  { month: 'September 2026', totalPortions: 71250, totalWasteKg: 890.0, avgWastePerStudentGrams: 12.5, wastePercentage: 2.7, zeroWasteReuseKg: 890.0 },
+];
