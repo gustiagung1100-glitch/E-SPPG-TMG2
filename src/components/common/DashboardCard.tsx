@@ -62,7 +62,7 @@ export const DashboardCard: React.FC<DashboardCardProps> = ({
       </div>
 
       <div className="mt-3 flex items-baseline justify-between">
-        <h3 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+        <h3 className="text-[20px] leading-6 font-bold text-slate-900 dark:text-white tracking-tight">
           {value}
         </h3>
         {badge && (

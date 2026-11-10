@@ -71,13 +71,19 @@ export const ProcurementModule: React.FC = () => {
     hasPermission,
     sppgConfig,
     addToast,
+    rabItems,
+    addRABItem,
+    updateRABItem,
+    approveRABItem,
+    qualityControlRecords,
+    addQualityControlRecord,
   } = useApp();
 
   // Active Sub-Module Tab
   const [activeTab, setActiveTab] = useState<SubModuleTab>('rab');
 
-  // --- STATE SUBMODUL A: RAB ---
-  const [rabList, setRabList] = useState<RABItem[]>(defaultRABItems);
+  // --- STATE SUBMODUL A: RAB (Synced with Global Store) ---
+  const rabList = rabItems;
   const [filterRABCategory, setFilterRABCategory] = useState<string>('ALL');
   const [filterRABPeriod, setFilterRABPeriod] = useState<string>('ALL');
   const [isRABModalOpen, setIsRABModalOpen] = useState(false);
@@ -86,7 +92,7 @@ export const ProcurementModule: React.FC = () => {
   // Form State for RAB
   const [rabForm, setRabForm] = useState<Omit<RABItem, 'id' | 'totalBudget'>>({
     category: 'RAB Bahan Pangan',
-    budgetCode: `RAB-BP-2026-11-00${defaultRABItems.length + 1}`,
+    budgetCode: `RAB-BP-2026-11-00${rabItems.length + 1}`,
     planDate: '2026-11-08',
     periodMonth: 'November 2026',
     itemName: '',
@@ -113,8 +119,8 @@ export const ProcurementModule: React.FC = () => {
   const [poFormUnitPrice, setPoFormUnitPrice] = useState<number>(0);
   const [poFormNotes, setPoFormNotes] = useState<string>('');
 
-  // --- STATE SUBMODUL C: QUALITY CONTROL (QC) ---
-  const [qcList, setQcList] = useState<QualityControlRecord[]>(defaultQualityControlRecords);
+  // --- STATE SUBMODUL C: QUALITY CONTROL (QC) (Synced with Global Store) ---
+  const qcList = qualityControlRecords;
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
   const [selectedPOForQC, setSelectedPOForQC] = useState<PurchaseOrder | null>(null);
 
@@ -226,61 +232,32 @@ export const ProcurementModule: React.FC = () => {
     setIsRABModalOpen(true);
   };
 
-  const handleSaveRAB = (e: React.FormEvent) => {
+  const handleSaveRAB = async (e: React.FormEvent) => {
     e.preventDefault();
     const calculatedTotal = Number(rabForm.volume) * Number(rabForm.unitPrice);
 
     if (selectedRAB) {
-      setRabList(prev =>
-        prev.map(r =>
-          r.id === selectedRAB.id
-            ? {
-                ...r,
-                ...rabForm,
-                volume: Number(rabForm.volume),
-                unitPrice: Number(rabForm.unitPrice),
-                totalBudget: calculatedTotal,
-              }
-            : r
-        )
-      );
-      addToast('success', 'RAB Diperbarui', `Item anggaran ${rabForm.itemName} berhasil diperbarui.`);
-    } else {
-      const newRAB: RABItem = {
-        id: `rab-${Date.now()}`,
+      await updateRABItem(selectedRAB.id, {
         ...rabForm,
         volume: Number(rabForm.volume),
         unitPrice: Number(rabForm.unitPrice),
-        totalBudget: calculatedTotal,
-        poCreatedQuantity: 0,
-        poCreatedAmount: 0,
-      };
-      setRabList(prev => [newRAB, ...prev]);
-      addToast('success', 'RAB Ditambahkan', `Item anggaran baru ${rabForm.itemName} berhasil diajukan.`);
+      });
+    } else {
+      await addRABItem({
+        ...rabForm,
+        volume: Number(rabForm.volume),
+        unitPrice: Number(rabForm.unitPrice),
+      });
     }
     setIsRABModalOpen(false);
   };
 
-  const handleApproveRAB = (rabId: string) => {
-    setRabList(prev =>
-      prev.map(r =>
-        r.id === rabId
-          ? {
-              ...r,
-              status: 'Disetujui',
-              approvedBy: `${currentUser.name} (${currentUser.role})`,
-              approvedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-            }
-          : r
-      )
-    );
-    addToast('success', 'RAB Disetujui', 'Rencana Anggaran Belanja telah disahkan dan siap diterbitkan PO.');
+  const handleApproveRAB = async (rabId: string) => {
+    await approveRABItem(rabId, `${currentUser.name} (${currentUser.role})`);
   };
 
-  const handleRejectRAB = (rabId: string) => {
-    setRabList(prev =>
-      prev.map(r => (r.id === rabId ? { ...r, status: 'Ditolak' } : r))
-    );
+  const handleRejectRAB = async (rabId: string) => {
+    await updateRABItem(rabId, { status: 'Ditolak' });
     addToast('info', 'RAB Ditolak', 'Item anggaran ditolak dan dikembalikan untuk revisi.');
   };
 
@@ -360,24 +337,16 @@ export const ProcurementModule: React.FC = () => {
       ],
       totalAmount: subtotal,
       status: 'Menunggu persetujuan',
+      rabId: targetRABForPO.id,
       qcStatus: 'Belum QC',
       notes: poFormNotes,
     };
 
     await addPurchaseOrder(newPO);
-
-    // Update RAB cumulative tracking (poCreatedQuantity & poCreatedAmount)
-    setRabList(prev =>
-      prev.map(r =>
-        r.id === targetRABForPO.id
-          ? {
-              ...r,
-              poCreatedQuantity: (r.poCreatedQuantity || 0) + poFormQuantity,
-              poCreatedAmount: (r.poCreatedAmount || 0) + subtotal,
-            }
-          : r
-      )
-    );
+    await updateRABItem(targetRABForPO.id, {
+      poCreatedQuantity: (targetRABForPO.poCreatedQuantity || 0) + poFormQuantity,
+      poCreatedAmount: (targetRABForPO.poCreatedAmount || 0) + subtotal,
+    });
 
     addToast(
       'success',
@@ -458,44 +427,7 @@ export const ProcurementModule: React.FC = () => {
       inventoryAdded: shouldAddStock,
     };
 
-    setQcList(prev => [newQCRecord, ...prev]);
-
-    // If stock should be added, update inventory in store
-    if (shouldAddStock) {
-      // Find matching inventory item or add to first matching category
-      const matchedInv = inventory.find(i =>
-        i.name.toLowerCase().includes(item.itemName.toLowerCase().slice(0, 8))
-      );
-      if (matchedInv) {
-        await adjustStock(
-          matchedInv.id,
-          receivedQty,
-          `Penerimaan QC PO ${selectedPOForQC.poNumber} (${receivedQty} ${item.unit} ${qcFormQualityGrade})`
-        );
-      }
-    }
-
-    // Determine new PO status based on QC results
-    let nextPOStatus: POStatusPLOK = selectedPOForQC.status;
-    if (qcFormStatus === 'Diterima' && receivedQty >= orderedQty) {
-      nextPOStatus = 'Selesai diterima';
-    } else if (qcFormStatus === 'Diterima sebagian' || (qcFormStatus === 'Diterima' && receivedQty < orderedQty)) {
-      nextPOStatus = 'Sebagian diterima';
-    } else if (qcFormStatus === 'Ditolak') {
-      nextPOStatus = 'Ditolak';
-    }
-
-    await updatePurchaseOrder(selectedPOForQC.id, {
-      status: nextPOStatus,
-      qcStatus: qcFormStatus,
-      qcNotes: `[${qcFormQualityGrade}] ${qcFormNotes} (Diterima: ${receivedQty}/${orderedQty} ${item.unit})`,
-    });
-
-    addToast(
-      'success',
-      'QC Berhasil Disimpan',
-      `Hasil QC ${selectedPOForQC.poNumber} disimpan. ${shouldAddStock ? `Stok gudang bertambah +${receivedQty} ${item?.unit}.` : 'Tidak ada penambahan stok gudang (Ditolak).'}`
-    );
+    await addQualityControlRecord(newQCRecord);
     setIsQCModalOpen(false);
   };
 

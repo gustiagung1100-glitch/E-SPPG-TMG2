@@ -3,87 +3,284 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default-deny global net
+    // -------------------------------------------------------------------------
+    // PILLAR 1: Global Default-Deny Safety Net
+    // -------------------------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
     }
 
+    // -------------------------------------------------------------------------
+    // Global Helper Functions
+    // -------------------------------------------------------------------------
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
     }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // SPPG Settings: Any signed-in user can read; only authenticated staff can update
-    match /sppg_settings/{docId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(docId);
+    function isSameSppg() {
+      return incoming().sppgId is string && incoming().sppgId == 'GFBQSYXD';
     }
 
-    // Users collection: user can read/write their own profile; admins can list
+    function isExistingSameSppg() {
+      return existing().sppgId is string && existing().sppgId == 'GFBQSYXD';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'gustiagung1100@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleName in ['Admin Utama', 'Kepala SPPG'])
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // 1-4. Users, Roles, Permissions & SPPG Profile
+    // -------------------------------------------------------------------------
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(userId);
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(userId) && (
+        request.auth.uid == userId || isAdmin()
+      ) && isSameSppg();
+      allow update: if isSignedIn() && isValidId(userId) && (
+        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'updatedAt', 'lastLoginAt'])) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
     }
 
-    // Institutions / Beneficiaries
+    match /roles/{roleId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(roleId);
+    }
+
+    match /permissions/{permissionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(permissionId);
+    }
+
+    match /sppg_profiles/{profileId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(profileId) && (isAdmin() || request.auth.uid != null);
+    }
+
+    // -------------------------------------------------------------------------
+    // 5-7. Institutions & Beneficiaries
+    // -------------------------------------------------------------------------
     match /institutions/{instId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(instId);
+      allow write: if isSignedIn() && isValidId(instId) && isSameSppg();
     }
 
-    // Menu Items
-    match /menu_items/{menuId} {
+    match /beneficiaries/{beneficiaryId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(menuId);
+      allow write: if isSignedIn() && isValidId(beneficiaryId) && isSameSppg();
     }
 
-    // Inventory & Stock
-    match /inventory/{itemId} {
+    match /beneficiary_daily_records/{recordId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(itemId);
+      allow write: if isSignedIn() && isValidId(recordId) && isSameSppg();
     }
 
-    // Purchase Orders
+    // -------------------------------------------------------------------------
+    // 8-9. Volunteers & Suppliers
+    // -------------------------------------------------------------------------
+    match /volunteers/{volunteerId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(volunteerId) && isSameSppg();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(supplierId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 10-12. Ingredients, Prices & Nutrition References
+    // -------------------------------------------------------------------------
+    match /ingredients/{ingredientId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(ingredientId) && isSameSppg();
+    }
+
+    match /ingredient_prices/{priceId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(priceId) && isSameSppg();
+    }
+
+    match /nutrition_references/{refId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(refId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 13-18. Menu Plans, Items, Recipes, Nutrition & Food Cost
+    // -------------------------------------------------------------------------
+    match /menu_plans/{planId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(planId) && isSameSppg();
+    }
+
+    match /menu_items/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(itemId) && isSameSppg();
+    }
+
+    match /recipes/{recipeId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(recipeId) && isSameSppg();
+    }
+
+    match /recipe_ingredients/{riId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(riId) && isSameSppg();
+    }
+
+    match /nutrition_calculations/{calcId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(calcId) && isSameSppg();
+    }
+
+    match /food_costs/{costId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(costId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 19-23. RAB, Purchase Orders & Quality Control
+    // -------------------------------------------------------------------------
+    match /rab_headers/{headerId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(headerId) && isSameSppg();
+    }
+
+    match /rab_items/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(itemId) && isSameSppg();
+    }
+
     match /purchase_orders/{poId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(poId);
+      allow write: if isSignedIn() && isValidId(poId) && isSameSppg();
     }
 
-    // Distribution Logs
-    match /distribution_logs/{logId} {
+    match /purchase_order_items/{poiId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(logId);
+      allow write: if isSignedIn() && isValidId(poiId) && isSameSppg();
     }
 
-    // Financial Transactions & Cash Flow
+    match /quality_control/{qcId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(qcId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 24-25. Inventory Batches & Movements
+    // -------------------------------------------------------------------------
+    match /inventory_batches/{batchId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(batchId) && isSameSppg();
+    }
+
+    match /inventory_movements/{movementId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(movementId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 26-30. Kitchen Production, Temperature, Waste & Distribution
+    // -------------------------------------------------------------------------
+    match /production_logs/{logId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(logId) && isSameSppg();
+    }
+
+    match /temperature_logs/{tempId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(tempId) && isSameSppg();
+    }
+
+    match /food_waste_logs/{wasteId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(wasteId) && isSameSppg();
+    }
+
+    match /portioning_records/{portId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(portId) && isSameSppg();
+    }
+
+    match /distribution_records/{distId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(distId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 31-35. Finance & Letters
+    // -------------------------------------------------------------------------
     match /financial_transactions/{txId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(txId);
+      allow write: if isSignedIn() && isValidId(txId) && isSameSppg();
     }
 
-    // Volunteer Attendance & Tasks
-    match /volunteer_attendance/{attId} {
+    match /incoming_letters/{letterId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(attId);
+      allow write: if isSignedIn() && isValidId(letterId) && isSameSppg();
     }
 
-    // Audit Logs: Append-only for logged activities
-    match /audit_logs/{logId} {
+    match /outgoing_letters/{letterId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(logId);
-      allow update, delete: if false;
+      allow write: if isSignedIn() && isValidId(letterId) && isSameSppg();
     }
 
-    // Letters & Administrative Archive
-    match /letters/{letterId} {
+    match /document_templates/{templateId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(letterId);
+      allow write: if isSignedIn() && isValidId(templateId) && isSameSppg();
     }
 
-    // Connection test document
+    match /generated_documents/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(docId) && isSameSppg();
+    }
+
+    // -------------------------------------------------------------------------
+    // 36-39. Attendance, Notifications, Audit & Settings
+    // -------------------------------------------------------------------------
+    match /attendance_records/{attId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(attId) && isSameSppg();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && (existing().recipientUid == request.auth.uid || isAdmin());
+      allow write: if isSignedIn() && isValidId(notifId) && isSameSppg();
+    }
+
+    // Immutable append-only audit trail
+    match /audit_logs/{auditId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(auditId) && isSameSppg();
+      allow update, delete: if false; // Immutable!
+    }
+
+    match /app_settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Diagnostic connection test
     match /test/{docId} {
       allow read, write: if isSignedIn();
     }

@@ -20,7 +20,9 @@ import {
   Database,
   Store,
   PackageCheck,
+  Sparkles,
 } from 'lucide-react';
+import { SPPGLogo } from '../common/OfficialLogos';
 
 interface SidebarProps {
   activeModule: ModuleKey;
@@ -126,6 +128,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           label: 'Perencanaan Menu & Gizi',
           icon: <UtensilsCrossed className="w-4 h-4 shrink-0" />,
         },
+        {
+          key: 'menu_flyer',
+          label: 'Flyer Menu Otomatis',
+          icon: <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />,
+        },
       ],
     },
     {
@@ -230,8 +237,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="h-16 px-4 flex items-center justify-between border-b border-blue-900/80 bg-blue-950/70">
           {!isCollapsed ? (
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-sky-500 flex items-center justify-center text-white shadow-md shadow-sky-500/20 font-black">
-                <ShieldCheck className="w-5 h-5" />
+              <div className="shrink-0 flex items-center justify-center">
+                <SPPGLogo size="sm" />
               </div>
               <div className="min-w-0">
                 <h1 className="text-sm font-black tracking-wider text-white leading-tight">
@@ -243,8 +250,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           ) : (
-            <div className="mx-auto w-10 h-10 rounded-xl bg-sky-500 flex items-center justify-center text-white font-bold shadow-md">
-              <ShieldCheck className="w-5 h-5" />
+            <div className="mx-auto shrink-0 flex items-center justify-center">
+              <SPPGLogo size="sm" />
             </div>
           )}
 

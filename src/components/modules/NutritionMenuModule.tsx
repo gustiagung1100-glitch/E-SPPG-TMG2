@@ -825,7 +825,7 @@ export const NutritionMenuModule: React.FC = () => {
                 Rumus Perhitungan Kebutuhan Bahan Sesuai Kategori Porsi & BDD:
               </div>
               <p className="leading-relaxed">
-                Total Berat Bersih = (1.080 Porsi Kecil × Gram Kecil) + (1.770 Porsi Besar × Gram Besar).
+                Total Berat Bersih = ({formatNumber(quotaSmall)} Porsi Kecil × Gram Kecil) + ({formatNumber(quotaLarge)} Porsi Besar × Gram Besar).
                 <br />
                 Berat Kotor (Gross) = Total Berat Bersih / (% BDD / 100). Kebutuhan pembelian dihitung riil agar porsi saat disantap siswa tidak menyusut di bawah gramasi standar gizi.
               </p>
@@ -1463,7 +1463,7 @@ export const NutritionMenuModule: React.FC = () => {
                 <tfoot>
                   <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t border-slate-300 dark:border-slate-700 text-xs">
                     <td colSpan={4} className="p-3 font-sans text-right uppercase tracking-wider">
-                      TOTAL FOOD COST MENU (2.850 Porsi):
+                      TOTAL FOOD COST MENU ({formatNumber(totalBeneficiaries)} Porsi):
                     </td>
                     <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 text-sm font-black">
                       {formatRupiah(totalMenuProcurementCost)}

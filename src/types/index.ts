@@ -35,7 +35,29 @@ export type ModuleKey =
   | 'letters'
   | 'reports'
   | 'settings'
-  | 'supplier_portal';
+  | 'supplier_portal'
+  | 'menu_flyer';
+
+export type FlyerTemplateId = 'modern_bgn' | 'nutri_infographic' | 'nusantara_warm' | 'school_friendly';
+export type FlyerSizeId = 'a4' | 'social_square' | 'social_story';
+
+export interface FlyerConfig {
+  id: string;
+  menuId: string;
+  menuDate: string;
+  template: FlyerTemplateId;
+  size: FlyerSizeId;
+  title: string;
+  customPhotoUrl?: string;
+  selectedPhotoType: 'portioning_small' | 'portioning_large' | 'menu_display' | 'custom';
+  showNutritionFacts: boolean;
+  showConsumptionDeadline: boolean;
+  smallConsumptionDeadline: string;
+  largeConsumptionDeadline: string;
+  customNotes?: string;
+  displaySchoolTarget: string;
+  bgnStandardNote: string;
+}
 
 export interface RolePermissions {
   [key: string]: {
@@ -492,6 +514,8 @@ export interface PurchaseOrder {
   deliveryDate: string;
   items: PurchaseOrderItem[];
   totalAmount: number;
+  rabId?: string;
+  supplierId?: string;
   status: POStatusPLOK;
   qcStatus: QCStatusPLOK;
   qcNotes?: string;
@@ -882,5 +906,40 @@ export interface IncomingLetter {
   scannedDocumentUrl?: string; // Scan dokumen / bukti fisik
   recordedBy: string;
 }
+
+// 20 Laporan Resmi Pusat Laporan & Cetak SPPG
+export type OfficialReportKey =
+  | 'bast_distribusi'
+  | 'surat_tugas'
+  | 'perjalanan_dinas'
+  | 'organoleptik_penerima'
+  | 'organoleptik_plog'
+  | 'sampel_menu'
+  | 'flyer_menu'
+  | 'penerima_harian'
+  | 'informasi_gizi'
+  | 'food_cost'
+  | 'rab'
+  | 'purchase_order'
+  | 'quality_control'
+  | 'suhu_ruang'
+  | 'suhu_makanan_pengolahan'
+  | 'suhu_makanan_pemorsian'
+  | 'food_waste'
+  | 'keuangan'
+  | 'kartu_stok'
+  | 'rekap_distribusi';
+
+export interface ReportMetaConfig {
+  key: OfficialReportKey;
+  title: string;
+  category: 'Distribusi & Lapangan' | 'Gizi & Menu' | 'Operasional & Rantai Pasok' | 'Dapur & Keamanan Pangan' | 'Keuangan & Tata Usaha';
+  codePrefix: string;
+  description: string;
+  sourceModule: string;
+  defaultOrientation: 'portrait' | 'landscape';
+  approverRole: string;
+}
+
 
 

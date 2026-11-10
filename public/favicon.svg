@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="100%" height="100%">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f2b5c"/>
+      <stop offset="50%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Outer rounded shield badge -->
+  <path d="M64 6 C96 6, 118 16, 118 42 C118 84, 88 112, 64 122 C40 112, 10 84, 10 42 C10 16, 32 6, 64 6 Z"
+        fill="url(#shieldGrad)" filter="url(#drop)"/>
+  
+  <!-- Inner shield gold border -->
+  <path d="M64 13 C91 13, 111 22, 111 44 C111 81, 84 105, 64 114 C44 105, 17 81, 17 44 C17 22, 37 13, 64 13 Z"
+        fill="none" stroke="url(#goldGrad)" stroke-width="2.5" opacity="0.85"/>
+
+  <!-- Center Nutrition Plate with Green Ring -->
+  <circle cx="64" cy="56" r="30" fill="#ffffff" filter="url(#drop)"/>
+  <circle cx="64" cy="56" r="27" fill="none" stroke="url(#greenGrad)" stroke-width="3"/>
+
+  <!-- Healthy Food Motif (Fork & Spoon + Sprout/Leaf) -->
+  <!-- Left: Fork -->
+  <path d="M52 42 L52 50 C52 53 54 55 57 55 L57 68 C57 69.5 58 70 59 70 C60 70 61 69.5 61 68 L61 55 C64 55 66 53 66 50 L66 42 M55 42 L55 49 M58 42 L58 49 M63 42 L63 49"
+        fill="none" stroke="#1e3a8a" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Right: Spoon -->
+  <path d="M72 42 C68 42 66 46 66 50 C66 54 69 56 71 56 L71 68 C71 69.5 72 70 73 70 C74 70 75 69.5 75 68 L75 56 C77 56 80 54 80 50 C80 46 76 42 72 42 Z"
+        fill="#0284c7"/>
+
+  <!-- Top Center Sprout / Green Leaf of Nutrition -->
+  <path d="M64 36 C64 30 70 26 76 26 C76 33 71 37 64 36 Z" fill="url(#greenGrad)"/>
+  <path d="M64 36 C64 30 58 26 52 26 C52 33 57 37 64 36 Z" fill="#10b981"/>
+
+  <!-- BGN Star at top -->
+  <polygon points="64,18 66,22 71,22 67,25 69,29 64,26 59,29 61,25 57,22 62,22" fill="url(#goldGrad)"/>
+
+  <!-- Ribbon text banner below -->
+  <path d="M30 92 L98 92 L92 104 L36 104 Z" fill="url(#goldGrad)"/>
+  <text x="64" y="101" font-family="system-ui, -apple-system, sans-serif" font-size="8.5" font-weight="900" fill="#0f2b5c" text-anchor="middle" letter-spacing="0.5">E-SPPG TMG2</text>
+  <text x="64" y="112" font-family="system-ui, -apple-system, sans-serif" font-size="6" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="1">MBG • BGN</text>
+</svg>

@@ -1,43 +1,52 @@
 import React from 'react';
 import { useApp } from '../../lib/store';
-import { ShieldCheck } from 'lucide-react';
+import { SPPGLogo, BGNLogo } from './OfficialLogos';
 
 interface PrintHeaderProps {
   title: string;
   subtitle?: string;
   docNumber?: string;
+  documentNumber?: string;
+  date?: string;
 }
 
-export const PrintHeader: React.FC<PrintHeaderProps> = ({ title, subtitle, docNumber }) => {
+export const PrintHeader: React.FC<PrintHeaderProps> = ({ title, subtitle, docNumber, documentNumber, date }) => {
   const { sppgConfig } = useApp();
+  const activeDocNumber = docNumber || documentNumber;
 
   return (
-    <div className="print-header mb-6 pb-4 border-b-2 border-slate-900 dark:border-slate-100">
+    <div className="print-header mb-6 pb-4 border-b-2 border-slate-900 dark:border-slate-100 print:border-black">
       <div className="flex items-center justify-between gap-4">
-        <div className="w-16 h-16 rounded-xl bg-blue-900 flex items-center justify-center text-white shrink-0 shadow-sm print:border print:border-black">
-          <ShieldCheck className="w-9 h-9" />
+        {/* Left: Official SPPG Yayasan Hafshawaty Logo */}
+        <div className="shrink-0 flex items-center justify-center">
+          <SPPGLogo size="lg" />
         </div>
-        <div className="flex-1 text-center">
-          <h2 className="text-sm font-semibold tracking-wider uppercase text-slate-700 dark:text-slate-300">
+
+        {/* Center: Official Kop Surat Text */}
+        <div className="flex-1 text-center px-2">
+          <h2 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-700 dark:text-slate-300 print:text-black">
             {sppgConfig.foundationName}
           </h2>
-          <h1 className="text-lg md:text-xl font-black uppercase text-blue-950 dark:text-white tracking-wide">
+          <h1 className="text-base sm:text-lg md:text-xl font-black uppercase text-blue-950 dark:text-white tracking-wide print:text-black">
             {sppgConfig.sppgName}
           </h1>
-          <p className="text-xs font-semibold text-sky-700 dark:text-sky-400">
-            Nomor Identitas SPPG: {sppgConfig.sppgId} | {sppgConfig.programName}
+          <p className="text-xs font-bold text-sky-800 dark:text-sky-400 print:text-black mt-0.5">
+            Nomor Identitas SPPG: <span className="font-mono">{sppgConfig.sppgId}</span> | {sppgConfig.programName}
           </p>
-          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 print:text-black mt-0.5">
             {sppgConfig.address}, Kec. {sppgConfig.district}, {sppgConfig.regency} - Jawa Timur
           </p>
-          <p className="text-[10px] text-slate-500">
+          <p className="text-[10px] text-slate-500 print:text-black">
             Kontak: {sppgConfig.phone} | Email: {sppgConfig.email}
           </p>
         </div>
-        <div className="w-16 h-16 border border-slate-300 dark:border-slate-700 rounded-lg flex flex-col items-center justify-center p-1 text-[9px] text-center font-mono shrink-0">
-          <span className="font-bold text-slate-900 dark:text-white">BGN</span>
-          <span className="text-[8px] text-slate-500">VERIFIED</span>
-          <span className="text-[7px] text-blue-900 font-bold">2026</span>
+
+        {/* Right: Official Badan Gizi Nasional (BGN) RI Logo */}
+        <div className="shrink-0 flex flex-col items-center justify-center">
+          <BGNLogo size="lg" />
+          <span className="text-[8px] font-black uppercase tracking-wider text-blue-950 dark:text-white print:text-black mt-1">
+            BGN RI
+          </span>
         </div>
       </div>
 
@@ -46,9 +55,9 @@ export const PrintHeader: React.FC<PrintHeaderProps> = ({ title, subtitle, docNu
           <span className="font-bold uppercase text-slate-900 dark:text-white">{title}</span>
           {subtitle && <span className="text-slate-500 ml-2">({subtitle})</span>}
         </div>
-        {docNumber && (
+        {activeDocNumber && (
           <div className="text-slate-600 dark:text-slate-400 font-mono">
-            No: <span className="font-bold">{docNumber}</span>
+            No: <span className="font-bold">{activeDocNumber}</span>
           </div>
         )}
       </div>

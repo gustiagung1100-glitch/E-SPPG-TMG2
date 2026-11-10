@@ -97,37 +97,45 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     secondaryValue: inst.largePortions,
   }));
 
-  // Chart Data: Hourly Distribution Tracking
-  const distributionHourlyData = [
-    { label: '07:30', value: 160 },
-    { label: '08:30', value: 400 },
-    { label: '09:00', value: 600 },
-    { label: '09:30', value: 325 },
-    { label: '10:00', value: 480 },
-    { label: '10:30', value: 410 },
-    { label: '11:00', value: 325 },
-    { label: '11:30', value: 150 },
-  ];
+  // Chart Data: Hourly Distribution Tracking from actual distributionLogs
+  const distributionHourlyData = distributionLogs.map(log => ({
+    label: log.departureTime ? log.departureTime.replace(' WIB', '') : log.institutionName.slice(0, 8),
+    value: log.totalPortions,
+  }));
 
-  // Chart Data: Budget Usage Breakdown
-  const budgetAllocationData = [
-    { label: 'Bahan Baku Pangan (Food Cost)', value: 38450000, color: '#1e3a8a' }, // 76%
-    { label: 'Upah & Insentif Relawan', value: 5250000, color: '#0284c7' },
-    { label: 'Operasional Gas & Listrik', value: 2400000, color: '#f59e0b' },
-    { label: 'Logistik & Bahan Bakar Armada', value: 1650000, color: '#10b981' },
-    { label: 'Higiene & Kemasan Ompreng', value: 1250000, color: '#8b5cf6' },
-  ];
+  // Chart Data: Budget Usage Breakdown from actual financial transactions
+  const categoryColors: Record<string, string> = {
+    'Bahan Baku': '#1e3a8a',
+    'Operasional Dapur': '#f59e0b',
+    'Transport & Logistik': '#10b981',
+    'Gaji & Honor': '#0284c7',
+    'Administrasi & ATK': '#8b5cf6',
+    'Lainnya': '#64748b',
+  };
+  const expenseTransactions = financialTransactions.filter(t => t.type === 'Pengeluaran');
+  const categoryTotals = expenseTransactions.reduce((acc, t) => {
+    acc[t.category] = (acc[t.category] || 0) + t.amount;
+    return acc;
+  }, {} as Record<string, number>);
 
-  // Chart Data: Food Cost Realization vs Target
-  const foodCostTrendData = [
-    { label: '04 Nov', actual: 13600, target: 15000 },
-    { label: '05 Nov', actual: 13950, target: 15000 },
-    { label: '06 Nov', actual: 13400, target: 15000 },
-    { label: '07 Nov', actual: 13800, target: 15000 },
-    { label: '08 Nov', actual: 13450, target: 15000 },
-    { label: '09 Nov (Est)', actual: 13800, target: 15000 },
-    { label: '10 Nov (Est)', actual: 13600, target: 15000 },
-  ];
+  const budgetAllocationData =
+    Object.keys(categoryTotals).length > 0
+      ? Object.entries(categoryTotals).map(([cat, val]) => ({
+          label: cat,
+          value: val,
+          color: categoryColors[cat] || '#0284c7',
+        }))
+      : [
+          { label: 'Bahan Baku (Food Cost)', value: totalPOAmount, color: '#1e3a8a' },
+          { label: 'Operasional & Insentif', value: Math.max(0, totalRAB - totalPOAmount), color: '#0284c7' },
+        ];
+
+  // Chart Data: Food Cost Realization vs Target from menuItems
+  const foodCostTrendData = menuItems.map(m => ({
+    label: new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short' }).format(new Date(m.date)),
+    actual: m.estimatedCostPerPortion,
+    target: sppgConfig.smallPortionBudget || 15000,
+  }));
 
   // Chart Data: Cash In vs Cash Out
   const cashFlowBarData = [
@@ -262,7 +270,10 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             value={`${formatNumber(totalSmallPortions)} Porsi`}
             subtitle="PAUD/TK & SD Kelas 1-3 (~620 kkal)"
             icon={<Utensils className="w-5 h-5 text-emerald-600" />}
-            badge={{ text: '39.3%', color: 'emerald' }}
+            badge={{
+              text: totalRecipients > 0 ? `${((totalSmallPortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
+              color: 'emerald',
+            }}
             accentColor="emerald"
             onClick={() => onNavigate('institutions')}
           />
@@ -271,14 +282,17 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             value={`${formatNumber(totalLargePortions)} Porsi`}
             subtitle="SD Kelas 4-6, SMP, SMA (~875 kkal)"
             icon={<Utensils className="w-5 h-5 text-indigo-600" />}
-            badge={{ text: '60.7%', color: 'blue' }}
+            badge={{
+              text: totalRecipients > 0 ? `${((totalLargePortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
+              color: 'blue',
+            }}
             accentColor="indigo"
             onClick={() => onNavigate('institutions')}
           />
           <DashboardCard
             title="Total Porsi Harian"
             value={`${formatNumber(totalRecipients)} Porsi`}
-            subtitle="Alokasi hari ini (Minggu)"
+            subtitle={`Alokasi hari ini (${menuToday.dayName || 'MBG'})`}
             icon={<ChefHat className="w-5 h-5 text-amber-600" />}
             badge={{ text: 'Tercapai', color: 'amber' }}
             accentColor="amber"

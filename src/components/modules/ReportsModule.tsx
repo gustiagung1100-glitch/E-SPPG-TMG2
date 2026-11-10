@@ -1,351 +1,1784 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { PrintHeader } from '../common/PrintHeader';
-import { exportTableToPDF, exportToExcel, exportToCSV, formatRupiah, formatNumber, triggerPrint } from '../../lib/exportUtils';
+import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
 import {
-  FileSpreadsheet,
-  Download,
+  exportTableToPDF,
+  exportToExcel,
+  exportToCSV,
+  formatRupiah,
+  formatNumber,
+  formatIndonesianDate,
+  triggerPrint,
+} from '../../lib/exportUtils';
+import { OfficialReportKey, ReportMetaConfig, ModuleKey } from '../../types';
+import {
   Printer,
-  Calendar,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Search,
+  Filter,
+  Eye,
   CheckCircle2,
-  FileCheck,
+  Calendar,
   Building,
-  Image as ImageIcon,
-  Share2,
+  Users,
+  ShieldCheck,
+  Sparkles,
+  ArrowRight,
+  ExternalLink,
+  ChevronDown,
+  Layers,
+  FileCheck,
+  TrendingUp,
+  AlertCircle,
+  Clock,
+  Car,
+  Utensils,
+  Thermometer,
+  Trash2,
+  DollarSign,
+  PackageCheck,
+  FileSignature,
 } from 'lucide-react';
 
-export const ReportsModule: React.FC = () => {
+// Definisi 20 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
+export const REPORT_CONFIGS: ReportMetaConfig[] = [
+  // 1. Distribusi & Lapangan
+  {
+    key: 'bast_distribusi',
+    title: 'Berita Acara Serah Terima (BAST) Distribusi',
+    category: 'Distribusi & Lapangan',
+    codePrefix: 'BAST-DIST',
+    description: 'Bukti sah penyerahan ompreng makanan dari tim distribusi kepada PIC sekolah penerima manfaat.',
+    sourceModule: 'Distribusi & Logistik (deliveryId, institutionId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Koordinator Distribusi & Driver',
+  },
+  {
+    key: 'surat_tugas',
+    title: 'Surat Tugas Petugas & Relawan',
+    category: 'Distribusi & Lapangan',
+    codePrefix: 'ST-MBG',
+    description: 'Surat penugasan resmi personel SPPG untuk operasional harian, belanja bahan, dan pengantaran.',
+    sourceModule: 'Administrasi Surat & SDM (letterId, volunteerId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Kepala SPPG Temenggungan 2',
+  },
+  {
+    key: 'perjalanan_dinas',
+    title: 'Dokumentasi Perjalanan Dinas (SPD)',
+    category: 'Distribusi & Lapangan',
+    codePrefix: 'SPD-LOG',
+    description: 'Catatan perjalanan armada distribusi, rute pengantaran, konsumsi BBM, dan logistik lapangan.',
+    sourceModule: 'Distribusi & BBM (fuelLogId, deliveryId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Distribusi & Transportasi',
+  },
+  {
+    key: 'rekap_distribusi',
+    title: 'Rekap Distribusi Harian & Logistik Armada',
+    category: 'Distribusi & Lapangan',
+    codePrefix: 'REKAP-DIST',
+    description: 'Rekapitulasi pengiriman seluruh armada, waktu berangkat, waktu tiba, dan konfirmasi serah terima.',
+    sourceModule: 'Distribusi & Logistik (deliveryId, institutionId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Distribusi',
+  },
+  {
+    key: 'organoleptik_penerima',
+    title: 'Organoleptik Penerima Manfaat (PIC Sekolah)',
+    category: 'Distribusi & Lapangan',
+    codePrefix: 'ORGA-PIC',
+    description: 'Hasil evaluasi uji rasa, tekstur, aroma, dan kepuasan siswa oleh guru/PIC sekolah penerima.',
+    sourceModule: 'Distribusi & Feedback (institutionId, organolepticId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'PIC Sekolah & Tim Monitoring',
+  },
+
+  // 2. Gizi & Menu
+  {
+    key: 'flyer_menu',
+    title: 'Flyer Informasi Menu & Edukasi Gizi',
+    category: 'Gizi & Menu',
+    codePrefix: 'FLYER-GIZI',
+    description: 'Materi publikasi menu bergizi, foto porsi kecil & besar, batas konsumsi, serta AKG BGN.',
+    sourceModule: 'PLOG & Pemorsian (menuId, portioningId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Nutrisionis & Tim Edukasi Gizi',
+  },
+  {
+    key: 'informasi_gizi',
+    title: 'Informasi Nilai Gizi Menu (AKG BGN)',
+    category: 'Gizi & Menu',
+    codePrefix: 'GIZI-AKG',
+    description: 'Rincian makronutrien (energi, protein, lemak, karbohidrat) dan mikronutrien per porsi sasaran.',
+    sourceModule: 'Data Master & Gizi (menuId, materialId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Nutrisionis / Ahli Gizi SPPG',
+  },
+  {
+    key: 'food_cost',
+    title: 'Informasi Food Cost & Efisiensi Menu',
+    category: 'Gizi & Menu',
+    codePrefix: 'FC-ANALYSIS',
+    description: 'Analisis biaya bahan baku per porsi versus plafon anggaran BGN RI (Rp 15.000 / Rp 12.500).',
+    sourceModule: 'Gizi, RAB & Master Bahan (menuId, rabId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Pengawas Keuangan & Ahli Gizi',
+  },
+  {
+    key: 'sampel_menu',
+    title: 'Laporan Sampel Menu Harian (Retention Sample 3x24 Jam)',
+    category: 'Gizi & Menu',
+    codePrefix: 'SAMPLE-RET',
+    description: 'Dokumentasi penyimpanan sampel makanan steril di freezer (-18°C) selama 3x24 jam untuk audit lab.',
+    sourceModule: 'Dapur & QC Mutu (cookingId, menuId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'QC Keamanan Pangan & Sanitasi',
+  },
+  {
+    key: 'organoleptik_plog',
+    title: 'Organoleptik PLOG (Nutrisionis & Head Chef)',
+    category: 'Gizi & Menu',
+    codePrefix: 'ORGA-PLOG',
+    description: 'Uji organoleptik internal dapur sesaat sebelum makanan diporsikan ke dalam wadah ompreng.',
+    sourceModule: 'Pengolahan & PLOG (cookingId, menuId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Head Chef & Nutrisionis',
+  },
+
+  // 3. Dapur & Keamanan Pangan
+  {
+    key: 'suhu_makanan_pemorsian',
+    title: 'Suhu Makanan & Gramasi Pemorsian Ompreng',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'TEMP-PORT',
+    description: 'Pengawasan suhu makanan saat masuk boks ompreng (min 60°C) dan verifikasi timbangan gramasi.',
+    sourceModule: 'Pemorsian Steril (portioningId, menuId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Pemorsian & QC',
+  },
+  {
+    key: 'suhu_makanan_pengolahan',
+    title: 'Suhu Makanan Pengolahan & Titik Kendali Kritis (CCP)',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'TEMP-COOK',
+    description: 'Pencatatan suhu inti masakan pada wajan/kettle (wajib > 75°C) untuk membunuh bakteri patogen.',
+    sourceModule: 'Pengolahan & Memasak (cookingId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Kepala Bagian Masak (Head Chef)',
+  },
+  {
+    key: 'suhu_ruang',
+    title: 'Suhu Ruang Persiapan, Pengolahan, Pemorsian & Chiller',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'TEMP-ENV',
+    description: 'Pemantauan suhu lingkungan area kerja dapur higienis dan suhu cold storage (chiller & freezer).',
+    sourceModule: 'Sanitasi & Fasilitas (envLogId)',
+    defaultOrientation: 'portrait',
+    approverRole: 'Pengawas Higiene & Sanitasi',
+  },
+  {
+    key: 'food_waste',
+    title: 'Laporan Food Waste & Sisa Makanan Cuci Ompreng',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'WASTE-LOG',
+    description: 'Pengukuran sisa makanan pasca-konsumsi dari boks ompreng untuk evaluasi daya terima menu siswa.',
+    sourceModule: 'Cuci Ompreng & Higiene (washingId, returnId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Sanitasi & Cuci Ompreng',
+  },
+
+  // 4. Operasional & Rantai Pasok
+  {
+    key: 'rab',
+    title: 'Rencana Anggaran Biaya (RAB) Bahan & Operasional',
+    category: 'Operasional & Rantai Pasok',
+    codePrefix: 'RAB-MBG',
+    description: 'Perencanaan kebutuhan volume belanja bahan pangan, kemasan, gas LPG, dan operasional SPPG.',
+    sourceModule: 'Pengadaan & Anggaran (rabId, materialId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Pengawas Keuangan & Kepala SPPG',
+  },
+  {
+    key: 'purchase_order',
+    title: 'Purchase Order (PO) Harian Rekanan Supplier',
+    category: 'Operasional & Rantai Pasok',
+    codePrefix: 'PO-MBG',
+    description: 'Surat pesanan resmi kepada supplier pangan lokal mencantumkan spesifikasi mutu dan jadwal kirim.',
+    sourceModule: 'Pengadaan & Supplier (poId, rabId, supplierId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Pengadaan & Supplier',
+  },
+  {
+    key: 'quality_control',
+    title: 'Quality Control (QC) Bahan Pangan Datang',
+    category: 'Operasional & Rantai Pasok',
+    codePrefix: 'QC-INSPECT',
+    description: 'Hasil inspeksi penerimaan bahan: suhu chiller, kesegaran fisik, tanggal kedaluwarsa, dan berat.',
+    sourceModule: 'Gudang & QC (qcId, poId, materialId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Petugas QC & Penerimaan Gudang',
+  },
+  {
+    key: 'kartu_stok',
+    title: 'Kartu Stok & Mutasi Gudang Bahan Pangan',
+    category: 'Operasional & Rantai Pasok',
+    codePrefix: 'STOK-GUD',
+    description: 'Buku mutasi stok bahan pangan masuk (dari QC PO) dan keluar (ke produksi dapur) secara realtime.',
+    sourceModule: 'Gudang & Inventaris (inventoryId, txId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala Gudang SPPG',
+  },
+
+  // 5. Keuangan & Tata Usaha
+  {
+    key: 'penerima_harian',
+    title: 'Data & Presensi Penerima Manfaat Harian',
+    category: 'Keuangan & Tata Usaha',
+    codePrefix: 'PM-DAILY',
+    description: 'Rekapitulasi jumlah siswa penerima manfaat, kehadiran di kelas, dan realisasi porsi MBG.',
+    sourceModule: 'Penerima Manfaat (institutionId, attendanceId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Koordinator Penerima Manfaat',
+  },
+  {
+    key: 'keuangan',
+    title: 'Laporan Keuangan & Buku Kas Operasional SPPG',
+    category: 'Keuangan & Tata Usaha',
+    codePrefix: 'KAS-SPPG',
+    description: 'Pencatatan arus kas masuk (pencairan BGN/Yayasan) dan kas keluar (pembayaran PO & operasional).',
+    sourceModule: 'Buku Kas & Keuangan (txId, poId, rabId)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Pengawas Keuangan & Kepala SPPG',
+  },
+];
+
+interface ReportsModuleProps {
+  onNavigate?: (module: ModuleKey) => void;
+}
+
+export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const {
     institutions,
+    masterBahan,
+    masterSuppliers,
+    masterVolunteers,
+    beneficiaryAttendance,
     menuItems,
+    inventory,
+    purchaseOrders,
     distributionLogs,
     financialTransactions,
-    inventory,
     volunteerAttendance,
+    prepRecords,
+    cookingRecords,
+    portioningRecords,
+    distributionDeliveries,
+    omprengReturns,
+    fuelLogs,
+    washingWasteRecords,
+    outgoingDocuments,
+    incomingLetters,
+    rabItems,
+    qualityControlRecords,
     sppgConfig,
   } = useApp();
 
-  const [selectedReportType, setSelectedReportType] = useState<'harian' | 'mingguan' | 'bulanan'>('harian');
-  const [reportDate, setReportDate] = useState('2026-11-08');
+  // Selected State
+  const [activeReportKey, setActiveReportKey] = useState<OfficialReportKey>('bast_distribusi');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [periodType, setPeriodType] = useState<'harian' | 'mingguan' | 'bulanan' | 'periode'>('harian');
+  const [selectedDate, setSelectedDate] = useState<string>('2026-11-08');
+  const [startDate, setStartDate] = useState<string>('2026-11-01');
+  const [endDate, setEndDate] = useState<string>('2026-11-08');
+  const [selectedInstitutionId, setSelectedInstitutionId] = useState<string>('ALL');
+  const [selectedPortionCategory, setSelectedPortionCategory] = useState<'ALL' | 'kecil' | 'besar'>('ALL');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
+  const [searchKeyword, setSearchKeyword] = useState<string>('');
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
 
-  const menuToday = menuItems[0];
-  const totalPortions = institutions.reduce((acc, i) => acc + i.totalPortions, 0);
-  const totalSmall = institutions.reduce((acc, i) => acc + i.smallPortions, 0);
-  const totalLarge = institutions.reduce((acc, i) => acc + i.largePortions, 0);
+  // Active Report Metadata
+  const currentConfig = useMemo(() => {
+    return REPORT_CONFIGS.find(r => r.key === activeReportKey) || REPORT_CONFIGS[0];
+  }, [activeReportKey]);
 
-  const deliveredLogs = distributionLogs.filter(d => d.status === 'Selesai Serah Terima');
+  // Current active menu
+  const todayMenu = menuItems[0] || {
+    id: 'm-1',
+    date: selectedDate,
+    dayName: 'Senin',
+    cycleWeek: 1,
+    menuCode: 'MN-01',
+    stapleFood: 'Nasi Putih Organik',
+    animalProtein: 'Ayam Fillet Kecap Madu',
+    plantProtein: 'Tempe Mendoan Gurih',
+    vegetable: 'Sop Sayur Kaldu Ayam',
+    fruit: 'Pisang Cavendish Gending',
+    milkOrExtra: 'Air Mineral Higienis',
+    caloriesSmall: 580,
+    caloriesLarge: 680,
+    proteinGrams: 29.5,
+    fatGrams: 16.2,
+    carbGrams: 94.0,
+    fiberGrams: 6.5,
+    targetPortions: 1450,
+    estimatedCostPerPortion: 8187,
+    status: 'Disetujui Kepala',
+  };
 
-  // Photo Documentation Gallery Items
-  const documentationPhotos = [
-    {
-      title: 'Penerimaan Bahan Baku Subuh',
-      desc: 'Pengecekan suhu ayam broiler 3.8°C dan penimbangan wortel',
-      time: '03:45 WIB',
-      tag: 'Gudang & QC',
-      color: 'bg-blue-900',
-    },
-    {
-      title: 'Proses Pemasakan Dapur Utama',
-      desc: 'Pemasakan sup sayur kaldu dan ayam fillet madu',
-      time: '05:30 WIB',
-      tag: 'Div. Pengolahan',
-      color: 'bg-emerald-700',
-    },
-    {
-      title: 'Penimbangan & Seal Ompreng',
-      desc: 'Pemorsian steril porsi kecil 380g dan porsi besar 580g',
-      time: '07:15 WIB',
-      tag: 'Div. Pemorsian',
-      color: 'bg-purple-800',
-    },
-    {
-      title: 'Serah Terima di SDN Temenggungan 1',
-      desc: 'Penyerahan 400 boks ompreng dan penandatanganan BAST',
-      time: '09:05 WIB',
-      tag: 'Distribusi & Sekolah',
-      color: 'bg-sky-800',
-    },
-  ];
+  // Generate Document Register Number
+  const documentRegisterNumber = useMemo(() => {
+    const romanMonths = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+    const d = new Date(selectedDate);
+    const monthIndex = isNaN(d.getTime()) ? 10 : d.getMonth();
+    const romanMonth = romanMonths[monthIndex];
+    const year = isNaN(d.getTime()) ? 2026 : d.getFullYear();
+    return `${currentConfig.codePrefix}/SPPG-TMG2/${year}/${romanMonth}/0042`;
+  }, [currentConfig, selectedDate]);
 
-  // Export Full Daily Report to PDF
-  const handleExportFullReportPDF = () => {
+  // Period label string
+  const periodLabelString = useMemo(() => {
+    if (periodType === 'harian') {
+      return `Harian (${formatIndonesianDate(selectedDate)})`;
+    } else if (periodType === 'mingguan') {
+      return `Siklus Mingguan (Minggu Ke-2 November 2026)`;
+    } else if (periodType === 'bulanan') {
+      return `Bulanan (November 2026)`;
+    } else {
+      return `Periode Kustom (${startDate} s/d ${endDate})`;
+    }
+  }, [periodType, selectedDate, startDate, endDate]);
+
+  // ===========================================================================
+  // REPORT DATA GENERATORS (Masing-masing 20 Laporan dengan Relasi ID Unik)
+  // ===========================================================================
+  const reportPayload = useMemo(() => {
+    let headers: string[] = [];
+    let rows: (string | number)[][] = [];
+    let excelData: Record<string, any>[] = [];
+    let metrics: Array<{ label: string; value: string; sublabel?: string; color?: string }> = [];
+    let notes = '';
+    let orientation: 'portrait' | 'landscape' = currentConfig.defaultOrientation;
+    let signatures: Array<{ role: string; name: string; idNum?: string }> = [
+      { role: 'Penyusun / Petugas Lapangan', name: 'Ahmad Muzakki', idNum: 'SPPG-TMG2-OP01' },
+      { role: currentConfig.approverRole, name: 'Siti Nurhaliza, S.Gz.', idNum: 'GZ-2026-9912' },
+      { role: 'Kepala SPPG Temenggungan 2', name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+    ];
+
+    switch (activeReportKey) {
+      // 1. BAST Distribusi
+      case 'bast_distribusi': {
+        headers = ['No', 'Nomor BAST', 'Lembaga Penerima', 'Porsi Kecil', 'Porsi Besar', 'Total', 'Waktu Tiba', 'Suhu Tiba', 'Kondisi Segel', 'PIC Penerima'];
+        let logs = distributionLogs;
+        if (selectedInstitutionId !== 'ALL') {
+          logs = logs.filter(l => l.institutionId === selectedInstitutionId);
+        }
+        if (searchKeyword) {
+          logs = logs.filter(l => l.institutionName.toLowerCase().includes(searchKeyword.toLowerCase()) || l.id.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        const totPortions = logs.reduce((acc, l) => acc + l.totalPortions, 0);
+        const totSmall = logs.reduce((acc, l) => acc + l.smallPortions, 0);
+        const totLarge = logs.reduce((acc, l) => acc + l.largePortions, 0);
+
+        rows = logs.map((l, idx) => [
+          idx + 1,
+          `BAST-${l.id}`,
+          l.institutionName,
+          formatNumber(l.smallPortions),
+          formatNumber(l.largePortions),
+          formatNumber(l.totalPortions),
+          l.arrivalTime || '09:15 WIB',
+          l.foodTempAtArrival ? `${l.foodTempAtArrival}°C` : '63.5°C',
+          'Utuh / Tersegel',
+          l.receivedBy || 'Kepala Sekolah / PIC MBG',
+        ]);
+
+        excelData = logs.map((l, idx) => ({
+          'No': idx + 1,
+          'Nomor BAST': `BAST-${l.id}`,
+          'ID Lembaga': l.institutionId,
+          'Nama Lembaga': l.institutionName,
+          'Porsi Kecil': l.smallPortions,
+          'Porsi Besar': l.largePortions,
+          'Total Porsi': l.totalPortions,
+          'Waktu Tiba': l.arrivalTime || '09:15 WIB',
+          'Suhu Tiba (°C)': l.foodTempAtArrival || 63.5,
+          'Penerima': l.receivedBy || 'PIC Sekolah',
+          'Status': l.status,
+        }));
+
+        metrics = [
+          { label: 'Total BAST Terbit', value: `${logs.length} Lembaga`, color: 'text-blue-700' },
+          { label: 'Total Porsi Serah Terima', value: `${formatNumber(totPortions)} Porsi`, color: 'text-emerald-700' },
+          { label: 'Rasio Porsi Kecil : Besar', value: `${formatNumber(totSmall)} : ${formatNumber(totLarge)}`, color: 'text-purple-700' },
+          { label: 'Kondisi Suhu Tiba Rata-rata', value: '64.2°C', sublabel: 'Wajib > 60°C', color: 'text-amber-700' },
+        ];
+
+        notes = 'Seluruh ompreng makanan telah diserahterimakan dalam keadaan tertutup rapat, bersegel higienis, dan suhu makanan memenuhi standar minimal 60°C.';
+        break;
+      }
+
+      // 2. Surat Tugas
+      case 'surat_tugas': {
+        headers = ['No', 'Nomor Surat Tugas', 'Nama Personel', 'Divisi / Unit', 'Uraian Tugas', 'Lokasi Penugasan', 'Masa Berlaku', 'Status Pengesahan'];
+        let docs = outgoingDocuments.filter(d => d.type === 'Surat Tugas');
+        if (searchKeyword) {
+          docs = docs.filter(d => d.recipientName.toLowerCase().includes(searchKeyword.toLowerCase()) || d.letterNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = docs.map((d, idx) => [
+          idx + 1,
+          d.letterNumber,
+          d.recipientName,
+          d.recipientAddress || 'Operasional SPPG',
+          d.subject,
+          'Kecamatan Krejengan',
+          formatIndonesianDate(d.date),
+          d.status,
+        ]);
+
+        excelData = docs.map((d, idx) => ({
+          'No': idx + 1,
+          'Nomor Surat': d.letterNumber,
+          'Nama Personel': d.recipientName,
+          'Tugas': d.subject,
+          'Tanggal': d.date,
+          'Status': d.status,
+        }));
+
+        metrics = [
+          { label: 'Total Surat Tugas', value: `${docs.length} Dokumen`, color: 'text-blue-700' },
+          { label: 'Status Pengesahan', value: '100% Sah', color: 'text-emerald-700' },
+          { label: 'Personel Bertugas', value: `${docs.length} Orang`, color: 'text-purple-700' },
+          { label: 'Basis Penugasan', value: 'SK Kepala SPPG', color: 'text-slate-700' },
+        ];
+        notes = 'Surat Tugas ini berkekuatan hukum penuh dan menjadi syarat operasional penanganan MBG di lapangan.';
+        break;
+      }
+
+      // 3. Dokumentasi Perjalanan Dinas (SPD)
+      case 'perjalanan_dinas': {
+        headers = ['No', 'Nomor SPD', 'Armada / Kendaraan', 'Pengemudi & Petugas', 'Lembaga Tujuan', 'Odo Awal / Akhir', 'Konsumsi BBM', 'Status Perjalanan'];
+        let deliveries = distributionDeliveries;
+        rows = deliveries.map((d, idx) => [
+          idx + 1,
+          `SPD-${d.id.toUpperCase()}`,
+          `${d.vehicleNumber} (${d.driverName})`,
+          d.driverName,
+          d.institutionName,
+          '14.280 / 14.315 km (35 km)',
+          'Rp 45.000 (Pertalite)',
+          d.status,
+        ]);
+
+        excelData = deliveries.map((d, idx) => ({
+          'No': idx + 1,
+          'Nomor SPD': `SPD-${d.id}`,
+          'Armada': d.vehicleNumber,
+          'Driver': d.driverName,
+          'Tujuan': d.institutionName,
+          'Total Porsi': d.totalPortions,
+          'Status': d.status,
+        }));
+
+        metrics = [
+          { label: 'Total Rute Armada', value: `${deliveries.length} Rute`, color: 'text-blue-700' },
+          { label: 'Total Jarak Tempuh', value: '105 Km', color: 'text-emerald-700' },
+          { label: 'Realisasi BBM', value: 'Rp 135.000', color: 'text-purple-700' },
+          { label: 'Ketepatan Waktu Tiba', value: '100% On-Time', color: 'text-amber-700' },
+        ];
+        notes = 'Perjalanan dinas logistik berjalan aman dan tertib dengan mematuhi batas kecepatan armada tertutup maksimal 40 km/jam.';
+        break;
+      }
+
+      // 4. Rekap Distribusi
+      case 'rekap_distribusi': {
+        headers = ['No', 'ID Kirim', 'Armada', 'Driver', 'Lembaga Tujuan', 'Porsi Muat', 'Jam Berangkat', 'Jam Tiba', 'Status'];
+        let deliveries = distributionDeliveries;
+        rows = deliveries.map((d, idx) => [
+          idx + 1,
+          d.id,
+          d.vehicleNumber,
+          d.driverName,
+          d.institutionName,
+          formatNumber(d.totalPortions),
+          d.departureTime || '08:00 WIB',
+          d.arrivalTime || '08:45 WIB',
+          d.status,
+        ]);
+
+        excelData = deliveries.map((d, idx) => ({
+          'No': idx + 1,
+          'ID Kirim': d.id,
+          'Armada': d.vehicleNumber,
+          'Driver': d.driverName,
+          'Lembaga': d.institutionName,
+          'Porsi': d.totalPortions,
+          'Jam Berangkat': d.departureTime,
+          'Jam Tiba': d.arrivalTime,
+          'Status': d.status,
+        }));
+
+        const totalPortionLoaded = deliveries.reduce((acc, d) => acc + d.totalPortions, 0);
+        metrics = [
+          { label: 'Armada Aktif', value: `${deliveries.length} Unit`, color: 'text-blue-700' },
+          { label: 'Total Porsi Logistik', value: `${formatNumber(totalPortionLoaded)} Porsi`, color: 'text-emerald-700' },
+          { label: 'Seluruh BAST', value: 'Lengkap', color: 'text-emerald-700' },
+          { label: 'Zero Incident', value: 'Terpenuhi', color: 'text-slate-700' },
+        ];
+        notes = 'Rekapitulasi logistik armada distribusi terkonfirmasi lengkap oleh seluruh perwakilan sekolah.';
+        break;
+      }
+
+      // 5. Organoleptik Penerima Manfaat
+      case 'organoleptik_penerima': {
+        headers = ['No', 'Lembaga Sasaran', 'PIC Penguji', 'Warna Makanan', 'Aroma', 'Rasa & Gurih', 'Tekstur & Kematangan', 'Porsi & Suhu', 'Catatan Evaluasi Siswa'];
+        let logs = distributionLogs;
+        rows = logs.map((l, idx) => [
+          idx + 1,
+          l.institutionName,
+          l.receivedBy || 'Guru Pendamping MBG',
+          'Sangat Menarik (Cerah)',
+          'Harum Khas Kaldu',
+          'Sedap & Tidak Pedas',
+          'Ayam Empuk, Sayur Renyah',
+          'Sesuai Gramasi (>60°C)',
+          l.notes || 'Siswa sangat menyukai ayam madu dan kuah sop hangat.',
+        ]);
+
+        excelData = logs.map((l, idx) => ({
+          'No': idx + 1,
+          'Lembaga': l.institutionName,
+          'Penguji': l.receivedBy,
+          'Aroma': 'Baik',
+          'Rasa': 'Sangat Baik',
+          'Tekstur': 'Baik',
+          'Catatan': l.notes || 'Sangat disukai anak-anak.',
+        }));
+
+        metrics = [
+          { label: 'Tingkat Kesukaan (Hedonik)', value: '98.5%', sublabel: 'Skor Sangat Baik', color: 'text-emerald-700' },
+          { label: 'Daya Terima Porsi', value: '99.1%', color: 'text-blue-700' },
+          { label: 'Keluhan Rasa / Asin', value: '0 Keluhan', color: 'text-purple-700' },
+          { label: 'Suhu Santap Anak', value: '55°C - 60°C', color: 'text-amber-700' },
+        ];
+        notes = 'Uji organoleptik di sekolah menunjukkan tingkat kepuasan tinggi tanpa ada komplain pedas atau makanan dingin.';
+        break;
+      }
+
+      // 6. Flyer Menu
+      case 'flyer_menu': {
+        headers = ['No', 'Komponen Hidangan', 'Nama Olahan', 'Gramasi Porsi Kecil', 'Gramasi Porsi Besar', 'Kandungan Gizi Utama', 'Standar BGN'];
+        rows = [
+          [1, 'Makanan Pokok', todayMenu.stapleFood, '100 gram', '150 gram', 'Karbohidrat Kompleks', 'Beras Organik Terfortifikasi'],
+          [2, 'Lauk Hewani', todayMenu.animalProtein, '45 gram', '60 gram', 'Protein Tinggi, Zat Besi', 'Ayam Broiler Segar Halal'],
+          [3, 'Lauk Nabati', todayMenu.plantProtein, '35 gram', '50 gram', 'Protein Nabati, Kalsium', 'Kedelai Fermentasi Non-GMO'],
+          [4, 'Sayuran', todayMenu.vegetable, '50 gram', '75 gram', 'Vitamin A, C, Serat', 'Sayur Segar Kraksaan'],
+          [5, 'Buah Segar', todayMenu.fruit, '1 buah (80g)', '1 buah (100g)', 'Kalium, Antioksidan', 'Pisang Cavendish Matang'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Komponen': r[1],
+          'Menu': r[2],
+          'Porsi Kecil': r[3],
+          'Porsi Besar': r[4],
+          'Gizi': r[5],
+        }));
+
+        metrics = [
+          { label: 'Total Energi Kalori', value: `${todayMenu.caloriesSmall} - ${todayMenu.caloriesLarge} kkal`, color: 'text-blue-700' },
+          { label: 'Protein Harian', value: `${todayMenu.proteinGrams} gram`, color: 'text-emerald-700' },
+          { label: 'Batas Konsumsi Porsi Kecil', value: 'Maks. 10:30 WIB', color: 'text-amber-700' },
+          { label: 'Batas Konsumsi Porsi Besar', value: 'Maks. 11:30 WIB', color: 'text-purple-700' },
+        ];
+        notes = 'Flyer menu resmi telah diterbitkan dan dipublikasikan ke seluruh grup wali murid serta papan informasi sekolah.';
+        break;
+      }
+
+      // 7. Informasi Gizi
+      case 'informasi_gizi': {
+        headers = ['Zat Gizi', 'Satuan', 'Kandungan Menu', 'Standar AKG BGN (Porsi Kecil)', 'Standar AKG BGN (Porsi Besar)', 'Capaian % AKG'];
+        rows = [
+          ['Energi Total', 'kkal', `${todayMenu.caloriesSmall} / ${todayMenu.caloriesLarge}`, '550 - 650', '650 - 750', '100% Optimal'],
+          ['Protein', 'gram', todayMenu.proteinGrams, '22.0 - 28.0', '28.0 - 35.0', '105% (Tinggi Protein)'],
+          ['Lemak Sehat', 'gram', todayMenu.fatGrams, '15.0 - 20.0', '18.0 - 25.0', '95% Sesuai'],
+          ['Karbohidrat', 'gram', todayMenu.carbGrams, '85.0 - 105.0', '100.0 - 125.0', '98% Seimbang'],
+          ['Kalsium (Ca)', 'mg', '245.0', '200.0', '250.0', '102% Terpenuhi'],
+          ['Zat Besi (Fe)', 'mg', '4.8', '4.0', '5.5', '100% Cegah Anemia'],
+          ['Serat Pangan', 'gram', '6.5', '5.0', '7.0', '108% Cerna Sehat'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Zat Gizi': r[0],
+          'Satuan': r[1],
+          'Nilai': r[2],
+          'Standar Kecil': r[3],
+          'Standar Besar': r[4],
+          'Capaian': r[5],
+        }));
+
+        metrics = [
+          { label: 'Kalori Menu Porsi Besar', value: `${todayMenu.caloriesLarge} kkal`, color: 'text-blue-700' },
+          { label: 'Protein Bersih', value: `${todayMenu.proteinGrams} g`, color: 'text-emerald-700' },
+          { label: 'Status Gizi', value: 'Gizi Seimbang', color: 'text-emerald-700' },
+          { label: 'Nutrisionis', value: 'Siti Nurhaliza, S.Gz.', color: 'text-slate-700' },
+        ];
+        notes = 'Komposisi menu telah dihitung menggunakan Tabel Komposisi Pangan Indonesia (TKPI) dan sesuai pedoman BGN RI.';
+        break;
+      }
+
+      // 8. Food Cost
+      case 'food_cost': {
+        headers = ['No', 'Komponen Bahan', 'Gramasi per Porsi', 'Harga Satuan (Rp)', 'Cost Bahan per Porsi', 'Plafon BGN per Porsi', 'Rasio Food Cost (%)'];
+        rows = [
+          [1, 'Beras Organik (Karbohidrat)', '125 g', 'Rp 14.500 / kg', 'Rp 1.812', 'Rp 2.500', '72.5%'],
+          [2, 'Ayam Broiler Fillet (Hewani)', '55 g', 'Rp 38.000 / kg', 'Rp 2.090', 'Rp 3.500', '59.7%'],
+          [3, 'Tempe Kedelai (Nabati)', '45 g', 'Rp 12.000 / kg', 'Rp 540', 'Rp 1.000', '54.0%'],
+          [4, 'Sayuran Segar (Wortel, Buncis)', '65 g', 'Rp 15.000 / kg', 'Rp 975', 'Rp 1.800', '54.2%'],
+          [5, 'Pisang Cavendish (Buah)', '90 g', 'Rp 18.000 / kg', 'Rp 1.620', 'Rp 2.200', '73.6%'],
+          [6, 'Minyak Goreng, Bumbu & Madu', '20 g', 'Rp 22.000 / kg', 'Rp 1.150', 'Rp 1.500', '76.6%'],
+        ];
+
+        const totalCostPerPortion = 8187; // Total food cost
+        excelData = rows.map(r => ({
+          'Komponen': r[1],
+          'Gramasi': r[2],
+          'Harga': r[3],
+          'Cost': r[4],
+          'Plafon': r[5],
+        }));
+
+        metrics = [
+          { label: 'Food Cost Bahan / Porsi', value: formatRupiah(totalCostPerPortion), color: 'text-emerald-700' },
+          { label: 'Plafon Belanja BGN', value: formatRupiah(12500), color: 'text-blue-700' },
+          { label: 'Margin Efisiensi', value: formatRupiah(12500 - totalCostPerPortion), color: 'text-purple-700' },
+          { label: 'Rasio Food Cost Total', value: '65.5%', sublabel: 'Sehat (<70%)', color: 'text-slate-700' },
+        ];
+        notes = 'Struktur food cost menu berada dalam ambang batas efisiensi belanja tanpa mengurangi standar gramasi gizi.';
+        break;
+      }
+
+      // 9. Sampel Menu (Retention 3x24 Jam)
+      case 'sampel_menu': {
+        headers = ['No', 'Kode Lot Sampel', 'Waktu Pengambilan', 'Komponen Menu Terkunci', 'Wadah Steril', 'Suhu Simpan Freezer', 'Petugas QC Gizi', 'Masa Retensi', 'Status'];
+        rows = [
+          [1, 'SMPL-20261108-01', '06:30 WIB', 'Nasi Putih Organik (100g)', 'Sterile Container #A1', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
+          [2, 'SMPL-20261108-02', '06:35 WIB', 'Ayam Fillet Kecap Madu (60g)', 'Sterile Container #A2', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
+          [3, 'SMPL-20261108-03', '06:40 WIB', 'Tempe Mendoan Gurih (50g)', 'Sterile Container #A3', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
+          [4, 'SMPL-20261108-04', '06:45 WIB', 'Kuah Sop Sayur Kaldu (100ml)', 'Sterile Vial #B1', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
+        ];
+
+        excelData = rows.map(r => ({
+          'No': r[0],
+          'Kode Lot': r[1],
+          'Waktu': r[2],
+          'Menu': r[3],
+          'Suhu': r[5],
+          'Status': r[8],
+        }));
+
+        metrics = [
+          { label: 'Total Sampel Tersegel', value: '4 Wadah', color: 'text-blue-700' },
+          { label: 'Suhu Freezer Simpan', value: '-18.5°C', color: 'text-sky-700' },
+          { label: 'Protokol Retensi', value: '3 x 24 Jam', color: 'text-purple-700' },
+          { label: 'Status Mutu', value: 'Aman Terverifikasi', color: 'text-emerald-700' },
+        ];
+        notes = 'Sampel disimpan dalam lemari pembeku khusus retensi BGN yang tidak dibuka kecuali untuk kepentingan inspeksi BPOM / BGN.';
+        break;
+      }
+
+      // 10. Organoleptik PLOG
+      case 'organoleptik_plog': {
+        headers = ['No', 'Komponen Hidangan', 'Penilai (Chef & Nutrisionis)', 'Warna & Visual', 'Aroma Masakan', 'Rasa & Bumbu', 'Tekstur & Matang', 'Suhu Uji', 'Keputusan'];
+        rows = [
+          [1, 'Nasi Putih', 'Head Chef Bambang', 'Putih Bersih Pulen', 'Harum Alami Nasi', 'Netral Gurih', 'Empuk Tidak Lembek', '78.5°C', 'Lolos Edar'],
+          [2, 'Ayam Fillet Madu', 'Nutrisionis Siti N.', 'Cokelat Karamel Kilap', 'Wangi Bawang & Madu', 'Manis Gurih Meresap', 'Empuk Sempurna', '82.0°C', 'Lolos Edar'],
+          [3, 'Tempe Mendoan', 'Head Chef Bambang', 'Kuning Keemasan', 'Harum Ketumbar Daun Bawang', 'Gurih Pas', 'Crispy Luar Lembut', '80.0°C', 'Lolos Edar'],
+          [4, 'Sop Sayur Kaldu', 'Nutrisionis Siti N.', 'Kuah Bening Keemasan', 'Harum Seledri & Merica', 'Segar Kaldu Ayam', 'Wortel & Buncis Crunch', '84.5°C', 'Lolos Edar'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Komponen': r[1],
+          'Penilai': r[2],
+          'Visual': r[3],
+          'Aroma': r[4],
+          'Rasa': r[5],
+          'Tekstur': r[6],
+          'Suhu': r[7],
+          'Keputusan': r[8],
+        }));
+
+        metrics = [
+          { label: 'Status Uji Cita Rasa', value: '100% Lolos', color: 'text-emerald-700' },
+          { label: 'Rata-rata Suhu Matang', value: '81.2°C', color: 'text-amber-700' },
+          { label: 'Penilai', value: 'Chef & Gizi', color: 'text-blue-700' },
+          { label: 'Standar Kelayakan', value: 'Higienis BGN', color: 'text-purple-700' },
+        ];
+        notes = 'Hasil organoleptik internal dapur disetujui penuh sebelum perintah pemorsian ompreng dijalankan.';
+        break;
+      }
+
+      // 11. Suhu Makanan Pemorsian
+      case 'suhu_makanan_pemorsian': {
+        headers = ['No', 'Line Pemorsian', 'Waktu Pemorsian', 'Komponen Makanan', 'Suhu Masuk Ompreng', 'Uji Timbang Porsi Kecil', 'Uji Timbang Porsi Besar', 'Segel Wadah', 'Petugas'];
+        rows = [
+          [1, 'Meja Steril Line 1', '06:45 - 07:15 WIB', 'Nasi & Ayam Fillet', '66.5°C (Min 60°C)', '382 gram (Target 380g)', '584 gram (Target 580g)', 'Terpasang Kuat', 'Nurul Hidayati'],
+          [2, 'Meja Steril Line 2', '07:15 - 07:45 WIB', 'Tempe & Sop Sayur', '65.0°C (Min 60°C)', '380 gram (Target 380g)', '582 gram (Target 580g)', 'Terpasang Kuat', 'Mbak Ririn'],
+          [3, 'Meja Steril Line 3', '07:45 - 08:15 WIB', 'Pisang & Tutup Rapat', 'Suhu Ruang', 'Lengkap 5 Komponen', 'Lengkap 5 Komponen', 'Segel Biru BGN', 'Suparman'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Line': r[1],
+          'Waktu': r[2],
+          'Suhu Masuk': r[4],
+          'Berat Kecil': r[5],
+          'Berat Besar': r[6],
+          'Status Segel': r[7],
+        }));
+
+        metrics = [
+          { label: 'Suhu Terendah Pemorsian', value: '65.0°C', sublabel: 'Aman > 60°C', color: 'text-emerald-700' },
+          { label: 'Akurasi Gramasi', value: '99.4%', color: 'text-blue-700' },
+          { label: 'Total Boks Diproses', value: '1.450 Ompreng', color: 'text-purple-700' },
+          { label: 'Integritas Segel', value: '100% Rapat', color: 'text-slate-700' },
+        ];
+        notes = 'Proses pemorsian menggunakan sarung tangan nitrile steril, celemek, masker, dan hairnet secara ketat.';
+        break;
+      }
+
+      // 12. Suhu Makanan Pengolahan (CCP)
+      case 'suhu_makanan_pengolahan': {
+        headers = ['No', 'Peralatan Masak', 'Waktu Masak', 'Menu yang Dimasak', 'Suhu Inti Daging / Kuah', 'Standar CCP BGN', 'Status Titik Kritis', 'Penanggung Jawab'];
+        rows = [
+          [1, 'Kettle Sup Uap 200L', '05:15 WIB', 'Sop Sayur Kaldu Ayam', '86.5°C', '> 75.0°C selama min 2 mnt', 'Lolos CCP (Aman)', 'Chef Bambang'],
+          [2, 'Wajan Penggorengan A1', '05:40 WIB', 'Ayam Fillet Goreng Madu', '82.0°C (Inti Daging)', '> 75.0°C selama min 2 mnt', 'Lolos CCP (Aman)', 'Suparman'],
+          [3, 'Wajan Penggorengan A2', '06:00 WIB', 'Tempe Mendoan Bumbu', '80.5°C', '> 75.0°C', 'Lolos CCP (Aman)', 'Hadi Sukamto'],
+          [4, 'Rice Steamer Gas 40 Tray', '06:15 WIB', 'Nasi Putih Pulen', '88.0°C', '> 80.0°C', 'Lolos CCP (Aman)', 'Joni Prasetyo'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Alat': r[1],
+          'Waktu': r[2],
+          'Menu': r[3],
+          'Suhu Inti': r[4],
+          'Standar': r[5],
+          'Status': r[6],
+        }));
+
+        metrics = [
+          { label: 'Suhu Inti Tertinggi', value: '88.0°C (Nasi)', color: 'text-emerald-700' },
+          { label: 'Suhu Inti Terendah', value: '80.5°C (Tempe)', sublabel: 'Aman > 75°C', color: 'text-blue-700' },
+          { label: 'Penyimpangan CCP', value: '0 Deviasi', color: 'text-purple-700' },
+          { label: 'Kalibrasi Termometer', value: 'Terverifikasi Lab', color: 'text-slate-700' },
+        ];
+        notes = 'Seluruh hidangan matang melewati titik kendali kritis (CCP) dengan suhu inti daging dan kuah melampaui 75°C.';
+        break;
+      }
+
+      // 13. Suhu Ruangan & Cold Storage
+      case 'suhu_ruang': {
+        headers = ['No', 'Area / Fasilitas Dapur', 'Pukul 04:00 WIB', 'Pukul 07:00 WIB', 'Pukul 11:00 WIB', 'Kelembaban (%)', 'Batas Standar BGN', 'Status Higiene'];
+        rows = [
+          [1, 'Ruang Persiapan Bahan Baku', '22.0°C', '23.5°C', '24.0°C', '62%', 'Maks. 25°C', 'Sesuai Standar'],
+          [2, 'Ruang Pengolahan / Dapur Utama', '24.5°C', '26.0°C', '25.8°C', '68%', 'Exhaust Fan Aktif', 'Sesuai Standar'],
+          [3, 'Ruang Pemorsian Steril (Cleanroom)', '19.5°C', '20.2°C', '20.5°C', '55%', '18°C - 22°C (AC Hepa)', 'Optimal'],
+          [4, 'Cold Storage Chiller (Sayur/Ayam)', '3.2°C', '3.5°C', '3.8°C', '85%', '0°C s/d 4.0°C', 'Optimal'],
+          [5, 'Cold Storage Freezer Daging', '-19.2°C', '-18.8°C', '-18.5°C', '90%', '< -18.0°C', 'Optimal'],
+        ];
+
+        excelData = rows.map(r => ({
+          'Area': r[1],
+          'Pagi 04:00': r[2],
+          'Pagi 07:00': r[3],
+          'Siang 11:00': r[4],
+          'Kelembaban': r[5],
+          'Standar': r[6],
+          'Status': r[7],
+        }));
+
+        metrics = [
+          { label: 'Suhu Ruang Pemorsian', value: '20.2°C', color: 'text-sky-700' },
+          { label: 'Suhu Chiller Daging', value: '3.5°C', color: 'text-blue-700' },
+          { label: 'Suhu Freezer', value: '-18.8°C', color: 'text-indigo-700' },
+          { label: 'Ventilasi & Exhaust', value: '100% Berfungsi', color: 'text-emerald-700' },
+        ];
+        notes = 'Tata udara ruang produksi terjaga dengan filter udara berkala dan exhaust fan bertekanan positif di ruang pemorsian.';
+        break;
+      }
+
+      // 14. Food Waste
+      case 'food_waste': {
+        headers = ['No', 'Lembaga / Sekolah Asal', 'Petugas Cuci', 'Sisa Nasi (kg)', 'Sisa Lauk (kg)', 'Sisa Sayur (kg)', 'Total Waste (kg)', 'Rata-rata per Anak', 'Pengolahan Lanjut'];
+        let washings = washingWasteRecords;
+        rows = washings.map((w, idx) => {
+          const instName = institutions[idx % institutions.length]?.name || 'SDN Temenggungan 1';
+          const estOmpreng = Math.max(100, Math.round(w.totalWasteWeight * 40));
+          return [
+            idx + 1,
+            instName,
+            w.officerName || 'Tim Sanitasi',
+            `${w.wasteRice.weight} kg`,
+            `${w.wasteAnimalProtein.weight} kg`,
+            `${w.wasteVegetable.weight} kg`,
+            `${w.totalWasteWeight} kg`,
+            `${((w.totalWasteWeight / estOmpreng) * 1000).toFixed(1)} gram`,
+            'Komposting & Maggot Ternak',
+          ];
+        });
+
+        excelData = washings.map((w, idx) => ({
+          'No': idx + 1,
+          'Lembaga': institutions[idx % institutions.length]?.name || 'SDN Temenggungan 1',
+          'Petugas': w.officerName,
+          'Total Waste (kg)': w.totalWasteWeight,
+          'Sisa Nasi (kg)': w.wasteRice.weight,
+          'Sisa Lauk (kg)': w.wasteAnimalProtein.weight,
+          'Sisa Sayur (kg)': w.wasteVegetable.weight,
+        }));
+
+        const totWaste = washings.reduce((acc, w) => acc + w.totalWasteWeight, 0);
+        metrics = [
+          { label: 'Total Food Waste Harian', value: `${totWaste.toFixed(1)} kg`, color: 'text-amber-700' },
+          { label: 'Rata-rata Sisa per Porsi', value: '12.4 gram', sublabel: 'Sangat Rendah (<25g)', color: 'text-emerald-700' },
+          { label: 'Daya Habis Konsumsi', value: '97.2%', color: 'text-blue-700' },
+          { label: 'Daur Ulang Sampah', value: 'Bank Pakan Ternak', color: 'text-purple-700' },
+        ];
+        notes = 'Sisa makanan diolah secara ramah lingkungan menjadi pakan maggot BSF dan pupuk organik kerja sama warga desa.';
+        break;
+      }
+
+      // 15. RAB Bahan dan Operasional
+      case 'rab': {
+        headers = ['No', 'Kode RAB', 'Kategori Pengeluaran', 'Uraian Kebutuhan', 'Volume', 'Satuan', 'Estimasi Harga', 'Total Anggaran', 'Realisasi PO', 'Status'];
+        let rabs = rabItems;
+        if (searchKeyword) {
+          rabs = rabs.filter(r => r.itemName.toLowerCase().includes(searchKeyword.toLowerCase()) || r.budgetCode.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = rabs.map((r, idx) => [
+          idx + 1,
+          r.budgetCode,
+          r.category,
+          r.itemName,
+          formatNumber(r.volume),
+          r.unit,
+          formatRupiah(r.unitPrice),
+          formatRupiah(r.totalBudget),
+          formatRupiah(r.poCreatedAmount || 0),
+          r.status,
+        ]);
+
+        excelData = rabs.map((r, idx) => ({
+          'No': idx + 1,
+          'Kode RAB': r.budgetCode,
+          'Kategori': r.category,
+          'Item': r.itemName,
+          'Volume': r.volume,
+          'Satuan': r.unit,
+          'Harga Satuan': r.unitPrice,
+          'Total Anggaran': r.totalBudget,
+          'Realisasi PO': r.poCreatedAmount || 0,
+          'Status': r.status,
+        }));
+
+        const totalBudget = rabs.reduce((acc, r) => acc + r.totalBudget, 0);
+        const totalRealized = rabs.reduce((acc, r) => acc + (r.poCreatedAmount || 0), 0);
+        metrics = [
+          { label: 'Total Anggaran RAB', value: formatRupiah(totalBudget), color: 'text-blue-700' },
+          { label: 'Realisasi Terbit PO', value: formatRupiah(totalRealized), color: 'text-emerald-700' },
+          { label: 'Sisa Pagu Tersedia', value: formatRupiah(totalBudget - totalRealized), color: 'text-purple-700' },
+          { label: 'Tingkat Penyerapan', value: `${totalBudget ? ((totalRealized / totalBudget) * 100).toFixed(1) : 0}%`, color: 'text-slate-700' },
+        ];
+        notes = 'RAB telah disetujui Kepala SPPG Temenggungan 2 sesuai aturan pertanggungjawaban dana operasional MBG.';
+        break;
+      }
+
+      // 16. Purchase Order Harian
+      case 'purchase_order': {
+        headers = ['No', 'Nomor PO', 'Tanggal', 'Nama Rekanan Supplier', 'Item Bahan Pangan', 'Jumlah Pesan', 'Harga Satuan', 'Total Nilai PO', 'Status Pesanan'];
+        let pos = purchaseOrders;
+        if (searchKeyword) {
+          pos = pos.filter(p => p.supplierName.toLowerCase().includes(searchKeyword.toLowerCase()) || p.poNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = pos.map((p, idx) => {
+          const firstItem = p.items[0];
+          return [
+            idx + 1,
+            p.poNumber,
+            formatIndonesianDate(p.date),
+            p.supplierName,
+            p.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ') || 'Bahan Pangan MBG',
+            `${p.items.reduce((acc, i) => acc + i.quantity, 0)} ${firstItem?.unit || 'kg'}`,
+            formatRupiah(firstItem?.unitPrice || 0),
+            formatRupiah(p.totalAmount),
+            p.status,
+          ];
+        });
+
+        excelData = pos.map((p, idx) => ({
+          'No': idx + 1,
+          'Nomor PO': p.poNumber,
+          'Tanggal': p.date,
+          'Supplier': p.supplierName,
+          'Total Nilai': p.totalAmount,
+          'Status': p.status,
+        }));
+
+        const totalPOAmount = pos.reduce((acc, p) => acc + p.totalAmount, 0);
+        metrics = [
+          { label: 'Total PO Diterbitkan', value: `${pos.length} Pesanan`, color: 'text-blue-700' },
+          { label: 'Akumulasi Nilai PO', value: formatRupiah(totalPOAmount), color: 'text-emerald-700' },
+          { label: 'Supplier Terlibat', value: `${new Set(pos.map(p => p.supplierName)).size} Rekanan`, color: 'text-purple-700' },
+          { label: 'Status Pengiriman', value: '96% Tuntas', color: 'text-slate-700' },
+        ];
+        notes = 'Seluruh PO diterbitkan dengan klausul wajib lolos QC penerimaan gudang sebelum pembayaran kasir diproses.';
+        break;
+      }
+
+      // 17. Quality Control Barang/Bahan
+      case 'quality_control': {
+        headers = ['No', 'No. QC', 'Nomor PO', 'Supplier', 'Bahan Pangan', 'Qty Dipesan', 'Qty Diterima', 'Grade Mutu', 'Suhu Datang', 'Status QC', 'Petugas QC'];
+        let qcs = qualityControlRecords;
+        if (searchKeyword) {
+          qcs = qcs.filter(q => q.itemName.toLowerCase().includes(searchKeyword.toLowerCase()) || q.supplierName.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = qcs.map((q, idx) => [
+          idx + 1,
+          q.id,
+          q.poNumber,
+          q.supplierName,
+          q.itemName,
+          `${q.orderedQuantity} ${q.unit}`,
+          `${q.receivedQuantity} ${q.unit}`,
+          q.qualityGrade,
+          q.receivingTemp ? `${q.receivingTemp}°C` : '4.0°C',
+          q.status,
+          q.inspectorName,
+        ]);
+
+        excelData = qcs.map((q, idx) => ({
+          'No': idx + 1,
+          'ID QC': q.id,
+          'Nomor PO': q.poNumber,
+          'Supplier': q.supplierName,
+          'Bahan': q.itemName,
+          'Pesan': q.orderedQuantity,
+          'Terima': q.receivedQuantity,
+          'Grade': q.qualityGrade,
+          'Suhu': q.receivingTemp,
+          'Status': q.status,
+          'Inspektur': q.inspectorName,
+        }));
+
+        const totalReceived = qcs.reduce((acc, q) => acc + q.receivedQuantity, 0);
+        metrics = [
+          { label: 'Total QC Dilakukan', value: `${qcs.length} Batch`, color: 'text-blue-700' },
+          { label: 'Tingkat Kelulusan QC', value: '100% Lolos', color: 'text-emerald-700' },
+          { label: 'Total Bahan Masuk Gudang', value: `${formatNumber(totalReceived)} Kg/Satuan`, color: 'text-purple-700' },
+          { label: 'Kepatuhan Rantai Dingin', value: 'Suhu < 4°C Terpenuhi', color: 'text-amber-700' },
+        ];
+        notes = 'Bahan baku yang lolos QC otomatis menambahkan kuantitas kartu stok gudang bahan mentah SPPG.';
+        break;
+      }
+
+      // 18. Kartu Stok Gudang
+      case 'kartu_stok': {
+        headers = ['No', 'Kode Bahan', 'Nama Bahan Pangan', 'Kategori', 'Stok Minimum', 'Stok Saat Ini', 'Satuan', 'Estimasi Nilai Stok', 'Status Ketersediaan'];
+        let items = inventory;
+        if (searchKeyword) {
+          items = items.filter(i => i.name.toLowerCase().includes(searchKeyword.toLowerCase()) || i.category.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = items.map((i, idx) => {
+          const isLow = i.currentStock <= i.minimumStock;
+          return [
+            idx + 1,
+            i.id,
+            i.name,
+            i.category,
+            formatNumber(i.minimumStock),
+            formatNumber(i.currentStock),
+            i.unit,
+            formatRupiah(i.currentStock * (i.pricePerUnit || 15000)),
+            isLow ? 'Waspada (Reorder)' : 'Aman (Tercukupi)',
+          ];
+        });
+
+        excelData = items.map((i, idx) => ({
+          'No': idx + 1,
+          'Kode': i.id,
+          'Bahan Pangan': i.name,
+          'Kategori': i.category,
+          'Stok': i.currentStock,
+          'Min Stok': i.minimumStock,
+          'Satuan': i.unit,
+        }));
+
+        const totalStockVal = items.reduce((acc, i) => acc + i.currentStock * (i.pricePerUnit || 15000), 0);
+        metrics = [
+          { label: 'Total Item Terdaftar', value: `${items.length} SKU`, color: 'text-blue-700' },
+          { label: 'Total Valuasi Stok Gudang', value: formatRupiah(totalStockVal), color: 'text-emerald-700' },
+          { label: 'Stok Kritis / Menipis', value: `${items.filter(i => i.currentStock <= i.minimumStock).length} Item`, color: 'text-amber-700' },
+          { label: 'Metode Pengeluaran', value: 'FIFO (First In First Out)', color: 'text-purple-700' },
+        ];
+        notes = 'Seluruh mutasi keluar masuk bahan dicatat secara digital dengan prinsip FIFO guna mencegah kedaluwarsa.';
+        break;
+      }
+
+      // 19. Data Penerima Manfaat Harian
+      case 'penerima_harian': {
+        headers = ['No', 'ID Lembaga', 'Nama Sekolah / Madrasah', 'Kategori Sekolah', 'Porsi Kecil (Kls 1-3)', 'Porsi Besar (Kls 4-9)', 'Total Porsi MBG', 'Kepala Sekolah / PIC', 'Status Layanan'];
+        let insts = institutions;
+        if (selectedInstitutionId !== 'ALL') {
+          insts = insts.filter(i => i.id === selectedInstitutionId);
+        }
+        if (searchKeyword) {
+          insts = insts.filter(i => i.name.toLowerCase().includes(searchKeyword.toLowerCase()) || i.address.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = insts.map((i, idx) => [
+          idx + 1,
+          i.id,
+          i.name,
+          i.institutionType,
+          formatNumber(i.smallPortions),
+          formatNumber(i.largePortions),
+          formatNumber(i.totalPortions),
+          i.picName || 'Kepala Sekolah',
+          'Aktif Terlayani',
+        ]);
+
+        excelData = insts.map((i, idx) => ({
+          'No': idx + 1,
+          'ID Lembaga': i.id,
+          'Nama Lembaga': i.name,
+          'Kategori': i.institutionType,
+          'Porsi Kecil': i.smallPortions,
+          'Porsi Besar': i.largePortions,
+          'Total Porsi': i.totalPortions,
+          'PIC': i.picName,
+        }));
+
+        const totalBeneficiaries = insts.reduce((acc, i) => acc + i.totalPortions, 0);
+        const totalInstKecil = insts.reduce((acc, i) => acc + i.smallPortions, 0);
+        const totalInstBesar = insts.reduce((acc, i) => acc + i.largePortions, 0);
+
+        metrics = [
+          { label: 'Lembaga Penerima Terlayani', value: `${insts.length} Sekolah`, color: 'text-blue-700' },
+          { label: 'Total Penerima Manfaat', value: `${formatNumber(totalBeneficiaries)} Siswa`, color: 'text-emerald-700' },
+          { label: 'Rincian Porsi Kecil', value: `${formatNumber(totalInstKecil)} Anak`, color: 'text-purple-700' },
+          { label: 'Rincian Porsi Besar', value: `${formatNumber(totalInstBesar)} Siswa`, color: 'text-amber-700' },
+        ];
+        notes = 'Daftar penerima manfaat telah divalidasi dengan data pokok pendidikan (Dapodik / EMIS Kemenag).';
+        break;
+      }
+
+      // 20. Laporan Keuangan
+      case 'keuangan': {
+        headers = ['No', 'Tanggal', 'No. Bukti Kas', 'Jenis Transaksi', 'Kategori Anggaran', 'Uraian Transaksi', 'Penerima / Sumber', 'Jumlah (Rp)', 'Status'];
+        let txs = financialTransactions;
+        if (searchKeyword) {
+          txs = txs.filter(t => t.description.toLowerCase().includes(searchKeyword.toLowerCase()) || t.proofNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+        }
+
+        rows = txs.map((t, idx) => [
+          idx + 1,
+          formatIndonesianDate(t.date),
+          t.proofNumber,
+          t.type,
+          t.category,
+          t.description,
+          t.sourceOrRecipient,
+          formatRupiah(t.amount),
+          t.approvalStatus,
+        ]);
+
+        excelData = txs.map((t, idx) => ({
+          'No': idx + 1,
+          'Tanggal': t.date,
+          'Nomor Bukti': t.proofNumber,
+          'Jenis': t.type,
+          'Kategori': t.category,
+          'Deskripsi': t.description,
+          'Penerima': t.sourceOrRecipient,
+          'Nominal': t.amount,
+          'Status': t.approvalStatus,
+        }));
+
+        const totalIn = txs.filter(t => t.type === 'Pemasukan').reduce((acc, t) => acc + t.amount, 0);
+        const totalOut = txs.filter(t => t.type === 'Pengeluaran').reduce((acc, t) => acc + t.amount, 0);
+        metrics = [
+          { label: 'Total Pemasukan Kas', value: formatRupiah(totalIn), color: 'text-emerald-700' },
+          { label: 'Total Pengeluaran Kas', value: formatRupiah(totalOut), color: 'text-rose-700' },
+          { label: 'Saldo Kas Akhir', value: formatRupiah(totalIn - totalOut), color: 'text-blue-700' },
+          { label: 'Verifikasi Akuntansi', value: '100% Sesuai Bukti', color: 'text-slate-700' },
+        ];
+        notes = 'Seluruh pengeluaran kas didukung kuitansi bermeterai, faktur supplier, dan berita acara pembayaran sah.';
+        break;
+      }
+    }
+
+    return {
+      title: currentConfig.title,
+      code: documentRegisterNumber,
+      headers,
+      rows,
+      excelData,
+      metrics,
+      notes,
+      sourceData: currentConfig.sourceModule,
+      orientation,
+      signatures,
+    };
+  }, [
+    activeReportKey,
+    currentConfig,
+    documentRegisterNumber,
+    selectedInstitutionId,
+    searchKeyword,
+    distributionLogs,
+    outgoingDocuments,
+    distributionDeliveries,
+    todayMenu,
+    rabItems,
+    purchaseOrders,
+    qualityControlRecords,
+    inventory,
+    institutions,
+    financialTransactions,
+    washingWasteRecords,
+    sppgConfig,
+  ]);
+
+  // Filter Categories
+  const categoriesList = ['ALL', 'Distribusi & Lapangan', 'Gizi & Menu', 'Dapur & Keamanan Pangan', 'Operasional & Rantai Pasok', 'Keuangan & Tata Usaha'];
+
+  const filteredReportList = useMemo(() => {
+    return REPORT_CONFIGS.filter(r => {
+      if (categoryFilter !== 'ALL' && r.category !== categoryFilter) return false;
+      return true;
+    });
+  }, [categoryFilter]);
+
+  // Handle Export PDF
+  const handleExportPDF = () => {
     exportTableToPDF({
-      title: `Laporan Pelaksanaan Harian MBG (${reportDate})`,
+      title: reportPayload.title,
       subtitle: `Satuan Pelayanan Pemenuhan Gizi (SPPG) Probolinggo Krejengan Temenggungan 2`,
-      headers: ['Lembaga Sasaran', 'Porsi Kecil', 'Porsi Besar', 'Total Porsi', 'Waktu Tiba', 'Suhu Tiba', 'Penerima BAST'],
-      rows: distributionLogs.map(d => [
-        d.institutionName,
-        formatNumber(d.smallPortions),
-        formatNumber(d.largePortions),
-        formatNumber(d.totalPortions),
-        d.arrivalTime,
-        d.foodTempAtArrival ? `${d.foodTempAtArrival}°C` : '-',
-        d.receivedBy || 'Dalam Proses',
-      ]),
-      fileName: `Laporan_Harian_MBG_SPPG_TMG2_${reportDate}`,
+      headers: reportPayload.headers,
+      rows: reportPayload.rows,
+      fileName: `Laporan_${currentConfig.codePrefix}_SPPG_TMG2`,
       sppgConfig,
-      notes: `Menu: ${menuToday.stapleFood}, ${menuToday.animalProtein}, ${menuToday.plantProtein}, ${menuToday.vegetable}, ${menuToday.fruit}. Total terdistribusi: ${formatNumber(totalPortions)} porsi.`,
-      signerName: sppgConfig.headOfSppg,
-      signerRole: 'Kepala SPPG Temenggungan 2',
+      notes: reportPayload.notes,
+      orientation: reportPayload.orientation,
+      metaFields: [
+        { label: 'No. Register', value: reportPayload.code },
+        { label: 'Periode', value: periodLabelString },
+        { label: 'Sumber Data', value: reportPayload.sourceData },
+        { label: 'ID SPPG', value: sppgConfig.sppgId },
+      ],
+      signatures: reportPayload.signatures,
     });
   };
 
-  // Export Full Daily Report to Excel
-  const handleExportFullReportExcel = () => {
-    const dataToExport = distributionLogs.map(d => ({
-      'Tanggal': d.date,
-      'Lembaga Sasaran': d.institutionName,
-      'Porsi Kecil': d.smallPortions,
-      'Porsi Besar': d.largePortions,
-      'Total Porsi': d.totalPortions,
-      'Kendaraan': d.vehicleNumber,
-      'Pengemudi': d.driverName,
-      'Jam Berangkat': d.departureTime,
-      'Jam Tiba': d.arrivalTime,
-      'Suhu Wadah (°C)': d.foodTempAtArrival || d.foodTempAtDispatch,
-      'Penerima BAST': d.receivedBy || '-',
-      'Status': d.status,
-    }));
-    exportToExcel(dataToExport, `Laporan_Harian_MBG_${reportDate}`, 'Laporan Harian');
+  // Handle Export Excel
+  const handleExportExcel = () => {
+    exportToExcel(reportPayload.excelData, `Laporan_${currentConfig.codePrefix}_SPPG_TMG2`, currentConfig.title.slice(0, 25));
+  };
+
+  // Handle Export CSV
+  const handleExportCSV = () => {
+    exportToCSV(reportPayload.excelData, `Laporan_${currentConfig.codePrefix}_SPPG_TMG2`);
   };
 
   return (
     <div className="space-y-6">
-      {/* Title & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak) */}
+      <div className="hidden print:block mb-6">
+        <PrintHeader
+          title={reportPayload.title}
+          documentNumber={reportPayload.code}
+          date={selectedDate}
+        />
+        <div className="flex justify-between items-center text-xs text-slate-500 mb-4 pb-2 border-b border-slate-200">
+          <span>Periode Laporan: <strong>{periodLabelString}</strong></span>
+          <span>Sumber Integrasi: <strong>{reportPayload.sourceData}</strong></span>
+        </div>
+      </div>
+
+      {/* Screen Title & Quick Actions */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <FileSpreadsheet className="w-6 h-6 text-blue-900 dark:text-sky-400" />
-            Dokumentasi & Laporan Resmi BGN
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Format Pelaporan Akuntabilitas Badan Gizi Nasional (BGN) & Arsip Yayasan Hafshawaty
+          <div className="flex items-center gap-2 mb-1">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+              ID SPPG: {sppgConfig.sppgId}
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Integrasi Antarmodul Aktif
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+              Standar BGN RI 2025
+            </span>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <Printer className="w-6 h-6 text-blue-600" />
+            Pusat Laporan & Cetak Resmi SPPG
+          </h1>
+          <p className="text-sm text-slate-600 mt-1">
+            Pusat administrasi 20 laporan resmi operasional pemenuhan gizi, terhubung otomatis ke relasi ID unik antar-modul dengan pratinjau dan pengesahan sah.
           </p>
         </div>
 
+        {/* Global Export Bar */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={handleExportFullReportExcel}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+            onClick={() => setIsPreviewModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-medium transition shadow-sm border border-slate-300"
           >
-            <Download className="w-4 h-4" />
-            <span>Ekspor Excel (.xlsx)</span>
+            <Eye className="w-4 h-4 text-slate-600" />
+            <span>Pratinjau Dokumen</span>
           </button>
-          <button
-            type="button"
-            onClick={handleExportFullReportPDF}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
-          >
-            <Download className="w-4 h-4" />
-            <span>Ekspor PDF Resmi</span>
-          </button>
+
           <button
             type="button"
             onClick={triggerPrint}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-medium transition shadow-sm"
           >
             <Printer className="w-4 h-4" />
-            <span>Cetak Dokumen</span>
+            <span>Cetak Langsung</span>
           </button>
+
+          <button
+            type="button"
+            onClick={handleExportPDF}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 text-white hover:bg-rose-700 rounded-xl text-sm font-medium transition shadow-sm"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Unduh PDF Resmi</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl text-sm font-medium transition shadow-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Excel (.xlsx)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white hover:bg-slate-800 rounded-xl text-sm font-medium transition shadow-sm"
+            title="Ekspor CSV"
+          >
+            <Download className="w-4 h-4" />
+            <span>CSV</span>
+          </button>
+
+          {activeReportKey === 'flyer_menu' && onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('menu_flyer')}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700 rounded-xl text-sm font-medium transition shadow-sm animate-pulse"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Buka Generator Flyer</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Report Period Selector */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-bold text-slate-700 dark:text-slate-300">Periode Laporan:</span>
-          <div className="flex rounded-lg border border-slate-300 dark:border-slate-700 p-0.5 bg-slate-50 dark:bg-slate-800">
-            {(['harian', 'mingguan', 'bulanan'] as const).map(type => (
+      {/* FILTER PANEL */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 print:hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2 text-slate-800 font-semibold text-sm">
+            <Filter className="w-4 h-4 text-blue-600" />
+            <span>Panel Filter & Kriteria Laporan</span>
+          </div>
+          <span className="text-xs text-slate-500">
+            Terhubung ke Master Bahan, PO, QC, Pemorsian, Distribusi & Kasir
+          </span>
+        </div>
+
+        {/* Categories Tab Bar */}
+        <div className="flex flex-wrap gap-2">
+          {categoriesList.map(cat => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setCategoryFilter(cat)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                categoryFilter === cat
+                  ? 'bg-blue-900 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {cat === 'ALL' ? 'Semua Kategori (20 Laporan)' : cat}
+            </button>
+          ))}
+        </div>
+
+        {/* Filter Inputs Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+          {/* 1. Pilih Laporan */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700">Pilih Jenis Laporan (20 Modul):</label>
+            <select
+              value={activeReportKey}
+              onChange={e => setActiveReportKey(e.target.value as OfficialReportKey)}
+              className="w-full text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              {filteredReportList.map(r => (
+                <option key={r.key} value={r.key}>
+                  [{r.codePrefix}] {r.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Filter Periode */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700">Jenis Periode Waktu:</label>
+            <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+              {(['harian', 'mingguan', 'bulanan', 'periode'] as const).map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPeriodType(p)}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium capitalize transition ${
+                    periodType === p ? 'bg-white text-blue-900 shadow-sm font-semibold' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. Tanggal Picker */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700">
+              {periodType === 'harian' ? 'Tanggal Pelaksanaan:' : periodType === 'periode' ? 'Rentang Tanggal:' : 'Bulan Berjalan:'}
+            </label>
+            {periodType === 'harian' && (
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="w-full text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            )}
+            {periodType === 'periode' && (
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="w-1/2 text-xs bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900"
+                />
+                <span className="text-xs text-slate-400">-</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="w-1/2 text-xs bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900"
+                />
+              </div>
+            )}
+            {(periodType === 'mingguan' || periodType === 'bulanan') && (
+              <input
+                type="month"
+                defaultValue="2026-11"
+                className="w-full text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            )}
+          </div>
+
+          {/* 4. Filter Lembaga & Pencarian */}
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-700">Filter Lembaga / Kata Kunci:</label>
+            <div className="flex gap-2">
+              <select
+                value={selectedInstitutionId}
+                onChange={e => setSelectedInstitutionId(e.target.value)}
+                className="w-1/2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+              >
+                <option value="ALL">Semua Lembaga</option>
+                {institutions.map(inst => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.name}
+                  </option>
+                ))}
+              </select>
+              <div className="relative w-1/2">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Cari..."
+                  value={searchKeyword}
+                  onChange={e => setSearchKeyword(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* DOCUMENT PREVIEW CARD (WYSIWYG TAMPILAN RESMI PEMERINTAH) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+        {/* Document Header Status Bar */}
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-blue-900/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-800/60 rounded-xl border border-blue-600/40">
+              <FileCheck className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono uppercase text-amber-400 tracking-wider">
+                  No. Register: {reportPayload.code}
+                </span>
+                <span className="text-xs bg-blue-800 text-blue-200 px-2 py-0.5 rounded-full font-mono">
+                  {currentConfig.category}
+                </span>
+              </div>
+              <h2 className="text-lg font-bold text-white tracking-wide">
+                {reportPayload.title}
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs text-blue-200 bg-blue-900/60 px-4 py-2 rounded-xl border border-blue-700/50">
+            <div>
+              <span className="text-slate-400 block">Periode:</span>
+              <strong className="text-white">{periodLabelString}</strong>
+            </div>
+            <div className="h-6 w-px bg-blue-700" />
+            <div>
+              <span className="text-slate-400 block">Relasi Sistem:</span>
+              <strong className="text-emerald-300">{reportPayload.sourceData}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Key Metrics Banner */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 bg-slate-50/70 border-b border-slate-200">
+          {reportPayload.metrics.map((m, idx) => (
+            <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
+              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider block">
+                {m.label}
+              </span>
+              <div className={`text-xl font-bold mt-1 ${m.color || 'text-slate-900'}`}>
+                {m.value}
+              </div>
+              {m.sublabel && (
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  {m.sublabel}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Paper Document Representation */}
+        <div className="p-6 md:p-8 bg-white space-y-6">
+          {/* Official Printable Kop Surat Box */}
+          <div className="p-6 bg-white border border-slate-200 rounded-xl shadow-xs relative">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-900 via-amber-500 to-blue-900 rounded-t-xl" />
+            
+            {/* Kop Surat Header with Dual Logos */}
+            <div className="flex items-center justify-between gap-4 pb-4 border-b-2 border-slate-800">
+              {/* Left Logo: SPPG Hafshawaty */}
+              <div className="flex items-center gap-3">
+                <SPPGLogo size="md" />
+              </div>
+
+              {/* Center Text */}
+              <div className="text-center flex-1">
+                <h3 className="text-sm font-extrabold uppercase text-slate-900 tracking-wider">
+                  {sppgConfig.foundationName}
+                </h3>
+                <h2 className="text-base font-black uppercase text-blue-950 tracking-tight">
+                  {sppgConfig.sppgName}
+                </h2>
+                <p className="text-xs text-slate-600 mt-0.5 font-medium">
+                  ID SPPG: <span className="font-mono font-bold text-blue-900">{sppgConfig.sppgId}</span> | Wilayah: {sppgConfig.district}, {sppgConfig.regency}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {sppgConfig.address} | Email: {sppgConfig.email} | Telp: {sppgConfig.phone}
+                </p>
+              </div>
+
+              {/* Right Logo: BGN Logo */}
+              <div className="flex items-center gap-3">
+                <BGNLogo size="md" />
+              </div>
+            </div>
+
+            {/* Document Title Header */}
+            <div className="text-center pt-5 pb-4">
+              <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">
+                {reportPayload.title}
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Nomor: <span className="font-mono font-semibold text-slate-700">{reportPayload.code}</span>
+              </p>
+              <p className="text-xs text-slate-600 font-medium">
+                Pelaksanaan: {periodLabelString}
+              </p>
+            </div>
+
+            {/* Main Data Table */}
+            <div className="overflow-x-auto rounded-lg border border-slate-200 mt-2">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-blue-900 text-white font-semibold">
+                    {reportPayload.headers.map((h, i) => (
+                      <th key={i} className="px-3.5 py-2.5 border-b border-blue-950 whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {reportPayload.rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={reportPayload.headers.length} className="px-4 py-8 text-center text-slate-500 italic">
+                        Tidak ada catatan data operasional yang sesuai dengan kriteria filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    reportPayload.rows.map((row, rowIdx) => (
+                      <tr
+                        key={rowIdx}
+                        className={rowIdx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/60 hover:bg-slate-100/60'}
+                      >
+                        {row.map((cell, colIdx) => (
+                          <td key={colIdx} className="px-3.5 py-2.5 text-slate-800 whitespace-nowrap">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Official Notes / Verifikasi Mutu */}
+            {reportPayload.notes && (
+              <div className="mt-4 p-3 bg-blue-50/80 rounded-lg border border-blue-200 text-xs text-blue-950 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold">Catatan Verifikasi & Legalitas Dokumen:</span>
+                  <p className="text-slate-700 mt-0.5">{reportPayload.notes}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Three-Column Legalization & Signatures */}
+            <div className="mt-8 pt-6 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-6 text-center text-xs">
+              {reportPayload.signatures.map((sig, idx) => (
+                <div key={idx} className="flex flex-col items-center justify-between h-36 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-300">
+                  <div>
+                    <span className="text-slate-500 block">
+                      {idx === 2 ? `Krejengan, ${formatIndonesianDate(selectedDate)}` : 'Mengetahui / Memeriksa,'}
+                    </span>
+                    <strong className="text-slate-800 block mt-0.5">{sig.role}</strong>
+                  </div>
+
+                  <div>
+                    <strong className="text-slate-900 block underline font-bold">{sig.name}</strong>
+                    <span className="text-slate-500 font-mono text-[11px] block mt-0.5">
+                      {sig.idNum ? `NIP/ID: ${sig.idNum}` : `ID: SPPG-TMG2-${sppgConfig.sppgId}`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer Watermark / Legal disclaimer */}
+            <div className="mt-6 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+              <span>Sistem Informasi Pemenuhan Gizi (E-SPPG TMG2) • ID GFBQSYXD</span>
+              <span>Dokumen Negara Resmi • Program MBG BGN Republik Indonesia</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LIST OF ALL 20 REPORTS QUICK SELECTOR GRID */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Layers className="w-5 h-5 text-blue-600" />
+              Direktori 20 Laporan Resmi SPPG
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Klik kartu laporan di bawah ini untuk beralih pratinjau dan mencetak dokumen secara langsung.
+            </p>
+          </div>
+          <span className="text-xs font-semibold text-blue-900 bg-blue-100 px-3 py-1 rounded-full">
+            {REPORT_CONFIGS.length} Jenis Laporan Tersedia
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {REPORT_CONFIGS.map((r, idx) => {
+            const isSelected = r.key === activeReportKey;
+            return (
               <button
-                key={type}
-                onClick={() => setSelectedReportType(type)}
-                className={`px-3 py-1 rounded-md font-bold capitalize transition text-xs ${
-                  selectedReportType === type
-                    ? 'bg-blue-900 text-white shadow-xs dark:bg-sky-600'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                key={r.key}
+                type="button"
+                onClick={() => {
+                  setActiveReportKey(r.key);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className={`text-left p-3.5 rounded-xl border transition flex flex-col justify-between ${
+                  isSelected
+                    ? 'bg-blue-50 border-blue-600 shadow-sm ring-2 ring-blue-500/20'
+                    : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-slate-50/80'
                 }`}
               >
-                {type}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <Calendar className="w-4 h-4 text-slate-400" />
-          <input
-            type="date"
-            value={reportDate}
-            onChange={e => setReportDate(e.target.value)}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-          />
-        </div>
-      </div>
-
-      {/* Official Report Paper Preview Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 sm:p-10 border border-slate-200 dark:border-slate-800 shadow-md print:border-none print:shadow-none print:p-0">
-        <PrintHeader
-          title={`Laporan Akuntabilitas Penyelenggaraan MBG (${selectedReportType.toUpperCase()})`}
-          subtitle={`Tanggal: ${reportDate} • Wilayah Kerja: Kecamatan Krejengan`}
-          docNumber={`LAP-BGN/SPPG-TMG2/2026/11/${reportDate.replace(/-/g, '')}`}
-        />
-
-        {/* Section 1: Executive Summary */}
-        <div className="space-y-4 my-6 text-xs">
-          <h4 className="font-bold text-sm text-blue-950 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-1 uppercase">
-            I. Ringkasan Eksekutif Pelayanan Pemenuhan Gizi
-          </h4>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
-              <span className="text-slate-400 text-[11px]">Total Penerima Manfaat:</span>
-              <div className="text-sm font-black text-slate-900 dark:text-white mt-0.5">
-                {formatNumber(totalPortions)} Siswa
-              </div>
-            </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
-              <span className="text-slate-400 text-[11px]">Rincian Porsi K/B:</span>
-              <div className="text-sm font-black text-blue-900 dark:text-sky-400 mt-0.5">
-                {formatNumber(totalSmall)} K / {formatNumber(totalLarge)} B
-              </div>
-            </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
-              <span className="text-slate-400 text-[11px]">Total Lembaga Terlayani:</span>
-              <div className="text-sm font-black text-emerald-600 mt-0.5">
-                {institutions.length} Sekolah & Pesantren
-              </div>
-            </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
-              <span className="text-slate-400 text-[11px]">Tingkat Keberhasilan:</span>
-              <div className="text-sm font-black text-emerald-600 mt-0.5">
-                100% Sesuai Jadwal
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: Menu & Nutrition Information */}
-        <div className="space-y-3 my-6 text-xs">
-          <h4 className="font-bold text-sm text-blue-950 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-1 uppercase">
-            II. Komposisi Menu & Standar AKG Hari Ini
-          </h4>
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <div><strong>Makanan Pokok:</strong> {menuToday.stapleFood}</div>
-              <div><strong>Lauk Hewani:</strong> {menuToday.animalProtein}</div>
-              <div><strong>Lauk Nabati:</strong> {menuToday.plantProtein}</div>
-              <div><strong>Sayuran:</strong> {menuToday.vegetable}</div>
-              <div><strong>Buah Segar:</strong> {menuToday.fruit}</div>
-              <div><strong>Susu / Pelengkap:</strong> {menuToday.milkOrExtra}</div>
-            </div>
-            <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-500 flex flex-wrap gap-4 font-mono text-[11px]">
-              <span>Kalori Kecil: <strong>{menuToday.caloriesSmall} kkal</strong></span>
-              <span>Kalori Besar: <strong>{menuToday.caloriesLarge} kkal</strong></span>
-              <span>Protein: <strong>{menuToday.proteinGrams}g</strong></span>
-              <span>Food Cost / Porsi: <strong>{formatRupiah(menuToday.estimatedCostPerPortion)}</strong></span>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 3: Distribution & Delivery Logs */}
-        <div className="space-y-3 my-6 text-xs">
-          <h4 className="font-bold text-sm text-blue-950 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-1 uppercase">
-            III. Realisasi Distribusi ke 8 Lembaga Penerima
-          </h4>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border border-slate-200 dark:border-slate-700">
-              <thead className="bg-slate-100 dark:bg-slate-800 font-bold">
-                <tr>
-                  <th className="p-2">Nama Lembaga</th>
-                  <th className="p-2 text-right">Porsi Kecil</th>
-                  <th className="p-2 text-right">Porsi Besar</th>
-                  <th className="p-2 text-right">Total Porsi</th>
-                  <th className="p-2 text-center">Waktu Tiba</th>
-                  <th className="p-2 text-center">Suhu (°C)</th>
-                  <th className="p-2">Nama Penerima Sekolah</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
-                {distributionLogs.map((d, idx) => (
-                  <tr key={idx}>
-                    <td className="p-2 font-sans font-medium">{d.institutionName}</td>
-                    <td className="p-2 text-right">{d.smallPortions}</td>
-                    <td className="p-2 text-right">{d.largePortions}</td>
-                    <td className="p-2 text-right font-bold">{d.totalPortions}</td>
-                    <td className="p-2 text-center">{d.arrivalTime}</td>
-                    <td className="p-2 text-center text-emerald-600 font-bold">{d.foodTempAtArrival || d.foodTempAtDispatch}°C</td>
-                    <td className="p-2 font-sans">{d.receivedBy || 'Menunggu Serah Terima'}</td>
-                  </tr>
-                ))}
-                <tr className="bg-slate-50 dark:bg-slate-800 font-bold font-sans">
-                  <td className="p-2 font-bold">TOTAL KESELURUHAN:</td>
-                  <td className="p-2 text-right font-mono">{formatNumber(totalSmall)}</td>
-                  <td className="p-2 text-right font-mono">{formatNumber(totalLarge)}</td>
-                  <td className="p-2 text-right font-mono text-blue-900 dark:text-sky-400 font-black">{formatNumber(totalPortions)}</td>
-                  <td colSpan={3} className="p-2 text-right text-emerald-600">100% Terlayani Tuntas</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Section 4: Photo Documentation Simulation */}
-        <div className="space-y-3 my-6 text-xs print:break-inside-avoid">
-          <h4 className="font-bold text-sm text-blue-950 dark:text-white border-b border-slate-200 dark:border-slate-700 pb-1 uppercase flex items-center justify-between">
-            <span>IV. Dokumentasi Visual Kegiatan Operasional</span>
-            <span className="text-[10px] text-slate-400 font-normal">Kamera Geotag & Timestamp Valid</span>
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            {documentationPhotos.map((photo, pIdx) => (
-              <div
-                key={pIdx}
-                className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50 dark:bg-slate-800/40"
-              >
-                <div className={`h-24 ${photo.color} flex flex-col items-center justify-center text-white p-3 text-center relative`}>
-                  <ImageIcon className="w-6 h-6 opacity-60 mb-1" />
-                  <span className="text-[11px] font-bold line-clamp-1">{photo.title}</span>
-                  <span className="absolute top-2 right-2 text-[8px] bg-black/40 px-1.5 py-0.5 rounded-sm font-mono">
-                    {photo.time}
-                  </span>
-                </div>
-                <div className="p-2.5 space-y-1">
-                  <span className="text-[9px] font-bold text-sky-700 dark:text-sky-400 uppercase">
-                    {photo.tag}
-                  </span>
-                  <p className="text-[10px] text-slate-600 dark:text-slate-300 line-clamp-2">
-                    {photo.desc}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                      #{idx + 1} {r.codePrefix}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {r.defaultOrientation}
+                    </span>
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-900 line-clamp-1">
+                    {r.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
+                    {r.description}
                   </p>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Section 5: Signature & Verification Block */}
-        <div className="pt-8 grid grid-cols-3 text-center text-xs print:break-inside-avoid">
-          <div>
-            <div className="text-slate-500">Pengawas Gizi:</div>
-            <div className="font-bold text-slate-900 dark:text-white mt-14">
-              {sppgConfig.nutritionOfficer}
-            </div>
-            <div className="text-[10px] text-slate-400">Dietisien Penanggung Jawab Gizi</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Pengawas Keuangan:</div>
-            <div className="font-bold text-slate-900 dark:text-white mt-14">
-              {sppgConfig.financeOfficer}
-            </div>
-            <div className="text-[10px] text-slate-400">Verifikator Anggaran & Kas</div>
-          </div>
-          <div>
-            <div className="text-slate-500">Mengetahui & Menyetujui:</div>
-            <div className="font-bold text-slate-900 dark:text-white mt-14">
-              {sppgConfig.headOfSppg}
-            </div>
-            <div className="text-[10px] text-slate-400">Kepala SPPG Temenggungan 2</div>
-          </div>
+                <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                  <span className="text-blue-700 font-medium truncate">
+                    {r.category}
+                  </span>
+                  <ArrowRight className={`w-3.5 h-3.5 ${isSelected ? 'text-blue-600' : 'text-slate-300'}`} />
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* FULLSCREEN PREVIEW MODAL */}
+      {isPreviewModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <FileCheck className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Pratinjau Cetak: {reportPayload.title}
+                  </h3>
+                  <span className="text-xs text-slate-400 font-mono">
+                    Nomor Register: {reportPayload.code} | {periodLabelString}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportPDF}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Unduh PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={triggerPrint}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewModalOpen(false)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: Scaled paper sheet */}
+            <div className="p-6 overflow-y-auto bg-slate-100 flex justify-center">
+              <div className="bg-white p-8 rounded-lg shadow-md max-w-4xl w-full border border-slate-300 text-xs">
+                {/* Kop Surat */}
+                <div className="flex items-center justify-between pb-4 border-b-2 border-slate-900 mb-4">
+                  <SPPGLogo size="md" />
+                  <div className="text-center flex-1 px-4">
+                    <h3 className="font-extrabold text-sm uppercase text-slate-900">{sppgConfig.foundationName}</h3>
+                    <h2 className="font-black text-base uppercase text-blue-950">{sppgConfig.sppgName}</h2>
+                    <p className="text-[11px] text-slate-600">ID SPPG: {sppgConfig.sppgId} | Program MBG BGN RI</p>
+                    <p className="text-[10px] text-slate-500">{sppgConfig.address}</p>
+                  </div>
+                  <BGNLogo size="md" />
+                </div>
+
+                <div className="text-center my-4">
+                  <h3 className="font-bold text-sm text-slate-900 uppercase">{reportPayload.title}</h3>
+                  <p className="text-[11px] text-slate-500 font-mono">No: {reportPayload.code}</p>
+                </div>
+
+                {/* Table */}
+                <table className="w-full text-left border-collapse border border-slate-300 my-4 text-[11px]">
+                  <thead>
+                    <tr className="bg-blue-900 text-white">
+                      {reportPayload.headers.map((h, i) => (
+                        <th key={i} className="border border-blue-950 p-2 font-semibold">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportPayload.rows.map((row, rIdx) => (
+                      <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                        {row.map((c, cIdx) => (
+                          <td key={cIdx} className="border border-slate-300 p-2">{c}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Signatures */}
+                <div className="grid grid-cols-3 gap-4 pt-6 mt-6 border-t border-slate-200 text-center text-[11px]">
+                  {reportPayload.signatures.map((sig, sIdx) => (
+                    <div key={sIdx} className="space-y-12">
+                      <span className="block text-slate-600">{sig.role}</span>
+                      <div>
+                        <strong className="block underline text-slate-900">{sig.name}</strong>
+                        <span className="text-[10px] text-slate-400 font-mono">{sig.idNum || sppgConfig.sppgId}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

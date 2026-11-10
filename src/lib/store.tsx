@@ -34,6 +34,8 @@ import {
   IncomingLetter,
   VolunteerAbsenceRecord,
   SupplierDocument,
+  RABItem,
+  QualityControlRecord,
 } from '../types';
 import {
   initialInstitutionsData,
@@ -58,6 +60,10 @@ import {
   defaultOutgoingDocuments,
   defaultIncomingLetters,
 } from './letterTemplatesData';
+import {
+  defaultRABItems,
+  defaultQualityControlRecords,
+} from './plokData';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -141,6 +147,16 @@ interface AppContextType {
   approvePurchaseOrderHead: (id: string, approverName: string) => Promise<void>;
   updatePOQualityControl: (id: string, qcStatus: PurchaseOrder['qcStatus'], notes: string) => Promise<void>;
   receivePOToWarehouse: (id: string) => Promise<void>;
+
+  // Modul PLOK: RAB & Quality Control
+  rabItems: RABItem[];
+  addRABItem: (item: Omit<RABItem, 'id' | 'totalBudget'>) => Promise<void>;
+  updateRABItem: (id: string, item: Partial<RABItem>) => Promise<void>;
+  deleteRABItem: (id: string) => Promise<void>;
+  approveRABItem: (id: string, approverName: string) => Promise<void>;
+  qualityControlRecords: QualityControlRecord[];
+  addQualityControlRecord: (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => Promise<void>;
+  updateQualityControlRecord: (id: string, qc: Partial<QualityControlRecord>) => Promise<void>;
 
   distributionLogs: DistributionLog[];
   addDistributionLog: (log: Omit<DistributionLog, 'id'>) => Promise<void>;
@@ -1222,6 +1238,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : initialPurchaseOrders;
   });
 
+  const [rabItems, setRabItems] = useState<RABItem[]>(() => {
+    const saved = localStorage.getItem('esppg_rab_items');
+    return saved ? JSON.parse(saved) : defaultRABItems;
+  });
+
+  const [qualityControlRecords, setQualityControlRecords] = useState<QualityControlRecord[]>(() => {
+    const saved = localStorage.getItem('esppg_qc_records');
+    return saved ? JSON.parse(saved) : defaultQualityControlRecords;
+  });
+
   const [distributionLogs, setDistributionLogs] = useState<DistributionLog[]>(() => {
     const saved = localStorage.getItem('esppg_distribution_logs');
     return saved ? JSON.parse(saved) : initialDistributions;
@@ -1382,6 +1408,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem('esppg_audit_logs', JSON.stringify(auditLogs));
   }, [auditLogs]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_rab_items', JSON.stringify(rabItems));
+  }, [rabItems]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_qc_records', JSON.stringify(qualityControlRecords));
+  }, [qualityControlRecords]);
 
   useEffect(() => {
     localStorage.setItem('esppg_prep_records', JSON.stringify(prepRecords));
@@ -1890,6 +1924,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
     const newPO: PurchaseOrder = { ...po, id: 'po-' + Date.now() };
     setPurchaseOrders(prev => [newPO, ...prev]);
+
+    // Relational sync: update matching RAB items if rabId is provided
+    if (po.rabId) {
+      const totalQty = po.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+      setRabItems(prev =>
+        prev.map(r => {
+          if (r.id === po.rabId) {
+            return {
+              ...r,
+              poCreatedQuantity: (r.poCreatedQuantity || 0) + totalQty,
+              poCreatedAmount: (r.poCreatedAmount || 0) + po.totalAmount,
+            };
+          }
+          return r;
+        })
+      );
+    }
+
     await logAudit('CREATE', 'procurement', `Membuat Purchase Order baru: ${po.poNumber} (${po.supplierName})`);
     addToast('success', 'PO Berhasil Dibuat', `Purchase Order ${po.poNumber} berhasil diajukan.`);
   };
@@ -1962,6 +2014,161 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     await logAudit('UPDATE', 'inventory', `Penerimaan fisik barang PO ${po.poNumber} masuk ke stok gudang`);
     addToast('success', 'Bahan Diterima di Gudang', `Stok barang otomatis ditambahkan ke inventaris.`);
+  };
+
+  // Modul PLOK: RAB Handlers
+  const addRABItem = async (item: Omit<RABItem, 'id' | 'totalBudget'>) => {
+    const totalBudget = item.volume * item.unitPrice;
+    const newRAB: RABItem = {
+      ...item,
+      id: 'rab-' + Date.now(),
+      totalBudget,
+      poCreatedQuantity: 0,
+      poCreatedAmount: 0,
+    };
+    setRabItems(prev => [newRAB, ...prev]);
+    await logAudit('CREATE', 'procurement', `Membuat anggaran baru ${newRAB.budgetCode}: ${newRAB.itemName} senilai Rp ${totalBudget.toLocaleString('id-ID')}`);
+    addToast('success', 'RAB Ditambahkan', `Anggaran ${newRAB.budgetCode} berhasil diajukan.`);
+  };
+
+  const updateRABItem = async (id: string, item: Partial<RABItem>) => {
+    setRabItems(prev =>
+      prev.map(r => {
+        if (r.id === id) {
+          const updated = { ...r, ...item };
+          if (item.volume !== undefined || item.unitPrice !== undefined) {
+            updated.totalBudget = (updated.volume || 0) * (updated.unitPrice || 0);
+          }
+          return updated;
+        }
+        return r;
+      })
+    );
+    await logAudit('UPDATE', 'procurement', `Memperbarui anggaran RAB ID: ${id}`);
+    addToast('success', 'RAB Diperbarui', 'Data Rencana Anggaran Belanja diperbarui.');
+  };
+
+  const deleteRABItem = async (id: string) => {
+    setRabItems(prev => prev.filter(r => r.id !== id));
+    await logAudit('DELETE', 'procurement', `Menghapus anggaran RAB ID: ${id}`);
+    addToast('info', 'RAB Dihapus', 'Data anggaran berhasil dihapus.');
+  };
+
+  const approveRABItem = async (id: string, approverName: string) => {
+    setRabItems(prev =>
+      prev.map(r =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'Disetujui',
+              approvedBy: approverName,
+              approvedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+            }
+          : r
+      )
+    );
+    await logAudit('APPROVE', 'procurement', `Persetujuan RAB ID: ${id} oleh ${approverName}`);
+    addToast('success', 'RAB Disetujui', 'RAB disetujui Kepala SPPG.');
+  };
+
+  // Modul PLOK: Quality Control Handlers with Automated Stock Addition
+  const addQualityControlRecord = async (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => {
+    const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const newQC: QualityControlRecord = {
+      ...qc,
+      id: 'qc-' + Date.now(),
+      inspectedAt,
+    };
+    setQualityControlRecords(prev => [newQC, ...prev]);
+
+    // Relational sync 1: update PO status
+    setPurchaseOrders(prev =>
+      prev.map(p => {
+        if (p.id === qc.poId || p.poNumber === qc.poNumber) {
+          const nextStatus =
+            qc.status === 'Diterima' || qc.status === 'Lolos Penuh'
+              ? 'Diterima di Gudang'
+              : qc.status === 'Diterima sebagian'
+              ? 'Sebagian diterima'
+              : qc.status === 'Ditolak'
+              ? 'Ditolak'
+              : p.status;
+          return {
+            ...p,
+            qcStatus: qc.status,
+            status: nextStatus,
+            qcNotes: qc.notes,
+            qcRecords: [...(p.qcRecords || []), newQC],
+          };
+        }
+        return p;
+      })
+    );
+
+    // Relational sync 2: If accepted, increase warehouse stock automatically!
+    if (
+      (qc.status === 'Diterima' || qc.status === 'Lolos Penuh' || qc.status === 'Diterima sebagian') &&
+      qc.receivedQuantity > 0 &&
+      qc.inventoryAdded
+    ) {
+      setInventory(prev => {
+        const existingIdx = prev.findIndex(
+          i => i.name.toLowerCase() === qc.itemName.toLowerCase()
+        );
+        if (existingIdx !== -1) {
+          const updated = [...prev];
+          const curr = updated[existingIdx];
+          const nextStock = curr.currentStock + qc.receivedQuantity;
+          const newTx = {
+            id: 'tx-qc-' + Date.now(),
+            date: inspectedAt.slice(0, 10),
+            type: 'Masuk' as const,
+            quantity: qc.receivedQuantity,
+            balanceAfter: nextStock,
+            reason: `Penerimaan QC Lolos PO ${qc.poNumber} (${qc.supplierName})`,
+            pic: qc.inspectorName,
+            batchNumber: `BATCH-${Date.now().toString().slice(-6)}`,
+            expiryDate: qc.expiryDate,
+          };
+          updated[existingIdx] = {
+            ...curr,
+            currentStock: nextStock,
+            lastRestocked: inspectedAt.slice(0, 10),
+            qualityStatus: 'Baik',
+          };
+          return updated;
+        } else {
+          const newItem: InventoryItem = {
+            id: 'inv-' + Date.now(),
+            code: 'BAHAN-' + Date.now().toString().slice(-4),
+            name: qc.itemName,
+            category: 'Bahan Segar',
+            initialStock: qc.receivedQuantity,
+            currentStock: qc.receivedQuantity,
+            unit: qc.unit,
+            minimumStock: Math.round(qc.receivedQuantity * 0.2),
+            pricePerUnit: 20000,
+            storageLocation: qc.receivingTemp && qc.receivingTemp < 5 ? 'Cold Storage 1' : 'Gudang Kering A',
+            supplierName: qc.supplierName,
+            lastRestocked: inspectedAt.slice(0, 10),
+            expiryDate: qc.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+            qualityStatus: 'Baik',
+          };
+          return [newItem, ...prev];
+        }
+      });
+    }
+
+    await logAudit('CREATE', 'procurement', `Pemeriksaan QC PO ${qc.poNumber}: ${qc.itemName} status ${qc.status} (${qc.receivedQuantity} ${qc.unit})`);
+    addToast('success', 'QC Dicatat', `Pemeriksaan QC PO ${qc.poNumber} berhasil disimpan.`);
+  };
+
+  const updateQualityControlRecord = async (id: string, qc: Partial<QualityControlRecord>) => {
+    setQualityControlRecords(prev =>
+      prev.map(r => (r.id === id ? { ...r, ...qc } : r))
+    );
+    await logAudit('UPDATE', 'procurement', `Memperbarui data QC ID: ${id}`);
+    addToast('success', 'QC Diperbarui', 'Data pemeriksaan mutu diperbarui.');
   };
 
   // Distribution Tracking
@@ -2412,6 +2619,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         approvePurchaseOrderHead,
         updatePOQualityControl,
         receivePOToWarehouse,
+        rabItems,
+        addRABItem,
+        updateRABItem,
+        deleteRABItem,
+        approveRABItem,
+        qualityControlRecords,
+        addQualityControlRecord,
+        updateQualityControlRecord,
         distributionLogs,
         addDistributionLog,
         updateDistributionLog,

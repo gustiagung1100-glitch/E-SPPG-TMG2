@@ -13,6 +13,7 @@ import { Header } from './components/layout/Header';
 import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
 import { RoleSwitcher } from './components/auth/RoleSwitcher';
+import { FirebaseAuthModal } from './components/auth/FirebaseAuthModal';
 
 // Module Components
 import { DashboardModule } from './components/modules/DashboardModule';
@@ -29,12 +30,14 @@ import { LettersModule } from './components/modules/LettersModule';
 import { ReportsModule } from './components/modules/ReportsModule';
 import { SettingsModule } from './components/modules/SettingsModule';
 import { SupplierPortalModule } from './components/modules/SupplierPortalModule';
+import { MenuFlyerModule } from './components/modules/MenuFlyerModule';
 
 const moduleTitles: Record<ModuleKey, string> = {
   dashboard: 'Dashboard Terpadu',
   master_data: 'Master Data Terpadu (A-E)',
   institutions: 'Modul Penerima Manfaat & Presensi',
   menu: 'Perencanaan Menu & Gizi',
+  menu_flyer: 'Pembuat Flyer Menu Otomatis',
   procurement: 'Modul PLOK — Operasional (RAB, PO, QC)',
   supplier_portal: 'Portal Mitra Rekanan Supplier & PO',
   inventory: 'Gudang & Stok Bahan Pangan',
@@ -55,6 +58,7 @@ const MainContent: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // Auto redirect if supplier switches role
   React.useEffect(() => {
@@ -64,6 +68,18 @@ const MainContent: React.FC = () => {
       }
     }
   }, [currentUser.role, activeModule]);
+
+  // Global custom event for fast cross-module navigation (e.g. from PLOG to Flyer Generator)
+  React.useEffect(() => {
+    const handleNavigate = (e: Event) => {
+      const customEvent = e as CustomEvent<ModuleKey>;
+      if (customEvent.detail) {
+        setActiveModule(customEvent.detail);
+      }
+    };
+    window.addEventListener('navigate-module', handleNavigate);
+    return () => window.removeEventListener('navigate-module', handleNavigate);
+  }, []);
 
   const renderModule = () => {
     // Strict RBAC boundary: suppliers are restricted to supplier_portal and settings
@@ -83,6 +99,8 @@ const MainContent: React.FC = () => {
         return <InstitutionsModule />;
       case 'menu':
         return <NutritionMenuModule />;
+      case 'menu_flyer':
+        return <MenuFlyerModule />;
       case 'procurement':
         return <ProcurementModule />;
       case 'supplier_portal':
@@ -100,7 +118,7 @@ const MainContent: React.FC = () => {
       case 'letters':
         return <LettersModule />;
       case 'reports':
-        return <ReportsModule />;
+        return <ReportsModule onNavigate={mod => setActiveModule(mod)} />;
       case 'settings':
         return <SettingsModule />;
       default:
@@ -126,6 +144,7 @@ const MainContent: React.FC = () => {
           {/* Top Header */}
           <Header
             onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
             activeModuleTitle={moduleTitles[activeModule]}
           />
 
@@ -162,6 +181,10 @@ const MainContent: React.FC = () => {
       <RoleSwitcher
         isOpen={isRoleSwitcherOpen}
         onClose={() => setIsRoleSwitcherOpen(false)}
+      />
+      <FirebaseAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
       />
       <ToastContainer />
     </div>

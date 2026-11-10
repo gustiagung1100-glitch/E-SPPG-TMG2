@@ -55,7 +55,7 @@ export function exportToCSV(data: Record<string, any>[], fileName: string) {
 }
 
 /**
- * Generate PDF with official SPPG Kop Surat
+ * Generate PDF with official SPPG Kop Surat and BGN verification
  */
 export function exportTableToPDF(options: {
   title: string;
@@ -67,68 +67,135 @@ export function exportTableToPDF(options: {
   notes?: string;
   signerName?: string;
   signerRole?: string;
+  orientation?: 'portrait' | 'landscape';
+  metaFields?: Array<{ label: string; value: string }>;
+  signatures?: Array<{ role: string; name: string; idNum?: string; date?: string }>;
 }) {
-  const { title, subtitle, headers, rows, fileName, sppgConfig, notes, signerName, signerRole } = options;
+  const {
+    title,
+    subtitle,
+    headers,
+    rows,
+    fileName,
+    sppgConfig,
+    notes,
+    signerName,
+    signerRole,
+    orientation = 'portrait',
+    metaFields,
+    signatures,
+  } = options;
+
   const doc = new jsPDF({
-    orientation: 'portrait',
+    orientation,
     unit: 'mm',
     format: 'a4',
   });
 
-  // Official Kop Surat
-  doc.setFillColor(15, 23, 42); // Navy
-  doc.rect(14, 10, 182, 1.5, 'F');
+  const pageWidth = orientation === 'landscape' ? 297 : 210;
+  const centerX = pageWidth / 2;
+  const rightX = pageWidth - 14;
 
-  doc.setFontSize(14);
+  // Official Kop Surat Top Accent
+  doc.setFillColor(15, 23, 42);
+  doc.rect(14, 10, pageWidth - 28, 1.5, 'F');
+
+  // Left Emblem: SPPG Yayasan Hafshawaty Shield
+  doc.setFillColor(15, 43, 92);
+  doc.roundedRect(14, 15, 17, 22, 2.5, 2.5, 'F');
+  doc.setDrawColor(217, 119, 6);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(15, 16, 15, 20, 2, 2, 'S');
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('SPPG', 22.5, 24, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('TMG2', 22.5, 29, { align: 'center' });
+  doc.setFontSize(4.5);
+  doc.setTextColor(251, 191, 36);
+  doc.text('HAFSHAWATY', 22.5, 33, { align: 'center' });
+
+  // Center Text Header
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(sppgConfig.foundationName.toUpperCase(), 105, 18, { align: 'center' });
+  doc.text(sppgConfig.foundationName.toUpperCase(), centerX, 18, { align: 'center' });
 
-  doc.setFontSize(12);
-  doc.text(sppgConfig.sppgName.toUpperCase(), 105, 24, { align: 'center' });
+  doc.setFontSize(11);
+  doc.text(sppgConfig.sppgName.toUpperCase(), centerX, 24, { align: 'center' });
 
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text(`ID SPPG: ${sppgConfig.sppgId} | Program: ${sppgConfig.programName}`, 105, 29, { align: 'center' });
-  doc.text(sppgConfig.address, 105, 34, { align: 'center' });
-  doc.text(`Telp: ${sppgConfig.phone} | Email: ${sppgConfig.email}`, 105, 39, { align: 'center' });
+  doc.text(`ID SPPG: ${sppgConfig.sppgId} | Program: ${sppgConfig.programName}`, centerX, 29, { align: 'center' });
+  doc.text(sppgConfig.address, centerX, 34, { align: 'center' });
+  doc.text(`Telp: ${sppgConfig.phone} | Email: ${sppgConfig.email}`, centerX, 39, { align: 'center' });
+
+  // Right Emblem: Official BGN Seal Badge
+  const bgnX = rightX - 17;
+  doc.setFillColor(180, 83, 9);
+  doc.roundedRect(bgnX, 15, 17, 22, 2.5, 2.5, 'F');
+  doc.setDrawColor(251, 191, 36);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(bgnX + 1, 16, 15, 20, 2, 2, 'S');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('BGN', bgnX + 8.5, 24, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('RI', bgnX + 8.5, 29, { align: 'center' });
+  doc.setFontSize(4.5);
+  doc.setTextColor(251, 191, 36);
+  doc.text('VERIFIKASI', bgnX + 8.5, 33, { align: 'center' });
 
   // Double horizontal rule
-  doc.setDrawColor(30, 58, 138); // Dark blue line
+  doc.setDrawColor(30, 58, 138);
   doc.setLineWidth(0.8);
-  doc.line(14, 43, 196, 43);
+  doc.line(14, 43, rightX, 43);
   doc.setLineWidth(0.3);
-  doc.line(14, 44.5, 196, 44.5);
+  doc.line(14, 44.5, rightX, 44.5);
 
   // Document Title
+  let currentY = 52;
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(title.toUpperCase(), 105, 52, { align: 'center' });
+  doc.text(title.toUpperCase(), centerX, currentY, { align: 'center' });
 
   if (subtitle) {
+    currentY += 5;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text(subtitle, 105, 57, { align: 'center' });
+    doc.text(subtitle, centerX, currentY, { align: 'center' });
+  }
+
+  // Optional Meta Fields (Periode, Tanggal, Sumber Data, Register)
+  if (metaFields && metaFields.length > 0) {
+    currentY += 6;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    const metaStr = metaFields.map(m => `${m.label}: ${m.value}`).join('  |  ');
+    doc.text(metaStr, centerX, currentY, { align: 'center' });
   }
 
   // Data Table using autoTable
   autoTable(doc, {
-    startY: subtitle ? 62 : 58,
+    startY: currentY + 5,
     head: [headers],
     body: rows,
     theme: 'grid',
     headStyles: {
       fillColor: [30, 58, 138],
       textColor: [255, 255, 255],
-      fontSize: 8.5,
+      fontSize: orientation === 'landscape' ? 8 : 8.5,
       fontStyle: 'bold',
       halign: 'center',
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: orientation === 'landscape' ? 7.5 : 8,
       textColor: [30, 41, 59],
     },
     alternateRowStyles: {
@@ -145,23 +212,53 @@ export function exportTableToPDF(options: {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(100, 116, 139);
-    doc.text(`Catatan: ${notes}`, 14, finalY + 8);
+    doc.text(`Catatan Pengesahan: ${notes}`, 14, finalY + 8);
   }
 
-  // Signature Block
-  const sigY = Math.min(finalY + 18, 250);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(15, 23, 42);
-  doc.text(`Krejengan, ${new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}`, 140, sigY);
-  doc.text(signerRole || 'Kepala SPPG Temenggungan 2', 140, sigY + 5);
+  // Signature Block: Multi-column support (3-kolom standar SPPG BGN)
+  const todayStr = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  const sigY = Math.min(finalY + 16, orientation === 'landscape' ? 165 : 245);
 
-  doc.setFont('helvetica', 'bold');
-  doc.text(signerName || sppgConfig.headOfSppg, 140, sigY + 25);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`NIP / ID: SPPG-TMG2-${sppgConfig.sppgId}`, 140, sigY + 29);
+  if (signatures && signatures.length > 0) {
+    const colCount = signatures.length;
+    const availableWidth = pageWidth - 28;
+    const colWidth = availableWidth / colCount;
+
+    signatures.forEach((sig, idx) => {
+      const colCenterX = 14 + idx * colWidth + colWidth / 2;
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(15, 23, 42);
+      if (idx === colCount - 1) {
+        doc.text(`Krejengan, ${todayStr}`, colCenterX, sigY, { align: 'center' });
+      } else {
+        doc.text(`Mengetahui / Memeriksa,`, colCenterX, sigY, { align: 'center' });
+      }
+      doc.text(sig.role, colCenterX, sigY + 5, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(sig.name, colCenterX, sigY + 24, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(sig.idNum ? `NIP/ID: ${sig.idNum}` : `ID SPPG: ${sppgConfig.sppgId}`, colCenterX, sigY + 28, { align: 'center' });
+    });
+  } else {
+    // Default single column right
+    const sigX = rightX - 55;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Krejengan, ${todayStr}`, sigX, sigY);
+    doc.text(signerRole || 'Kepala SPPG Temenggungan 2', sigX, sigY + 5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(signerName || sppgConfig.headOfSppg, sigX, sigY + 24);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`NIP / ID: SPPG-TMG2-${sppgConfig.sppgId}`, sigX, sigY + 28);
+  }
 
   // Save the PDF
   doc.save(`${fileName}_${new Date().toISOString().slice(0, 10)}.pdf`);

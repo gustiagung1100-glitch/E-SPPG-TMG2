@@ -11,15 +11,18 @@ import {
   Building,
   Clock,
   Sparkles,
+  KeyRound,
 } from 'lucide-react';
 import { RoleType } from '../../types';
+import { SPPGLogo, BGNLogo } from '../common/OfficialLogos';
 
 interface HeaderProps {
   onOpenRoleSwitcher: () => void;
+  onOpenAuthModal?: () => void;
   activeModuleTitle: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, activeModuleTitle }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthModal, activeModuleTitle }) => {
   const {
     currentUser,
     switchRole,
@@ -67,8 +70,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, activeModule
         {/* Left: Organization Identity & Active Module */}
         <div className="flex items-center gap-3 min-w-0">
           <div className="hidden sm:flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-950 dark:bg-sky-600 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-              TMG2
+            <div className="shrink-0 flex items-center justify-center">
+              <SPPGLogo size="sm" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -105,6 +108,19 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, activeModule
 
         {/* Right: Notifications, Dark Mode, Role Switcher & User Profile */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Firebase Auth & Account Button */}
+          {onOpenAuthModal && (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-semibold transition shadow-xs"
+              title="Autentikasi Firebase & Akun Petugas"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-sky-300" />
+              <span className="hidden sm:inline">Akun & Auth</span>
+            </button>
+          )}
+
           {/* Quick Demo Role Switcher Button */}
           <button
             type="button"
