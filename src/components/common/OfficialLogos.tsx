@@ -105,94 +105,68 @@ export const BGNLogo: React.FC<LogoProps> = ({ className = '', size = 'md', show
 /**
  * Official Logo SPPG Yayasan Hafshawaty
  * SPPG Probolinggo Krejengan Temenggungan 2 (ID: GFBQSYXD)
+ * Diperbarui menggunakan emblem resmi Badan Gizi Nasional (BGN) RI
  */
 export const SPPGLogo: React.FC<LogoProps> = ({ className = '', size = 'md', showText = false }) => {
+  const [imageError, setImageError] = React.useState(false);
   const sizeClass = sizeMap[size];
 
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
-      <svg
-        viewBox="0 0 100 100"
-        className={`${sizeClass} shrink-0 drop-shadow-xs`}
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <linearGradient id="sppgBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#0f2b5c" />
-            <stop offset="60%" stopColor="#1e3a8a" />
-            <stop offset="100%" stopColor="#0284c7" />
-          </linearGradient>
-          <linearGradient id="sppgGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#fde047" />
-            <stop offset="50%" stopColor="#eab308" />
-            <stop offset="100%" stopColor="#ca8a04" />
-          </linearGradient>
-        </defs>
-
-        {/* Shield Container */}
-        <path
-          d="M50 6 C76 6, 92 14, 92 36 C92 70, 68 90, 50 96 C32 90, 8 70, 8 36 C8 14, 24 6, 50 6 Z"
-          fill="url(#sppgBlueGrad)"
+      {!imageError ? (
+        <img
+          src="/logo-sppg.png"
+          alt="Logo SPPG Temenggungan 2 - Badan Gizi Nasional"
+          className={`${sizeClass} object-contain shrink-0 drop-shadow-xs rounded-full hover:scale-105 transition-transform duration-200`}
+          onError={() => setImageError(true)}
         />
-        <path
-          d="M50 11 C72 11, 86 18, 86 37 C86 67, 65 84, 50 90 C35 84, 14 67, 14 37 C14 18, 28 11, 50 11 Z"
-          fill="none"
-          stroke="url(#sppgGoldGrad)"
-          strokeWidth="2"
-        />
-
-        {/* Crescent and Star / Hafshawaty Islamic & Service Emblem */}
-        <path
-          d="M53 22 C44 23 37 31 38 41 C39 50 48 57 58 55 C50 56 42 51 41 43 C40 34 45 26 53 22 Z"
-          fill="url(#sppgGoldGrad)"
-        />
-        <polygon
-          points="58,28 60,33 65,33 61,36 63,41 58,38 53,41 55,36 51,33 56,33"
-          fill="url(#sppgGoldGrad)"
-        />
-
-        {/* Center Nutrition Symbol: Nutri-Plate with Fork and Leaf */}
-        <circle cx="50" cy="58" r="16" fill="#ffffff" />
-        <circle cx="50" cy="58" r="14.5" fill="none" stroke="#10b981" strokeWidth="1.5" />
-        <path
-          d="M44 50 L44 56 C44 58 45.5 59 47 59 L47 67 C47 68 48 68.5 48.5 68.5 C49 68.5 50 68 50 67 L50 59 C51.5 59 53 58 53 56 L53 50 M46 50 L46 55 M48.5 50 L48.5 55 M51 50 L51 55"
-          fill="none"
-          stroke="#1e3a8a"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M53 52 C53 48 56 46 59 46 C59 50 56 53 53 52 Z"
-          fill="#10b981"
-        />
-
-        {/* Ribbon at bottom */}
-        <path d="M22 75 L78 75 L73 84 L27 84 Z" fill="url(#sppgGoldGrad)" />
-        <text
-          x="50"
-          y="81.5"
-          fontSize="5.5"
-          fontWeight="900"
-          fill="#0f2b5c"
-          textAnchor="middle"
-          fontFamily="system-ui, sans-serif"
-          letterSpacing="0.4"
+      ) : (
+        <svg
+          viewBox="0 0 100 100"
+          className={`${sizeClass} shrink-0 drop-shadow-xs`}
+          xmlns="http://www.w3.org/2000/svg"
         >
-          HAFSHAWATY
-        </text>
-        <text
-          x="50"
-          y="89"
-          fontSize="4.2"
-          fontWeight="bold"
-          fill="#ffffff"
-          textAnchor="middle"
-          fontFamily="system-ui, sans-serif"
-          letterSpacing="0.5"
-        >
-          SPPG TMG2
-        </text>
-      </svg>
+          <defs>
+            <linearGradient id="sppgBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#0f2b5c" />
+              <stop offset="60%" stopColor="#1e3a8a" />
+              <stop offset="100%" stopColor="#0284c7" />
+            </linearGradient>
+            <linearGradient id="sppgGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#fde047" />
+              <stop offset="50%" stopColor="#eab308" />
+              <stop offset="100%" stopColor="#ca8a04" />
+            </linearGradient>
+          </defs>
+
+          {/* Circular Badge Container */}
+          <circle cx="50" cy="50" r="48" fill="url(#sppgBlueGrad)" stroke="url(#sppgGoldGrad)" strokeWidth="3" />
+          <circle cx="50" cy="50" r="42" fill="none" stroke="#ffffff" strokeWidth="1" strokeDasharray="3,2" />
+
+          {/* Nutrition Emblem: Garudapada & Nutri-Plate */}
+          <circle cx="50" cy="50" r="22" fill="#ffffff" />
+          <circle cx="50" cy="50" r="20" fill="none" stroke="#10b981" strokeWidth="1.8" />
+          <path
+            d="M44 42 L44 48 C44 50 46 52 48 52 L48 58 M52 58 L52 52 C54 52 56 50 56 48 L56 42"
+            stroke="#1e3a8a"
+            strokeWidth="1.8"
+            fill="none"
+            strokeLinecap="round"
+          />
+          <circle cx="50" cy="38" r="3" fill="#f59e0b" />
+          <text
+            x="50"
+            y="76"
+            fontSize="5.5"
+            fontWeight="bold"
+            fill="#ffffff"
+            textAnchor="middle"
+            fontFamily="system-ui, sans-serif"
+          >
+            SPPG TMG2
+          </text>
+        </svg>
+      )}
 
       {showText && (
         <div className="flex flex-col text-left leading-tight">

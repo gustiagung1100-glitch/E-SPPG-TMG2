@@ -113,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
             <button
               type="button"
               onClick={onOpenAuthModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-semibold transition shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-950 active:scale-95 text-white rounded-lg text-xs font-semibold transition-all shadow-xs border border-blue-800"
               title="Autentikasi Firebase & Akun Petugas"
             >
               <KeyRound className="w-3.5 h-3.5 text-sky-300" />
@@ -125,20 +125,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
           <button
             type="button"
             onClick={onOpenRoleSwitcher}
-            className="flex items-center gap-2 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 border border-sky-200 dark:border-sky-800 rounded-lg text-sky-800 dark:text-sky-300 text-xs font-semibold transition"
+            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 bg-sky-50 hover:bg-sky-100/80 active:scale-95 dark:bg-sky-950/50 dark:hover:bg-sky-900/60 border border-sky-200/90 dark:border-sky-800/90 rounded-lg text-sky-900 dark:text-sky-300 text-xs font-semibold transition-all shadow-2xs"
             title="Ganti peran pengguna simulasi"
           >
-            <Shield className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+            <Shield className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
             <span className="hidden md:inline">Ganti Peran:</span>
-            <span className="font-bold underline">{currentUser.role}</span>
-            <ChevronDown className="w-3 h-3 opacity-70" />
+            <span className="font-bold underline decoration-sky-400 underline-offset-2 truncate max-w-[120px]">{currentUser.role}</span>
+            <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
           </button>
 
           {/* Dark Mode Toggle */}
           <button
             type="button"
             onClick={toggleDarkMode}
-            className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            className="p-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 active:scale-90 dark:hover:bg-slate-800 rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
             aria-label="Toggle dark mode"
           >
             {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
@@ -149,12 +149,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
             <button
               type="button"
               onClick={() => setShowNotifications(prev => !prev)}
-              className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition relative"
+              className="p-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 active:scale-90 dark:hover:bg-slate-800 rounded-lg transition-all border border-transparent hover:border-slate-200 dark:hover:border-slate-700 relative"
               aria-label="Notifikasi sistem"
             >
               <Bell className="w-4 h-4" />
               {totalAlerts > 0 && (
-                <span className="absolute top-1 right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                <span className="absolute top-1 right-1 w-4 h-4 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse tabular-nums shadow-xs">
                   {totalAlerts}
                 </span>
               )}

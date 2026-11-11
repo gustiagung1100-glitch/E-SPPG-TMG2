@@ -270,11 +270,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {sections.map((section, sIdx) => (
             <div key={sIdx}>
               {!isCollapsed && (
-                <div className="px-3 pb-2 text-[10px] font-bold tracking-wider text-sky-400 uppercase">
+                <div className="px-3 pb-1.5 text-[10px] font-extrabold tracking-wider text-sky-400/90 uppercase select-none">
                   {section.title}
                 </div>
               )}
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {section.items.map(item => {
                   const isActive = activeModule === item.key;
                   return (
@@ -284,23 +284,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onSelectModule(item.key);
                         onCloseMobile();
                       }}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all relative ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-150 relative group ${
                         isActive
-                          ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
+                          ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/40 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:bg-white before:rounded-r-sm'
                           : 'text-slate-300 hover:bg-blue-900/60 hover:text-white'
                       } ${isCollapsed ? 'justify-center' : 'justify-between'}`}
                       title={item.label}
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        {item.icon}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`transition-transform duration-150 ${isActive ? 'scale-105' : 'group-hover:scale-105'}`}>
+                          {item.icon}
+                        </span>
                         {!isCollapsed && (
-                          <span className="truncate">{item.label}</span>
+                          <span className="truncate tracking-tight">{item.label}</span>
                         )}
                       </div>
 
                       {item.badge !== undefined && !isCollapsed && (
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
                             item.badgeColor || 'bg-sky-400 text-blue-950'
                           }`}
                         >
@@ -310,7 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                       {/* Dot badge on collapsed */}
                       {item.badge !== undefined && isCollapsed && (
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500" />
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                       )}
                     </button>
                   );

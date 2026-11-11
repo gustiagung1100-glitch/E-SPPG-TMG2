@@ -23,7 +23,9 @@ import {
   Eye,
   RotateCcw,
   Sparkle,
+  Wand2,
 } from 'lucide-react';
+import { removeOmprengBackground } from '../../lib/imageCutout';
 
 export const MenuFlyerModule: React.FC = () => {
   const { menuItems, portioningRecords, sppgConfig } = useApp();
@@ -102,6 +104,44 @@ export const MenuFlyerModule: React.FC = () => {
   const [smallPhotoCaption, setSmallPhotoCaption] = useState<string>('Ompreng Porsi Kecil (PAUD & SD 1-3)');
   const [largePhotoCaption, setLargePhotoCaption] = useState<string>('Ompreng Porsi Besar (SD 4-6, SMP, SMA, Santri)');
 
+  // Automatic Background Removal Feature (Hapus Background Otomatis Ompreng & Makanan)
+  const [autoRemoveBg, setAutoRemoveBg] = useState<boolean>(true);
+  const [removeBgSmall, setRemoveBgSmall] = useState<boolean>(true);
+  const [removeBgLarge, setRemoveBgLarge] = useState<boolean>(true);
+  const [cutoutSmallUrl, setCutoutSmallUrl] = useState<string | null>(null);
+  const [cutoutLargeUrl, setCutoutLargeUrl] = useState<string | null>(null);
+  const [isProcessingCutoutSmall, setIsProcessingCutoutSmall] = useState<boolean>(false);
+  const [isProcessingCutoutLarge, setIsProcessingCutoutLarge] = useState<boolean>(false);
+  const [cutoutTolerance, setCutoutTolerance] = useState<number>(38);
+
+  // Background Removal Processor for Porsi Kecil
+  const processSmallPhotoCutout = async (url: string, tolerance = cutoutTolerance) => {
+    if (!url) return;
+    setIsProcessingCutoutSmall(true);
+    try {
+      const cutout = await removeOmprengBackground(url, { tolerance, feather: 18 });
+      setCutoutSmallUrl(cutout);
+    } catch (err) {
+      console.error('Failed to process cutout for small photo:', err);
+    } finally {
+      setIsProcessingCutoutSmall(false);
+    }
+  };
+
+  // Background Removal Processor for Porsi Besar
+  const processLargePhotoCutout = async (url: string, tolerance = cutoutTolerance) => {
+    if (!url) return;
+    setIsProcessingCutoutLarge(true);
+    try {
+      const cutout = await removeOmprengBackground(url, { tolerance, feather: 18 });
+      setCutoutLargeUrl(cutout);
+    } catch (err) {
+      console.error('Failed to process cutout for large photo:', err);
+    } finally {
+      setIsProcessingCutoutLarge(false);
+    }
+  };
+
   // Sync photos when active menu/portioning changes
   useEffect(() => {
     if (activePortioning?.smallPortionPhoto) {
@@ -112,13 +152,43 @@ export const MenuFlyerModule: React.FC = () => {
     }
   }, [activePortioning, selectedMenuId]);
 
+  // Trigger background removal when small photo changes
+  useEffect(() => {
+    if (autoRemoveBg && smallPhotoUrl) {
+      processSmallPhotoCutout(smallPhotoUrl, cutoutTolerance);
+    } else if (!autoRemoveBg) {
+      setCutoutSmallUrl(null);
+    }
+  }, [smallPhotoUrl, autoRemoveBg]);
+
+  // Trigger background removal when large photo changes
+  useEffect(() => {
+    if (autoRemoveBg && largePhotoUrl) {
+      processLargePhotoCutout(largePhotoUrl, cutoutTolerance);
+    } else if (!autoRemoveBg) {
+      setCutoutLargeUrl(null);
+    }
+  }, [largePhotoUrl, autoRemoveBg]);
+
+  // Active displayed photos based on background removal status
+  const displayedSmallPhoto =
+    autoRemoveBg && removeBgSmall && cutoutSmallUrl ? cutoutSmallUrl : smallPhotoUrl;
+  const displayedLargePhoto =
+    autoRemoveBg && removeBgLarge && cutoutLargeUrl ? cutoutLargeUrl : largePhotoUrl;
+  const isSmallCutoutActive = autoRemoveBg && removeBgSmall && Boolean(cutoutSmallUrl);
+  const isLargeCutoutActive = autoRemoveBg && removeBgLarge && Boolean(cutoutLargeUrl);
+
   // Handle Photo Upload for Porsi Kecil
   const handleUploadSmallPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = () => {
-        setSmallPhotoUrl(reader.result as string);
+        const resultUrl = reader.result as string;
+        setSmallPhotoUrl(resultUrl);
+        if (autoRemoveBg) {
+          processSmallPhotoCutout(resultUrl, cutoutTolerance);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -130,7 +200,11 @@ export const MenuFlyerModule: React.FC = () => {
     if (file) {
       const reader = new FileReader();
       reader.onload = () => {
-        setLargePhotoUrl(reader.result as string);
+        const resultUrl = reader.result as string;
+        setLargePhotoUrl(resultUrl);
+        if (autoRemoveBg) {
+          processLargePhotoCutout(resultUrl, cutoutTolerance);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -140,6 +214,10 @@ export const MenuFlyerModule: React.FC = () => {
   const handleResetPhotos = () => {
     setSmallPhotoUrl(defaultSmallPortionPhoto);
     setLargePhotoUrl(defaultLargePortionPhoto);
+    if (autoRemoveBg) {
+      processSmallPhotoCutout(defaultSmallPortionPhoto, cutoutTolerance);
+      processLargePhotoCutout(defaultLargePortionPhoto, cutoutTolerance);
+    }
   };
 
   // Handle Download PNG
@@ -423,6 +501,137 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                   />
                 </div>
               </div>
+            </div>
+
+            {/* FITUR HAPUS BACKGROUND OTOMATIS (OMPRENG & ISI MAKANAN SAJA) */}
+            <div className="p-3.5 rounded-xl bg-linear-to-r from-emerald-50 via-teal-50 to-sky-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-sky-950/40 border border-emerald-200 dark:border-emerald-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-600 text-white shadow-xs">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-emerald-950 dark:text-emerald-200 uppercase tracking-wide">
+                      Hapus Background Foto Otomatis
+                    </h4>
+                    <p className="text-[10px] text-emerald-800 dark:text-emerald-300">
+                      Hanya ompreng stainless & makanan yang ditampilkan (tanpa meja dapur)
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoRemoveBg}
+                    onChange={e => setAutoRemoveBg(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {autoRemoveBg && (
+                <div className="space-y-2.5 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/60 text-xs">
+                  {/* Status Banner */}
+                  <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-emerald-200 dark:border-emerald-800/80 text-[11px] flex items-center justify-between">
+                    <span className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      Status Cutout Aktif
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">
+                      Ompreng Terisolasi
+                    </span>
+                  </div>
+
+                  {/* Individual Controls */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                      <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-slate-800 dark:text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={removeBgSmall}
+                          onChange={e => setRemoveBgSmall(e.target.checked)}
+                          className="rounded text-emerald-600 focus:ring-emerald-600"
+                        />
+                        <span>Porsi Kecil</span>
+                      </label>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500">Ompreng PAUD/SD</span>
+                        {isProcessingCutoutSmall ? (
+                          <span className="text-emerald-600 font-bold flex items-center gap-0.5 animate-pulse">
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Proses
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => processSmallPhotoCutout(smallPhotoUrl)}
+                            className="text-emerald-700 dark:text-sky-400 font-bold hover:underline"
+                          >
+                            Proses Ulang
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
+                      <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-slate-800 dark:text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={removeBgLarge}
+                          onChange={e => setRemoveBgLarge(e.target.checked)}
+                          className="rounded text-emerald-600 focus:ring-emerald-600"
+                        />
+                        <span>Porsi Besar</span>
+                      </label>
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500">Ompreng Santri</span>
+                        {isProcessingCutoutLarge ? (
+                          <span className="text-emerald-600 font-bold flex items-center gap-0.5 animate-pulse">
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Proses
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => processLargePhotoCutout(largePhotoUrl)}
+                            className="text-emerald-700 dark:text-sky-400 font-bold hover:underline"
+                          >
+                            Proses Ulang
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cutout Tolerance Slider */}
+                  <div className="p-2 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-400">
+                      <span>Sensitivitas Isolasi Ompreng:</span>
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                        {cutoutTolerance}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={20}
+                      max={60}
+                      step={2}
+                      value={cutoutTolerance}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        setCutoutTolerance(val);
+                        processSmallPhotoCutout(smallPhotoUrl, val);
+                        processLargePhotoCutout(largePhotoUrl, val);
+                      }}
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-400">
+                      <span>Presisi</span>
+                      <span>Standar (38)</span>
+                      <span>Bersih Total</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Mode Tata Letak Foto di Flyer */}
@@ -802,23 +1011,46 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                     {photoLayoutMode === 'dual_both' ? (
                       <div className="grid grid-cols-2 gap-3.5">
                         {/* FOTO 1: PORSI KECIL */}
-                        <div className="relative rounded-2xl overflow-hidden shadow-md border-2 border-blue-200 group bg-slate-900">
+                        <div
+                          className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
+                            isSmallCutoutActive
+                              ? 'border-2 border-blue-400 bg-radial from-slate-100 via-sky-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-2.5 min-h-[220px]'
+                              : 'border-2 border-blue-200 bg-slate-900'
+                          }`}
+                        >
                           <img
-                            src={smallPhotoUrl}
+                            src={displayedSmallPhoto}
                             alt="Dokumentasi Porsi Kecil"
-                            className="w-full h-52 sm:h-56 object-cover object-center group-hover:scale-103 transition duration-500"
+                            className={`w-full h-52 sm:h-56 transition duration-500 ${
+                              isSmallCutoutActive
+                                ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.32)] contrast-105'
+                                : 'object-cover object-center group-hover:scale-103'
+                            }`}
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+                          {!isSmallCutoutActive && (
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
+                          )}
 
                           {/* Top Badge */}
-                          <div className="absolute top-2.5 left-2.5">
+                          <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5">
                             <span className="px-2.5 py-1 rounded-full bg-blue-900/90 text-white font-bold text-[10px] shadow-sm backdrop-blur-xs flex items-center gap-1">
                               👶 Porsi Kecil • PAUD & SD 1-3
                             </span>
+                            {isSmallCutoutActive && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[9px] shadow-xs flex items-center gap-0.5">
+                                <Sparkles className="w-2.5 h-2.5" /> Ompreng Saja
+                              </span>
+                            )}
                           </div>
 
                           {/* Bottom Info */}
-                          <div className="absolute bottom-2.5 left-2.5 right-2.5 text-white">
+                          <div
+                            className={`absolute bottom-2.5 left-2.5 right-2.5 text-white ${
+                              isSmallCutoutActive
+                                ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2 border border-white/10 shadow-sm'
+                                : ''
+                            }`}
+                          >
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-black text-amber-300">
                                 ~{activePortioning?.smallPortionWeightGrams || 395} Gram
@@ -834,23 +1066,46 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                         </div>
 
                         {/* FOTO 2: PORSI BESAR */}
-                        <div className="relative rounded-2xl overflow-hidden shadow-md border-2 border-emerald-300 group bg-slate-900">
+                        <div
+                          className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
+                            isLargeCutoutActive
+                              ? 'border-2 border-emerald-400 bg-radial from-slate-100 via-emerald-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-2.5 min-h-[220px]'
+                              : 'border-2 border-emerald-300 bg-slate-900'
+                          }`}
+                        >
                           <img
-                            src={largePhotoUrl}
+                            src={displayedLargePhoto}
                             alt="Dokumentasi Porsi Besar"
-                            className="w-full h-52 sm:h-56 object-cover object-center group-hover:scale-103 transition duration-500"
+                            className={`w-full h-52 sm:h-56 transition duration-500 ${
+                              isLargeCutoutActive
+                                ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.32)] contrast-105'
+                                : 'object-cover object-center group-hover:scale-103'
+                            }`}
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+                          {!isLargeCutoutActive && (
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
+                          )}
 
                           {/* Top Badge */}
-                          <div className="absolute top-2.5 left-2.5">
+                          <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5">
                             <span className="px-2.5 py-1 rounded-full bg-emerald-800/90 text-white font-bold text-[10px] shadow-sm backdrop-blur-xs flex items-center gap-1">
                               🧑‍🎓 Porsi Besar • SD 4-6, SMP, SMA
                             </span>
+                            {isLargeCutoutActive && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[9px] shadow-xs flex items-center gap-0.5">
+                                <Sparkles className="w-2.5 h-2.5" /> Ompreng Saja
+                              </span>
+                            )}
                           </div>
 
                           {/* Bottom Info */}
-                          <div className="absolute bottom-2.5 left-2.5 right-2.5 text-white">
+                          <div
+                            className={`absolute bottom-2.5 left-2.5 right-2.5 text-white ${
+                              isLargeCutoutActive
+                                ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2 border border-white/10 shadow-sm'
+                                : ''
+                            }`}
+                          >
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-black text-emerald-300">
                                 ~{activePortioning?.largePortionWeightGrams || 585} Gram
@@ -867,38 +1122,84 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                       </div>
                     ) : photoLayoutMode === 'small_only' ? (
                       /* SINGLE PHOTO: SMALL ONLY */
-                      <div className="relative rounded-2xl overflow-hidden shadow-md border-2 border-blue-200 group bg-slate-900">
+                      <div
+                        className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
+                          isSmallCutoutActive
+                            ? 'border-2 border-blue-400 bg-radial from-slate-100 via-sky-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-4 min-h-[260px]'
+                            : 'border-2 border-blue-200 bg-slate-900'
+                        }`}
+                      >
                         <img
-                          src={smallPhotoUrl}
+                          src={displayedSmallPhoto}
                           alt="Porsi Kecil"
-                          className="w-full h-64 object-cover object-center group-hover:scale-102 transition duration-500"
+                          className={`w-full h-64 transition duration-500 ${
+                            isSmallCutoutActive
+                              ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_16px_30px_rgba(0,0,0,0.35)]'
+                              : 'object-cover object-center group-hover:scale-102'
+                          }`}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
-                        <div className="absolute top-3 left-3">
+                        {!isSmallCutoutActive && (
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
+                        )}
+                        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
                           <span className="px-3 py-1 rounded-full bg-blue-900 text-white font-bold text-xs shadow-sm">
                             👶 Porsi Kecil • PAUD & SD Kelas 1-3 (~{activePortioning?.smallPortionWeightGrams || 395}g)
                           </span>
+                          {isSmallCutoutActive && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[10px] shadow-xs flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" /> Ompreng Saja (Tanpa Meja)
+                            </span>
+                          )}
                         </div>
-                        <div className="absolute bottom-3 left-3 right-3 text-white">
+                        <div
+                          className={`absolute bottom-3 left-3 right-3 text-white ${
+                            isSmallCutoutActive
+                              ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2.5 border border-white/10 shadow-sm'
+                              : ''
+                          }`}
+                        >
                           <h2 className="text-lg font-black">{activeMenu.stapleFood} (Porsi Kecil)</h2>
                           <p className="text-xs text-slate-200">{smallPhotoCaption}</p>
                         </div>
                       </div>
                     ) : (
                       /* SINGLE PHOTO: LARGE ONLY */
-                      <div className="relative rounded-2xl overflow-hidden shadow-md border-2 border-emerald-300 group bg-slate-900">
+                      <div
+                        className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
+                          isLargeCutoutActive
+                            ? 'border-2 border-emerald-400 bg-radial from-slate-100 via-emerald-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-4 min-h-[260px]'
+                            : 'border-2 border-emerald-300 bg-slate-900'
+                        }`}
+                      >
                         <img
-                          src={largePhotoUrl}
+                          src={displayedLargePhoto}
                           alt="Porsi Besar"
-                          className="w-full h-64 object-cover object-center group-hover:scale-102 transition duration-500"
+                          className={`w-full h-64 transition duration-500 ${
+                            isLargeCutoutActive
+                              ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_16px_30px_rgba(0,0,0,0.35)]'
+                              : 'object-cover object-center group-hover:scale-102'
+                          }`}
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
-                        <div className="absolute top-3 left-3">
+                        {!isLargeCutoutActive && (
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
+                        )}
+                        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
                           <span className="px-3 py-1 rounded-full bg-emerald-800 text-white font-bold text-xs shadow-sm">
                             🧑‍🎓 Porsi Besar • SD 4-6, SMP, SMA & Santri (~{activePortioning?.largePortionWeightGrams || 585}g)
                           </span>
+                          {isLargeCutoutActive && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[10px] shadow-xs flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" /> Ompreng Saja (Tanpa Meja)
+                            </span>
+                          )}
                         </div>
-                        <div className="absolute bottom-3 left-3 right-3 text-white">
+                        <div
+                          className={`absolute bottom-3 left-3 right-3 text-white ${
+                            isLargeCutoutActive
+                              ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2.5 border border-white/10 shadow-sm'
+                              : ''
+                          }`}
+                        >
                           <h2 className="text-lg font-black">{activeMenu.stapleFood} (Porsi Besar)</h2>
                           <p className="text-xs text-slate-200">{largePhotoCaption}</p>
                         </div>

@@ -79,13 +79,13 @@ export const SimpleBarChart: React.FC<BarChartProps> = ({
             >
               {/* Tooltip */}
               {isHovered && (
-                <div className="absolute -top-10 z-20 bg-slate-900 text-white text-[11px] py-1 px-2.5 rounded-md shadow-lg whitespace-nowrap pointer-events-none">
-                  <div className="font-semibold">{item.label}</div>
-                  <div>
+                <div className="absolute -top-12 z-20 bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1.5 px-3 rounded-lg shadow-xl border border-slate-700/60 whitespace-nowrap pointer-events-none tabular-nums animate-in fade-in zoom-in-95 duration-100">
+                  <div className="font-bold text-sky-400">{item.label}</div>
+                  <div className="text-slate-200">
                     {primaryLabel}: {valueFormatter(item.value)}
                   </div>
                   {item.secondaryValue !== undefined && secondaryLabel && (
-                    <div>
+                    <div className="text-sky-300">
                       {secondaryLabel}: {valueFormatter(item.secondaryValue)}
                     </div>
                   )}
@@ -183,12 +183,12 @@ export const DonutChart: React.FC<DonutChartProps> = ({
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
             {centerValue && (
-              <span className="text-base font-bold text-slate-900 dark:text-white leading-none">
+              <span className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white leading-none tabular-nums">
                 {centerValue}
               </span>
             )}
             {centerLabel && (
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 uppercase font-semibold tracking-wider">
                 {centerLabel}
               </span>
             )}
@@ -196,14 +196,14 @@ export const DonutChart: React.FC<DonutChartProps> = ({
         </div>
 
         {/* Legend */}
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 space-y-2 tabular-nums">
           {data.map((item, idx) => {
             const pct = Math.round((item.value / total) * 100);
             return (
               <div key={idx} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <span
-                    className="w-3 h-3 rounded-xs shrink-0"
+                    className="w-3 h-3 rounded-xs shrink-0 shadow-2xs"
                     style={{ backgroundColor: item.color }}
                   />
                   <span className="text-slate-700 dark:text-slate-300 font-medium">
@@ -211,10 +211,10 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-900 dark:text-white">
+                  <span className="font-bold text-slate-900 dark:text-white">
                     {formatNumber(item.value)}
                   </span>
-                  <span className="text-slate-400 text-[11px]">({pct}%)</span>
+                  <span className="text-slate-400 text-[11px] font-mono">({pct}%)</span>
                 </div>
               </div>
             );
@@ -301,11 +301,11 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
                 />
 
                 {/* Tooltip */}
-                <div className="opacity-0 group-hover:opacity-100 transition absolute -top-8 bg-slate-900 text-white text-[10px] py-1 px-2 rounded-md shadow-md pointer-events-none whitespace-nowrap z-20">
-                  {item.label}: {formatRupiah(item.actual)}
+                <div className="opacity-0 group-hover:opacity-100 transition-all duration-150 absolute -top-9 bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1 px-2.5 rounded-lg shadow-xl border border-slate-700/60 pointer-events-none whitespace-nowrap z-20 tabular-nums">
+                  <span className="font-bold text-sky-300">{item.label}</span>: {formatRupiah(item.actual)}
                 </div>
 
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-2">
                   {item.label}
                 </span>
               </div>
