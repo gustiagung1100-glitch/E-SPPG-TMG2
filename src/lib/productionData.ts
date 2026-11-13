@@ -18,8 +18,14 @@ import {
 export const defaultFacilityTemperatures: FacilityTemperatures = {
   prepRoomTemp: 21.5,
   prepRoomPhoto: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=500&q=80',
+  portioningRoomTemp: 21.5,
+  portioningRoomPhoto: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=500&q=80',
   cookingRoomTemp: 26.0,
   cookingRoomPhoto: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=500&q=80',
+  wetWarehouseTemp: 14.5,
+  wetWarehousePhoto: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=500&q=80',
+  dryWarehouseTemp: 23.0,
+  dryWarehousePhoto: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=500&q=80',
   freezer1Temp: -19.5,
   freezer1Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
   freezer2Temp: -20.2,
@@ -65,7 +71,10 @@ export const defaultPrepRecords: PreparationInspectionRecord[] = [
     facilityTemps: {
       ...defaultFacilityTemperatures,
       prepRoomTemp: 21.0,
+      portioningRoomTemp: 21.0,
       cookingRoomTemp: 25.5,
+      wetWarehouseTemp: 14.0,
+      dryWarehouseTemp: 22.8,
       freezer1Temp: -19.0,
       freezer2Temp: -20.5,
       fridge1Temp: 5.0,
@@ -223,7 +232,10 @@ export const defaultPortioningRecords: PortioningInspectionRecord[] = [
     facilityTemps: {
       ...defaultFacilityTemperatures,
       prepRoomTemp: 22.0,
+      portioningRoomTemp: 22.0,
       cookingRoomTemp: 26.5,
+      wetWarehouseTemp: 14.2,
+      dryWarehouseTemp: 23.2,
     },
     smallPortionWeightGrams: 395, // Standar 380-410g
     largePortionWeightGrams: 585, // Standar 560-600g
@@ -273,6 +285,7 @@ export const defaultDistributionDeliveries: DistributionDeliveryRecord[] = [
     bastNumber: 'BAST/MBG-TMG2/2026/11/0401',
     picName: 'Drs. Slamet Hariyanto (Kepala Sekolah)',
     status: 'Selesai Serah Terima',
+    facilityTemps: { ...defaultFacilityTemperatures },
     notes: 'Penerimaan tepat waktu 40 menit sebelum jam istirahat. PIC melakukan uji organoleptik dengan hasil rasa sangat baik, suhu boks makanan saat tiba 64.5°C.',
   },
   {
@@ -425,6 +438,7 @@ export const defaultWashingWasteRecords: WashingWasteRecord[] = [
     },
     totalWasteWeight: 27.0, // kg
     unit: 'kg',
+    facilityTemps: { ...defaultFacilityTemperatures },
     notes: 'Sisa makanan dari 2.850 porsi = 27 kg (~9.4 gram per siswa / sisa hanya 2.1% dari total produksi). Sisa terbanyak adalah nasi pada porsi kelas 1-2 SD dan kuah sayur sop. Seluruh sisa dipilah untuk pakan ternak warga sekitar (Zero Waste).',
     sterilizationChecked: true,
   },

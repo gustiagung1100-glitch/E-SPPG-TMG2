@@ -404,7 +404,15 @@ export interface ProductionLogDocument extends BaseEntityMetadata {
 }
 
 export interface TemperatureLogDocument extends BaseEntityMetadata {
-  logType: 'Suhu Inti Masakan' | 'Suhu Pemorsian' | 'Suhu Ruang Steril' | 'Suhu Chiller' | 'Suhu Freezer';
+  logType:
+    | 'Suhu Inti Masakan'
+    | 'Suhu Pemorsian'
+    | 'Suhu Ruang Pemorsian'
+    | 'Suhu Ruang Steril'
+    | 'Suhu Gudang Basah'
+    | 'Suhu Gudang Kering'
+    | 'Suhu Chiller'
+    | 'Suhu Freezer';
   targetEntityName: string; // e.g. "Ayam Madu Wajan 1", "Cleanroom Pemorsian", "Cold Storage 1"
   measuredTemperature: number;
   standardMin?: number;

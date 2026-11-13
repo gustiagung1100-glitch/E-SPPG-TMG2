@@ -16,10 +16,26 @@ export const formatNumber = (val: number): string => {
   return new Intl.NumberFormat('id-ID').format(val || 0);
 };
 
+export const parseLocalDate = (dateStr?: string): Date | null => {
+  if (!dateStr) return null;
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return new Date(Number(y), Number(m) - 1, Number(d));
+  }
+  const dmyMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(dateStr.trim());
+  if (dmyMatch) {
+    const [, d, m, y] = dmyMatch;
+    return new Date(Number(y), Number(m) - 1, Number(d));
+  }
+  const parsed = new Date(dateStr);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
 export const formatIndonesianDate = (dateStr?: string): string => {
   if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
+  const d = parseLocalDate(dateStr);
+  if (!d) return dateStr;
   return new Intl.DateTimeFormat('id-ID', {
     weekday: 'long',
     day: 'numeric',
@@ -54,10 +70,65 @@ export function exportToCSV(data: Record<string, any>[], fileName: string) {
   document.body.removeChild(link);
 }
 
+export interface TableCellImage {
+  label: string;
+  url: string;
+}
+
+export interface TableImageCell {
+  rowIndex: number;
+  colIndex: number;
+  images: TableCellImage[];
+}
+
+async function loadImageUrlAsJpegDataUrl(url: string): Promise<string | null> {
+  if (!url || typeof url !== 'string') return null;
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (val: string | null) => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
+    const timer = window.setTimeout(() => finish(null), 4000);
+    const img = new Image();
+    if (!url.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => {
+      window.clearTimeout(timer);
+      try {
+        const canvas = document.createElement('canvas');
+        const targetSize = 140;
+        const ratio = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
+        canvas.width = ratio >= 1 ? targetSize : Math.max(40, Math.round(targetSize * ratio));
+        canvas.height = ratio >= 1 ? Math.max(40, Math.round(targetSize / ratio)) : targetSize;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          finish(canvas.toDataURL('image/jpeg', 0.85));
+        } else {
+          finish(url.startsWith('data:image/') ? url : null);
+        }
+      } catch {
+        finish(url.startsWith('data:image/') ? url : null);
+      }
+    };
+    img.onerror = () => {
+      window.clearTimeout(timer);
+      finish(url.startsWith('data:image/') ? url : null);
+    };
+    img.src = url;
+  });
+}
+
 /**
  * Generate PDF with official SPPG Kop Surat and BGN verification
  */
-export function exportTableToPDF(options: {
+export async function exportTableToPDF(options: {
   title: string;
   subtitle?: string;
   headers: string[];
@@ -70,6 +141,7 @@ export function exportTableToPDF(options: {
   orientation?: 'portrait' | 'landscape';
   metaFields?: Array<{ label: string; value: string }>;
   signatures?: Array<{ role: string; name: string; idNum?: string; date?: string }>;
+  imageCells?: TableImageCell[];
 }) {
   const {
     title,
@@ -84,7 +156,33 @@ export function exportTableToPDF(options: {
     orientation = 'portrait',
     metaFields,
     signatures,
+    imageCells = [],
   } = options;
+
+  // Preload cell images if provided
+  const resolvedImageMap = new Map<string, Array<{ label: string; dataUrl: string }>>();
+  if (imageCells.length > 0) {
+    const uniqueUrls = Array.from(
+      new Set(imageCells.flatMap(cell => cell.images.map(img => img.url)).filter(Boolean))
+    );
+    const urlToDataMap = new Map<string, string | null>();
+    await Promise.all(
+      uniqueUrls.map(async u => {
+        urlToDataMap.set(u, await loadImageUrlAsJpegDataUrl(u));
+      })
+    );
+    imageCells.forEach(cell => {
+      const loaded = cell.images
+        .map(img => {
+          const dataUrl = urlToDataMap.get(img.url);
+          return dataUrl ? { label: img.label, dataUrl } : null;
+        })
+        .filter((x): x is { label: string; dataUrl: string } => Boolean(x));
+      if (loaded.length > 0) {
+        resolvedImageMap.set(`${cell.rowIndex}:${cell.colIndex}`, loaded);
+      }
+    });
+  }
 
   const doc = new jsPDF({
     orientation,
@@ -197,12 +295,58 @@ export function exportTableToPDF(options: {
     bodyStyles: {
       fontSize: orientation === 'landscape' ? 7.5 : 8,
       textColor: [30, 41, 59],
+      valign: 'middle',
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
     styles: {
       cellPadding: 2,
+    },
+    didParseCell: data => {
+      if (data.section === 'body') {
+        const imgs = resolvedImageMap.get(`${data.row.index}:${data.column.index}`);
+        if (imgs && imgs.length > 0) {
+          data.cell.text = [''];
+          data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight || 0, 16);
+          data.cell.styles.minCellWidth = Math.max(
+            data.cell.styles.minCellWidth || 0,
+            Math.min(imgs.length, 5) * 10.5 + 4
+          );
+        }
+      }
+    },
+    didDrawCell: data => {
+      if (data.section === 'body') {
+        const imgs = resolvedImageMap.get(`${data.row.index}:${data.column.index}`);
+        if (imgs && imgs.length > 0) {
+          const maxShow = Math.min(imgs.length, 5);
+          const thumbSize = 9;
+          const gap = 1.4;
+          let drawX = data.cell.x + 2;
+          const drawY = data.cell.y + 1.8;
+          for (let i = 0; i < maxShow; i++) {
+            const item = imgs[i];
+            if (drawX + thumbSize > data.cell.x + data.cell.width - 1.5) break;
+            try {
+              const fmt = item.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+              doc.addImage(item.dataUrl, fmt, drawX, drawY, thumbSize, thumbSize);
+              doc.setDrawColor(203, 213, 225);
+              doc.setLineWidth(0.2);
+              doc.rect(drawX, drawY, thumbSize, thumbSize, 'S');
+              doc.setFontSize(5);
+              doc.setFont('helvetica', 'normal');
+              doc.setTextColor(71, 85, 105);
+              doc.text(item.label.slice(0, 6), drawX + thumbSize / 2, drawY + thumbSize + 2.5, {
+                align: 'center',
+              });
+            } catch {
+              // Ignore invalid image frame
+            }
+            drawX += thumbSize + gap;
+          }
+        }
+      }
     },
   });
 

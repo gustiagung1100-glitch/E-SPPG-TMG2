@@ -19,7 +19,6 @@ import {
   Flame,
   CheckCircle2,
   Clock,
-  Sparkles,
   ArrowRight,
 } from 'lucide-react';
 import { ModuleKey } from '../../types';
@@ -105,12 +104,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
   // Chart Data: Budget Usage Breakdown from actual financial transactions
   const categoryColors: Record<string, string> = {
-    'Bahan Baku': '#1e3a8a',
-    'Operasional Dapur': '#f59e0b',
-    'Transport & Logistik': '#10b981',
-    'Gaji & Honor': '#0284c7',
-    'Administrasi & ATK': '#8b5cf6',
-    'Lainnya': '#64748b',
+    'Bahan Baku': '#142B4A',
+    'Operasional Dapur': '#D97706',
+    'Transport & Logistik': '#16A34A',
+    'Gaji & Honor': '#0F766E',
+    'Administrasi & ATK': '#2563EB',
+    'Lainnya': '#64748B',
   };
   const expenseTransactions = financialTransactions.filter(t => t.type === 'Pengeluaran');
   const categoryTotals = expenseTransactions.reduce((acc, t) => {
@@ -123,11 +122,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
       ? Object.entries(categoryTotals).map(([cat, val]) => ({
           label: cat,
           value: val,
-          color: categoryColors[cat] || '#0284c7',
+          color: categoryColors[cat] || '#0F766E',
         }))
       : [
-          { label: 'Bahan Baku (Food Cost)', value: totalPOAmount, color: '#1e3a8a' },
-          { label: 'Operasional & Insentif', value: Math.max(0, totalRAB - totalPOAmount), color: '#0284c7' },
+          { label: 'Bahan Baku (Food Cost)', value: totalPOAmount, color: '#142B4A' },
+          { label: 'Operasional & Insentif', value: Math.max(0, totalRAB - totalPOAmount), color: '#0F766E' },
         ];
 
   // Chart Data: Food Cost Realization vs Target from menuItems
@@ -139,66 +138,67 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
   // Chart Data: Cash In vs Cash Out
   const cashFlowBarData = [
-    { label: 'Termin I BGN', value: totalIncome / 1000000, color: '#10b981' },
-    { label: 'Pengeluaran Nov', value: totalExpense / 1000000, color: '#f43f5e' },
-    { label: 'Saldo Kas', value: cashBalance / 1000000, color: '#0284c7' },
+    { label: 'Termin I BGN', value: totalIncome / 1000000, color: '#16A34A' },
+    { label: 'Pengeluaran Nov', value: totalExpense / 1000000, color: '#DC2626' },
+    { label: 'Saldo Kas', value: cashBalance / 1000000, color: '#0F766E' },
   ];
 
   return (
     <div className="space-y-6">
       {/* Top Banner Notice */}
-      <div className="bg-linear-to-r from-blue-950 via-blue-900 to-sky-900 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+      <div className="bg-linear-to-r from-[#142B4A] via-[#142B4A] to-[#0F766E] rounded-2xl p-6 text-white shadow-md border border-white/10 relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 text-xs font-semibold mb-2 border border-sky-400/30">
-              <Sparkles className="w-3.5 h-3.5" />
+            <div className="text-[11px] font-bold uppercase tracking-widest text-[#F2D58B] mb-1.5">
               Sistem ERP SPPG Aktif & Terverifikasi
             </div>
-            <h2 className="text-xl md:text-2xl font-black tracking-tight">
+            <h2 className="text-xl md:text-2xl font-extrabold tracking-tight text-white">
               {sppgConfig.sppgName}
             </h2>
-            <p className="text-xs md:text-sm text-sky-200 mt-1 max-w-2xl leading-relaxed">
+            <p className="text-xs md:text-sm text-slate-200 mt-1 max-w-2xl leading-relaxed">
               Pusat komando dan kendali terpadu Program Makan Bergizi Gratis (MBG) Kecamatan Krejengan.
               Pengelolaan gizi, rantai pasok, dapur, armada distribusi, dan akuntabilitas keuangan secara real-time.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
               onClick={() => onNavigate('reports')}
-              className="px-4 py-2 bg-white text-blue-950 hover:bg-sky-50 rounded-xl text-xs font-bold shadow-md transition"
+              className="px-4 py-2.5 bg-white text-[#142B4A] hover:bg-[#F4F7FA] rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap"
             >
               Laporan Harian BGN
             </button>
             <button
               type="button"
               onClick={() => onNavigate('distribution')}
-              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-md transition"
+              className="px-4 py-2.5 bg-[#0F766E] hover:bg-teal-600 text-white border border-white/15 rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap"
             >
               Pantau Distribusi
             </button>
           </div>
         </div>
 
-        {/* Ambient background decoration */}
-        <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+        {/* Subtle geometric highlight */}
+        <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
       </div>
 
       {/* Critical Operational Action Alerts */}
       {(criticalStockItems.length > 0 || pendingPOs.length > 0 || absentVolunteers.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
           {criticalStockItems.length > 0 && (
             <div
               onClick={() => onNavigate('inventory')}
-              className="cursor-pointer bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl p-3.5 flex items-start gap-3 hover:shadow-xs transition"
+              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#DC2626]/30 dark:border-rose-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
             >
-              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="p-2 rounded-lg bg-[#DC2626]/10 text-[#DC2626] shrink-0">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
               <div>
-                <h5 className="text-xs font-bold text-rose-900 dark:text-rose-200">
+                <h5 className="text-xs font-bold text-[#1F2937] dark:text-rose-200">
                   {criticalStockItems.length} Bahan di Bawah Minimum
                 </h5>
-                <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5">
+                <p className="text-[11px] text-[#64748B] dark:text-rose-300 mt-0.5">
                   {criticalStockItems.map(i => i.name).join(', ')}. Segera lakukan restock!
                 </p>
               </div>
@@ -208,14 +208,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           {pendingPOs.length > 0 && (
             <div
               onClick={() => onNavigate('procurement')}
-              className="cursor-pointer bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl p-3.5 flex items-start gap-3 hover:shadow-xs transition"
+              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-amber-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
             >
-              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
+                <Clock className="w-4 h-4" />
+              </div>
               <div>
-                <h5 className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                <h5 className="text-xs font-bold text-[#1F2937] dark:text-amber-200">
                   {pendingPOs.length} PO Menunggu Persetujuan
                 </h5>
-                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                <p className="text-[11px] text-[#64748B] dark:text-amber-300 mt-0.5">
                   Menunggu verifikasi Pengawas Keuangan / Kepala SPPG.
                 </p>
               </div>
@@ -225,14 +227,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           {absentVolunteers.length > 0 && (
             <div
               onClick={() => onNavigate('volunteers')}
-              className="cursor-pointer bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900 rounded-xl p-3.5 flex items-start gap-3 hover:shadow-xs transition"
+              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-orange-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
             >
-              <UserX className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+              <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
+                <UserX className="w-4 h-4" />
+              </div>
               <div>
-                <h5 className="text-xs font-bold text-orange-900 dark:text-orange-200">
+                <h5 className="text-xs font-bold text-[#1F2937] dark:text-orange-200">
                   {absentVolunteers.length} Relawan Tidak Hadir
                 </h5>
-                <p className="text-[11px] text-orange-700 dark:text-orange-300 mt-0.5">
+                <p className="text-[11px] text-[#64748B] dark:text-orange-300 mt-0.5">
                   {absentVolunteers.map(v => `${v.volunteerName} (${v.status})`).join(', ')}.
                 </p>
               </div>
@@ -243,7 +247,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
       {/* Row 1: Key Beneficiary & Portion Statistics */}
       <div>
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
           1. Penerima Manfaat & Kapasitas Porsi
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -251,7 +255,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total Penerima Manfaat"
             value={`${formatNumber(totalRecipients)} Siswa`}
             subtitle="Target harian terealisasi 100%"
-            icon={<Users className="w-5 h-5 text-blue-900 dark:text-sky-400" />}
+            icon={<Users className="w-5 h-5 text-[#142B4A] dark:text-sky-400" />}
             badge={{ text: 'Aktif MBG', color: 'blue' }}
             accentColor="navy"
             onClick={() => onNavigate('institutions')}
@@ -260,7 +264,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Jumlah Lembaga"
             value={`${totalInstitutions} Lembaga`}
             subtitle="SD, MI, SMP, MTs, SMK, Pesantren"
-            icon={<School className="w-5 h-5 text-sky-600" />}
+            icon={<School className="w-5 h-5 text-[#0F766E] dark:text-teal-400" />}
             badge={{ text: 'Krejengan', color: 'emerald' }}
             accentColor="sky"
             onClick={() => onNavigate('institutions')}
@@ -269,7 +273,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total Porsi Kecil"
             value={`${formatNumber(totalSmallPortions)} Porsi`}
             subtitle="PAUD/TK & SD Kelas 1-3 (~620 kkal)"
-            icon={<Utensils className="w-5 h-5 text-emerald-600" />}
+            icon={<Utensils className="w-5 h-5 text-[#16A34A] dark:text-emerald-400" />}
             badge={{
               text: totalRecipients > 0 ? `${((totalSmallPortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
               color: 'emerald',
@@ -281,7 +285,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total Porsi Besar"
             value={`${formatNumber(totalLargePortions)} Porsi`}
             subtitle="SD Kelas 4-6, SMP, SMA (~875 kkal)"
-            icon={<Utensils className="w-5 h-5 text-indigo-600" />}
+            icon={<Utensils className="w-5 h-5 text-[#2563EB] dark:text-blue-400" />}
             badge={{
               text: totalRecipients > 0 ? `${((totalLargePortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
               color: 'blue',
@@ -293,7 +297,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total Porsi Harian"
             value={`${formatNumber(totalRecipients)} Porsi`}
             subtitle={`Alokasi hari ini (${menuToday.dayName || 'MBG'})`}
-            icon={<ChefHat className="w-5 h-5 text-amber-600" />}
+            icon={<ChefHat className="w-5 h-5 text-[#D97706] dark:text-amber-400" />}
             badge={{ text: 'Tercapai', color: 'amber' }}
             accentColor="amber"
             onClick={() => onNavigate('production')}
@@ -304,89 +308,89 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
       {/* Row 2: Menu Hari Ini & Divisi Dapur Progress */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Menu Hari Ini Card */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-[#16A34A]/10 text-[#16A34A] dark:bg-emerald-950 dark:text-emerald-400">
                   <Utensils className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
                     Menu Gizi Hari Ini
                   </h4>
-                  <span className="text-[11px] text-slate-500 font-mono">
+                  <span className="text-[11px] text-[#64748B] font-mono">
                     Kode: {menuToday.menuCode}
                   </span>
                 </div>
               </div>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[#16A34A]/10 text-[#16A34A] dark:bg-emerald-950 dark:text-emerald-300 border border-[#16A34A]/20">
                 {menuToday.status}
               </span>
             </div>
 
             <div className="mt-4 space-y-2 text-xs">
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Pokok:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[#64748B] w-24 shrink-0">Pokok:</span>
+                <span className="font-semibold text-[#1F2937] dark:text-slate-200">
                   {menuToday.stapleFood}
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Lauk Hewani:</span>
-                <span className="font-semibold text-blue-900 dark:text-sky-400">
+                <span className="text-[#64748B] w-24 shrink-0">Lauk Hewani:</span>
+                <span className="font-semibold text-[#142B4A] dark:text-teal-400">
                   {menuToday.animalProtein}
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Lauk Nabati:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[#64748B] w-24 shrink-0">Lauk Nabati:</span>
+                <span className="font-semibold text-[#1F2937] dark:text-slate-200">
                   {menuToday.plantProtein}
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Sayuran:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[#64748B] w-24 shrink-0">Sayuran:</span>
+                <span className="font-semibold text-[#1F2937] dark:text-slate-200">
                   {menuToday.vegetable}
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Buah Segar:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[#64748B] w-24 shrink-0">Buah Segar:</span>
+                <span className="font-semibold text-[#1F2937] dark:text-slate-200">
                   {menuToday.fruit}
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <span className="text-slate-400 w-24 shrink-0">Pelengkap:</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[#64748B] w-24 shrink-0">Pelengkap:</span>
+                <span className="font-semibold text-[#1F2937] dark:text-slate-200">
                   {menuToday.milkOrExtra}
                 </span>
               </div>
             </div>
 
             {/* Nutrition metrics badge */}
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-4 gap-2 text-center">
-              <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg">
-                <div className="text-[10px] text-slate-400">Kalori (K/B)</div>
-                <div className="text-xs font-bold text-slate-900 dark:text-white">
-                  620 / 875 kkal
+            <div className="mt-4 pt-3 border-t border-[#E2E8F0] dark:border-slate-800 grid grid-cols-4 gap-2 text-center tabular-nums">
+              <div className="bg-[#F4F7FA] dark:bg-slate-800 p-2 rounded-lg border border-[#E2E8F0]/60 dark:border-slate-700">
+                <div className="text-[10px] text-[#64748B]">Kalori (K/B)</div>
+                <div className="text-xs font-bold text-[#1F2937] dark:text-white">
+                  620 / 875
                 </div>
               </div>
-              <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg">
-                <div className="text-[10px] text-slate-400">Protein</div>
-                <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+              <div className="bg-[#F4F7FA] dark:bg-slate-800 p-2 rounded-lg border border-[#E2E8F0]/60 dark:border-slate-700">
+                <div className="text-[10px] text-[#64748B]">Protein</div>
+                <div className="text-xs font-bold text-[#16A34A] dark:text-emerald-400">
                   {menuToday.proteinGrams}g
                 </div>
               </div>
-              <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg">
-                <div className="text-[10px] text-slate-400">Karbohidrat</div>
-                <div className="text-xs font-bold text-amber-600 dark:text-amber-400">
+              <div className="bg-[#F4F7FA] dark:bg-slate-800 p-2 rounded-lg border border-[#E2E8F0]/60 dark:border-slate-700">
+                <div className="text-[10px] text-[#64748B]">Karbohidrat</div>
+                <div className="text-xs font-bold text-[#D97706] dark:text-amber-400">
                   {menuToday.carbGrams}g
                 </div>
               </div>
-              <div className="bg-slate-50 dark:bg-slate-800 p-2 rounded-lg">
-                <div className="text-[10px] text-slate-400">Food Cost</div>
-                <div className="text-xs font-bold text-blue-900 dark:text-sky-400">
+              <div className="bg-[#F4F7FA] dark:bg-slate-800 p-2 rounded-lg border border-[#E2E8F0]/60 dark:border-slate-700">
+                <div className="text-[10px] text-[#64748B]">Food Cost</div>
+                <div className="text-xs font-bold text-[#142B4A] dark:text-teal-400">
                   {formatRupiah(menuToday.estimatedCostPerPortion)}
                 </div>
               </div>
@@ -397,7 +401,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             <button
               type="button"
               onClick={() => onNavigate('menu')}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-[#F4F7FA] hover:bg-[#E2E8F0]/70 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#142B4A] dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
             >
               <span>Kelola Siklus Menu Lengkap ({activeMenuCount} Hari)</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -406,40 +410,40 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
         </div>
 
         {/* Progres Tugas Divisi Dapur */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-300">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-[#142B4A]/10 text-[#142B4A] dark:bg-slate-800 dark:text-teal-400">
                   <Flame className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
                     Progres Tugas Divisi Dapur
                   </h4>
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-[11px] text-[#64748B]">
                     SOP & Kecepatan Alur Produksi Harian
                   </span>
                 </div>
               </div>
-              <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+              <span className="text-xs font-mono font-bold text-[#16A34A] dark:text-emerald-400">
                 Live Status
               </span>
             </div>
 
-            <div className="mt-4 space-y-3.5">
+            <div className="mt-4 space-y-3.5 tabular-nums">
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-[#1F2937] dark:text-slate-300">
                     Divisi Persiapan (Bahan, Potong, Cuci)
                   </span>
-                  <span className="font-mono font-bold text-emerald-600">
+                  <span className="font-mono font-bold text-[#16A34A]">
                     {kitchenProgress.preparation}% Selesai
                   </span>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-[#F4F7FA] dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
                     style={{ width: `${kitchenProgress.preparation}%` }}
                   />
                 </div>
@@ -447,16 +451,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-[#1F2937] dark:text-slate-300">
                     Divisi Pengolahan (Memasak & Uji Suhu &gt; 75°C)
                   </span>
-                  <span className="font-mono font-bold text-emerald-600">
+                  <span className="font-mono font-bold text-[#16A34A]">
                     {kitchenProgress.cooking}% Selesai
                   </span>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-[#F4F7FA] dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                    className="bg-[#16A34A] h-full rounded-full transition-all duration-500"
                     style={{ width: `${kitchenProgress.cooking}%` }}
                   />
                 </div>
@@ -464,16 +468,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-[#1F2937] dark:text-slate-300">
                     Divisi Pemorsian (Penimbangan & Seal Boks)
                   </span>
-                  <span className="font-mono font-bold text-blue-900 dark:text-sky-400">
+                  <span className="font-mono font-bold text-[#142B4A] dark:text-sky-400">
                     {kitchenProgress.portioning}% Berjalan
                   </span>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-[#F4F7FA] dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-blue-900 dark:bg-sky-500 h-full rounded-full transition-all duration-500"
+                    className="bg-[#142B4A] dark:bg-sky-500 h-full rounded-full transition-all duration-500"
                     style={{ width: `${kitchenProgress.portioning}%` }}
                   />
                 </div>
@@ -481,16 +485,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-[#1F2937] dark:text-slate-300">
                     Divisi Distribusi (Armada & Pengiriman Sekolah)
                   </span>
-                  <span className="font-mono font-bold text-sky-600">
+                  <span className="font-mono font-bold text-[#0F766E] dark:text-teal-400">
                     {kitchenProgress.distribution}% Terkirim
                   </span>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-[#F4F7FA] dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-sky-500 h-full rounded-full transition-all duration-500"
+                    className="bg-[#0F766E] h-full rounded-full transition-all duration-500"
                     style={{ width: `${kitchenProgress.distribution}%` }}
                   />
                 </div>
@@ -498,27 +502,27 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold text-[#1F2937] dark:text-slate-300">
                     Divisi Cuci Ompreng (Sterilisasi Air Panas)
                   </span>
-                  <span className="font-mono font-bold text-amber-600">
+                  <span className="font-mono font-bold text-[#D97706]">
                     {kitchenProgress.washing}% Berjalan
                   </span>
                 </div>
-                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-[#F4F7FA] dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                    className="bg-[#D97706] h-full rounded-full transition-all duration-500"
                     style={{ width: `${kitchenProgress.washing}%` }}
                   />
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+            <div className="mt-4 pt-3 border-t border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5 text-[#16A34A] dark:text-emerald-400 font-medium">
                 <CheckCircle2 className="w-4 h-4" /> Uji Organoleptik Chef: Lolos
               </span>
-              <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+              <span className="flex items-center gap-1.5 text-[#16A34A] dark:text-emerald-400 font-medium">
                 <CheckCircle2 className="w-4 h-4" /> Suhu Pengiriman: 68.5°C
               </span>
             </div>
@@ -528,7 +532,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             <button
               type="button"
               onClick={() => onNavigate('production')}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-[#F4F7FA] hover:bg-[#E2E8F0]/70 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#142B4A] dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
             >
               <span>Lihat Detail Produksi Dapur</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -537,66 +541,66 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
         </div>
 
         {/* Status Distribusi & Logistik Harian */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-[#2563EB]/10 text-[#2563EB] dark:bg-blue-950 dark:text-blue-300">
                   <Truck className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
                     Status Distribusi Armada
                   </h4>
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-[11px] text-[#64748B]">
                     6 Armada Melayani 8 Lembaga
                   </span>
                 </div>
               </div>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-md bg-[#2563EB]/10 dark:bg-blue-950 text-[#2563EB] dark:text-blue-300 border border-[#2563EB]/20">
                 {deliveredCount} / 8 Tiba
               </span>
             </div>
 
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
+            <div className="mt-4 space-y-3 tabular-nums">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-[#16A34A]/8 dark:bg-emerald-950/40 border border-[#16A34A]/20 dark:border-emerald-900">
                 <div className="flex items-center gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-[#16A34A]" />
+                  <span className="text-xs font-bold text-[#1F2937] dark:text-emerald-200">
                     Selesai Serah Terima (BAST Sah)
                   </span>
                 </div>
-                <span className="text-sm font-black text-emerald-700 dark:text-emerald-400">
+                <span className="text-sm font-extrabold text-[#16A34A] dark:text-emerald-400">
                   {deliveredCount} Sekolah
                 </span>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded-lg bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-[#2563EB]/8 dark:bg-blue-950/40 border border-[#2563EB]/20 dark:border-blue-900">
                 <div className="flex items-center gap-2.5">
-                  <Truck className="w-4 h-4 text-sky-600 animate-bounce" />
-                  <span className="text-xs font-bold text-sky-900 dark:text-sky-200">
+                  <Truck className="w-4 h-4 text-[#2563EB]" />
+                  <span className="text-xs font-bold text-[#1F2937] dark:text-blue-200">
                     Dalam Perjalanan (On Transit)
                   </span>
                 </div>
-                <span className="text-sm font-black text-sky-700 dark:text-sky-400">
+                <span className="text-sm font-extrabold text-[#2563EB] dark:text-blue-400">
                   {inTransitCount} Sekolah
                 </span>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-[#F4F7FA] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700">
                 <div className="flex items-center gap-2.5">
-                  <Clock className="w-4 h-4 text-slate-500" />
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <Clock className="w-4 h-4 text-[#64748B]" />
+                  <span className="text-xs font-bold text-[#1F2937] dark:text-slate-300">
                     Kloter Siang (SMP/SMA/MA)
                   </span>
                 </div>
-                <span className="text-sm font-black text-slate-600 dark:text-slate-400">
+                <span className="text-sm font-extrabold text-[#64748B] dark:text-slate-400">
                   {scheduledCount} Sekolah
                 </span>
               </div>
             </div>
 
-            <div className="mt-4 text-[11px] text-slate-500 leading-relaxed">
+            <div className="mt-4 text-[11px] text-[#64748B] leading-relaxed">
               * Seluruh pengemudi dibekali termometer digital food grade dan Surat Jalan resmi ber-Kop SPPG TMG2.
             </div>
           </div>
@@ -605,7 +609,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             <button
               type="button"
               onClick={() => onNavigate('distribution')}
-              className="w-full py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 bg-[#F4F7FA] hover:bg-[#E2E8F0]/70 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#142B4A] dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5"
             >
               <span>Buka Log Serah Terima & Surat Jalan</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -616,7 +620,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
       {/* Row 3: Financial & Rantai Pasok Overview */}
       <div>
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
           2. Keuangan, Pengadaan & Gudang Bahan Pangan
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -624,7 +628,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total RAB Harian"
             value={formatRupiah(totalRAB)}
             subtitle="Plafon BGN 2.850 Porsi x Rp 15rb"
-            icon={<Wallet className="w-5 h-5 text-blue-900 dark:text-sky-400" />}
+            icon={<Wallet className="w-5 h-5 text-[#142B4A] dark:text-sky-400" />}
             badge={{ text: 'Plafon', color: 'blue' }}
             accentColor="navy"
             onClick={() => onNavigate('finance')}
@@ -633,7 +637,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Total Purchase Order"
             value={formatRupiah(totalPOAmount)}
             subtitle="Pengadaan bahan pangan aktif"
-            icon={<Coins className="w-5 h-5 text-amber-600" />}
+            icon={<Coins className="w-5 h-5 text-[#D97706]" />}
             badge={{ text: `${purchaseOrders.length} PO`, color: 'amber' }}
             accentColor="amber"
             onClick={() => onNavigate('procurement')}
@@ -642,7 +646,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Pemasukan Kas"
             value={formatRupiah(totalIncome)}
             subtitle="Dana Termin MBG BGN diterima"
-            icon={<Coins className="w-5 h-5 text-emerald-600" />}
+            icon={<Coins className="w-5 h-5 text-[#16A34A]" />}
             badge={{ text: 'Termin I', color: 'emerald' }}
             accentColor="emerald"
             onClick={() => onNavigate('finance')}
@@ -651,7 +655,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Pengeluaran Realisasi"
             value={formatRupiah(totalExpense)}
             subtitle="Bahan baku, operasional, insentif"
-            icon={<Wallet className="w-5 h-5 text-rose-600" />}
+            icon={<Wallet className="w-5 h-5 text-[#DC2626]" />}
             badge={{ text: 'Tervalidasi', color: 'rose' }}
             accentColor="rose"
             onClick={() => onNavigate('finance')}
@@ -660,8 +664,8 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             title="Saldo Kas Riil"
             value={formatRupiah(cashBalance)}
             subtitle="Likuiditas kas operasional aman"
-            icon={<Wallet className="w-5 h-5 text-sky-600" />}
-            badge={{ text: 'Surplus', color: 'blue' }}
+            icon={<Wallet className="w-5 h-5 text-[#0F766E]" />}
+            badge={{ text: 'Surplus', color: 'emerald' }}
             accentColor="sky"
             onClick={() => onNavigate('finance')}
           />
@@ -674,7 +678,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           title="Stok Bahan Gudang"
           value={`${totalStockItems} Item`}
           subtitle={`${criticalStockItems.length} item di bawah batas safety stock`}
-          icon={<Boxes className="w-5 h-5 text-indigo-600" />}
+          icon={<Boxes className="w-5 h-5 text-[#2563EB]" />}
           badge={{ text: criticalStockItems.length > 0 ? 'Perlu Restock' : 'Aman', color: criticalStockItems.length > 0 ? 'rose' : 'emerald' }}
           accentColor={criticalStockItems.length > 0 ? 'rose' : 'indigo'}
           onClick={() => onNavigate('inventory')}
@@ -683,7 +687,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           title="Relawan Tidak Hadir"
           value={`${absentVolunteers.length} Orang`}
           subtitle="Telah dialokasikan relawan cadangan"
-          icon={<UserX className="w-5 h-5 text-orange-600" />}
+          icon={<UserX className="w-5 h-5 text-[#D97706]" />}
           badge={{ text: 'Tergantikan', color: 'amber' }}
           accentColor="amber"
           onClick={() => onNavigate('volunteers')}
@@ -692,7 +696,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           title="Tata Persuratan SPPG"
           value={`${incomingLetters + outgoingLetters} Surat`}
           subtitle={`${incomingLetters} Surat Masuk | ${outgoingLetters} Surat Keluar`}
-          icon={<Mail className="w-5 h-5 text-teal-600" />}
+          icon={<Mail className="w-5 h-5 text-[#0F766E]" />}
           badge={{ text: 'Tertib Arsip', color: 'blue' }}
           accentColor="sky"
           onClick={() => onNavigate('letters')}
@@ -701,7 +705,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           title="Kelengkapan Laporan BGN"
           value="98.5%"
           subtitle="Formulir harian & dokumentasi lengkap"
-          icon={<FileCheck2 className="w-5 h-5 text-emerald-600" />}
+          icon={<FileCheck2 className="w-5 h-5 text-[#16A34A]" />}
           badge={{ text: 'Siap Ekspor', color: 'emerald' }}
           accentColor="emerald"
           onClick={() => onNavigate('reports')}
@@ -710,7 +714,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
       {/* Row 5: Dynamic Interactive Charts */}
       <div>
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+        <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
           3. Analisis Grafik & Statistik Sistem Terpadu
         </h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

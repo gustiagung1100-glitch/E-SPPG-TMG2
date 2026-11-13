@@ -133,25 +133,23 @@ export const RoleSwitcher: React.FC<RoleSwitcherProps> = ({ isOpen, onClose }) =
                 switchRole(r.role);
                 onClose();
               }}
-              className={`p-3.5 rounded-xl border border-l-4 cursor-pointer transition-all ${
-                r.color
-              } ${
+              className={`p-4 rounded-xl border cursor-pointer transition-all duration-150 bg-white dark:bg-slate-900 ${
                 isSelected
-                  ? 'ring-2 ring-blue-900 dark:ring-sky-500 shadow-md'
-                  : 'hover:shadow-xs border-slate-200 dark:border-slate-800'
+                  ? 'border-[#0F766E] ring-2 ring-[#0F766E]/25 bg-[#0F766E]/[0.03] dark:bg-teal-950/20 shadow-sm'
+                  : 'border-[#E2E8F0] dark:border-slate-800 hover:border-[#142B4A]/40 hover:shadow-xs'
               }`}
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-xs">
+                  <div className="p-2 rounded-lg bg-[#F4F7FA] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700">
                     {r.icon}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                    <h4 className="text-xs font-bold text-[#1F2937] dark:text-white">
                       {r.role}
                     </h4>
                     {isSelected && (
-                      <span className="inline-block mt-0.5 text-[10px] font-bold text-blue-900 dark:text-sky-400">
+                      <span className="inline-block mt-0.5 text-[10px] font-bold text-[#0F766E] dark:text-teal-400">
                         ● Peran Aktif
                       </span>
                     )}
@@ -159,7 +157,7 @@ export const RoleSwitcher: React.FC<RoleSwitcherProps> = ({ isOpen, onClose }) =
                 </div>
               </div>
 
-              <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">
+              <p className="text-[11px] text-[#64748B] dark:text-slate-300 mt-2 line-clamp-2">
                 {r.description}
               </p>
 

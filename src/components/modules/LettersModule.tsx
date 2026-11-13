@@ -3,8 +3,21 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { PrintHeader } from '../common/PrintHeader';
+import {
+  BASTDocumentSheet,
+  resolveBastAutoFields,
+  formatBastDayDate,
+  generateBastNumber,
+  exportBastDocumentPDF,
+} from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
 import { officialDocumentTemplates } from '../../lib/letterTemplatesData';
+import { defaultFacilityTemperatures } from '../../lib/productionData';
+import {
+  FACILITY_TEMP_UNITS,
+  getFacilityTempValue,
+  getFacilityPhotoUrl,
+} from '../common/FacilityTempUploadSection';
 import {
   OutgoingDocument,
   IncomingLetter,
@@ -54,6 +67,13 @@ export const LettersModule: React.FC = () => {
     addIncomingLetter,
     updateIncomingLetter,
     deleteIncomingLetter,
+    prepRecords,
+    cookingRecords,
+    portioningRecords,
+    institutions,
+    beneficiaryAttendance,
+    masterVolunteers,
+    distributionLogs,
     currentUser,
     hasPermission,
     addToast,
@@ -85,6 +105,7 @@ export const LettersModule: React.FC = () => {
 
   // Template Viewer Modal
   const [viewingTemplate, setViewingTemplate] = useState<DocumentTemplate | null>(null);
+  const [bastInstitutionId, setBastInstitutionId] = useState<string>('');
 
   // Form State for Creating a Cloned Outgoing Document (Mail Merge)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('tmpl-spd');
@@ -122,6 +143,118 @@ export const LettersModule: React.FC = () => {
     return officialDocumentTemplates.find(t => t.id === selectedTemplateId) || officialDocumentTemplates[0];
   }, [selectedTemplateId]);
 
+  const buildInitialFieldsForTemplate = (
+    tmpl: DocumentTemplate,
+    targetDate?: string,
+    targetInstId?: string
+  ): Record<string, string> => {
+    const initialFieldValues: Record<string, string> = {};
+    tmpl.fields.forEach(f => {
+      initialFieldValues[f.key] = f.defaultValue || '';
+    });
+
+    if (tmpl.id === 'tmpl-bast') {
+      const resolved = resolveBastAutoFields({
+        institutions,
+        beneficiaryAttendance,
+        masterVolunteers,
+        distributionLogs,
+        sppgConfig,
+        institutionId: targetInstId || institutions[0]?.id,
+        date: targetDate || new Date().toISOString().slice(0, 10),
+      });
+      initialFieldValues['NAMA_LEMBAGA'] = resolved.institutionName;
+      initialFieldValues['JUMLAH_PORSI'] = String(resolved.totalPortions);
+      initialFieldValues['NAMA_PIC'] = resolved.picName;
+      initialFieldValues['NO_HP_PIC'] = resolved.picPhone;
+      initialFieldValues['HARI_TANGGAL'] = formatBastDayDate(resolved.date).fullLabel;
+      initialFieldValues['JAM_TERIMA'] = resolved.receiveTime;
+      initialFieldValues['JAM_KEMBALI'] = resolved.returnTime || '........';
+      initialFieldValues['NAMA_PETUGAS_DISTRIBUSI'] = resolved.distributorName;
+      initialFieldValues['NO_HP_DISTRIBUSI'] = resolved.distributorPhone;
+    }
+
+    if (tmpl.id === 'tmpl-bap-suhu') {
+      const pTemps = prepRecords[0]?.facilityTemps || defaultFacilityTemperatures;
+      const cTemps = cookingRecords[0]?.facilityTemps || defaultFacilityTemperatures;
+      const rTemps = portioningRecords[0]?.facilityTemps || defaultFacilityTemperatures;
+
+      const fmt3 = (tempKey: Parameters<typeof getFacilityTempValue>[1]) =>
+        `Div. Persiapan: ${getFacilityTempValue(pTemps, tempKey)}°C | Div. Pengolahan: ${getFacilityTempValue(cTemps, tempKey)}°C | Div. Pemorsian: ${getFacilityTempValue(rTemps, tempKey)}°C`;
+
+      const coolerSummary = FACILITY_TEMP_UNITS.slice(4)
+        .map(u => `${u.shortLabel}: ${getFacilityTempValue(pTemps, u.tempKey)}°C`)
+        .join(' | ');
+
+      const uploadedCount = FACILITY_TEMP_UNITS.reduce((sum, u) => {
+        return (
+          sum +
+          [
+            getFacilityPhotoUrl(pTemps, u.photoKey),
+            getFacilityPhotoUrl(cTemps, u.photoKey),
+            getFacilityPhotoUrl(rTemps, u.photoKey),
+          ].filter(Boolean).length
+        );
+      }, 0);
+      const totalSlots = FACILITY_TEMP_UNITS.length * 3;
+
+      initialFieldValues['RUANG_PEMORSIAN'] = `${fmt3('portioningRoomTemp')} (Standar ≤ 24°C)`;
+      initialFieldValues['RUANG_PENGOLAHAN'] = `${fmt3('cookingRoomTemp')} (Standar ≤ 28°C)`;
+      initialFieldValues['GUDANG_BASAH'] = `${fmt3('wetWarehouseTemp')} (Standar 10 - 16°C)`;
+      initialFieldValues['GUDANG_KERING'] = `${fmt3('dryWarehouseTemp')} (Standar ≤ 25°C)`;
+      initialFieldValues['UNIT_PENDINGIN'] = coolerSummary;
+      initialFieldValues['KELENGKAPAN_FOTO'] =
+        `${uploadedCount}/${totalSlots} bukti foto Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin telah terupload di Divisi Persiapan, Pengolahan, dan Pemorsian.`;
+      initialFieldValues['PETUGAS_DIVISI'] = [
+        prepRecords[0]?.officerName || 'Tim Persiapan',
+        cookingRecords[0]?.officerName || 'Tim Pengolahan',
+        portioningRecords[0]?.officerName || 'Tim Pemorsian',
+      ].join(' • ');
+    }
+
+    return initialFieldValues;
+  };
+
+  // Helper to sync BAST fields automatically when institution or date changes
+  const syncBastFormForInstitutionAndDate = (
+    instId: string,
+    dateStr: string,
+    prevForm: typeof outgoingForm
+  ): typeof outgoingForm => {
+    const inst = institutions.find(i => i.id === instId) || institutions[0];
+    const resolved = resolveBastAutoFields({
+      institutions,
+      beneficiaryAttendance,
+      masterVolunteers,
+      distributionLogs,
+      sppgConfig,
+      institutionId: inst?.id,
+      date: dateStr,
+    });
+    const { fullLabel } = formatBastDayDate(dateStr);
+
+    return {
+      ...prevForm,
+      date: dateStr,
+      subject: `Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) — ${resolved.institutionName}`,
+      recipientName: resolved.picName,
+      recipientInstitution: resolved.institutionName,
+      recipientAddress: inst?.address || prevForm.recipientAddress,
+      fieldsData: {
+        ...prevForm.fieldsData,
+        NAMA_LEMBAGA: resolved.institutionName,
+        JUMLAH_PORSI: String(resolved.totalPortions),
+        NAMA_PIC: resolved.picName,
+        NO_HP_PIC: resolved.picPhone,
+        HARI_TANGGAL: fullLabel,
+        JAM_TERIMA: prevForm.fieldsData.JAM_TERIMA || resolved.receiveTime,
+        JAM_KEMBALI: prevForm.fieldsData.JAM_KEMBALI || '........',
+        NAMA_PETUGAS_DISTRIBUSI: resolved.distributorName,
+        NO_HP_DISTRIBUSI: resolved.distributorPhone,
+      },
+    };
+  };
+
   // Handle template selection change
   const handleTemplateChange = (templateId: string) => {
     const tmpl = officialDocumentTemplates.find(t => t.id === templateId);
@@ -129,49 +262,102 @@ export const LettersModule: React.FC = () => {
 
     setSelectedTemplateId(templateId);
 
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const defaultInst = institutions[0];
+    if (tmpl.id === 'tmpl-bast' && defaultInst) {
+      setBastInstitutionId(defaultInst.id);
+    }
+
     // Auto-generate number based on prefix
     const countThisType = outgoingDocuments.filter(d => d.type === tmpl.type).length + 1;
     const padded = String(countThisType).padStart(3, '0');
-    const autoNumber = `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
+    const autoNumber =
+      tmpl.id === 'tmpl-bast'
+        ? generateBastNumber(191 + countThisType, outgoingForm.date || todayStr)
+        : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
 
-    // Populate initial field values from template defaults
-    const initialFieldValues: Record<string, string> = {};
-    tmpl.fields.forEach(f => {
-      initialFieldValues[f.key] = f.defaultValue || '';
-    });
+    const initialFieldValues = buildInitialFieldsForTemplate(
+      tmpl,
+      outgoingForm.date || todayStr,
+      defaultInst?.id
+    );
 
     setOutgoingForm(prev => ({
       ...prev,
       letterCode: tmpl.codePrefix,
       letterNumber: autoNumber,
-      subject: tmpl.defaultSubject,
+      subject:
+        tmpl.id === 'tmpl-bast' && initialFieldValues['NAMA_LEMBAGA']
+          ? `Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) — ${initialFieldValues['NAMA_LEMBAGA']}`
+          : tmpl.defaultSubject,
       fieldsData: initialFieldValues,
-      recipientName: initialFieldValues['NAMA_PETUGAS'] || initialFieldValues['PIHAK_KEDUA_NAMA'] || initialFieldValues['LEMBAGA_MITRA'] || 'Pihak Terkait',
+      recipientName:
+        tmpl.id === 'tmpl-bast'
+          ? initialFieldValues['NAMA_PIC'] || 'PIC Lembaga'
+          : initialFieldValues['NAMA_PETUGAS'] ||
+            initialFieldValues['PIHAK_KEDUA_NAMA'] ||
+            initialFieldValues['LEMBAGA_MITRA'] ||
+            (tmpl.id === 'tmpl-bap-suhu' ? 'Badan Gizi Nasional / Kepala SPPG' : 'Pihak Terkait'),
+      recipientInstitution:
+        tmpl.id === 'tmpl-bast'
+          ? initialFieldValues['NAMA_LEMBAGA'] || prev.recipientInstitution
+          : prev.recipientInstitution,
+      recipientAddress:
+        tmpl.id === 'tmpl-bast' && defaultInst
+          ? defaultInst.address
+          : prev.recipientAddress,
+      signedRole:
+        tmpl.id === 'tmpl-bast'
+          ? `Kepala ${sppgConfig.sppgName}`
+          : 'Kepala SPPG Temenggungan 2',
     }));
   };
 
   // Open Create Outgoing Modal initialized with chosen template
   const openCreateWithTemplate = (tmpl: DocumentTemplate) => {
     setSelectedTemplateId(tmpl.id);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const defaultInst = institutions[0];
+    if (tmpl.id === 'tmpl-bast' && defaultInst) {
+      setBastInstitutionId(defaultInst.id);
+    }
+
     const countThisType = outgoingDocuments.filter(d => d.type === tmpl.type).length + 1;
     const padded = String(countThisType).padStart(3, '0');
-    const autoNumber = `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
+    const autoNumber =
+      tmpl.id === 'tmpl-bast'
+        ? generateBastNumber(191 + countThisType, todayStr)
+        : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
 
-    const initialFieldValues: Record<string, string> = {};
-    tmpl.fields.forEach(f => {
-      initialFieldValues[f.key] = f.defaultValue || '';
-    });
+    const initialFieldValues = buildInitialFieldsForTemplate(tmpl, todayStr, defaultInst?.id);
 
     setOutgoingForm({
       letterCode: tmpl.codePrefix,
       letterNumber: autoNumber,
-      date: new Date().toISOString().slice(0, 10),
-      subject: tmpl.defaultSubject,
-      recipientName: initialFieldValues['NAMA_PETUGAS'] || initialFieldValues['PIHAK_KEDUA_NAMA'] || 'Pihak Terkait',
-      recipientInstitution: 'Mitra MBG / Instansi Terkait',
-      recipientAddress: 'Kabupaten Probolinggo',
+      date: todayStr,
+      subject:
+        tmpl.id === 'tmpl-bast' && initialFieldValues['NAMA_LEMBAGA']
+          ? `Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) — ${initialFieldValues['NAMA_LEMBAGA']}`
+          : tmpl.defaultSubject,
+      recipientName:
+        tmpl.id === 'tmpl-bast'
+          ? initialFieldValues['NAMA_PIC'] || 'PIC Lembaga'
+          : initialFieldValues['NAMA_PETUGAS'] ||
+            initialFieldValues['PIHAK_KEDUA_NAMA'] ||
+            (tmpl.id === 'tmpl-bap-suhu' ? 'Badan Gizi Nasional / Kepala SPPG' : 'Pihak Terkait'),
+      recipientInstitution:
+        tmpl.id === 'tmpl-bast'
+          ? initialFieldValues['NAMA_LEMBAGA'] || 'Lembaga Penerima Manfaat'
+          : tmpl.id === 'tmpl-bap-suhu'
+          ? 'Badan Gizi Nasional / Dinkes'
+          : 'Mitra MBG / Instansi Terkait',
+      recipientAddress:
+        tmpl.id === 'tmpl-bast' && defaultInst ? defaultInst.address : 'Kabupaten Probolinggo',
       signedBy: sppgConfig.headOfSppg,
-      signedRole: 'Kepala SPPG Temenggungan 2',
+      signedRole:
+        tmpl.id === 'tmpl-bast'
+          ? `Kepala ${sppgConfig.sppgName}`
+          : 'Kepala SPPG Temenggungan 2',
       status: 'Disahkan',
       fieldsData: initialFieldValues,
     });
@@ -187,6 +373,7 @@ export const LettersModule: React.FC = () => {
     text = text.replace(/{{NOMOR_SURAT}}/g, form.letterNumber);
     text = text.replace(/{{TANGGAL_SURAT}}/g, formatIndonesianDate(form.date));
     text = text.replace(/{{NAMA_SPPG}}/g, sppgConfig.sppgName);
+    text = text.replace(/{{KECAMATAN_KABUPATEN}}/g, `Kecamatan ${sppgConfig.district}, ${sppgConfig.regency}`);
     text = text.replace(/{{YAYASAN}}/g, sppgConfig.foundationName);
     text = text.replace(/{{ID_SPPG}}/g, sppgConfig.sppgId);
     text = text.replace(/{{PENANDATANGAN}}/g, form.signedBy);
@@ -459,6 +646,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
           <button
             onClick={() => {
               setSelectedOutgoing(doc);
+              setIsPreviewOutgoingOpen(true);
               setTimeout(() => triggerPrint(), 300);
             }}
             title="Cetak Cepat"
@@ -780,7 +968,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             </div>
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
-            8
+            {officialDocumentTemplates.length}
           </div>
           <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 font-medium">
             <Lock className="w-3 h-3" /> Template Asli Terkunci (Read-Only)
@@ -829,9 +1017,9 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
           }`}
         >
           <Layers className="w-4 h-4" />
-          <span>Katalog 8 Template Master</span>
+          <span>Katalog Template Master</span>
           <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-bold">
-            8
+            {officialDocumentTemplates.length}
           </span>
         </button>
       </div>
@@ -1019,7 +1207,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
           <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-200">
             <h3 className="font-bold text-sm mb-1 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              Katalog 8 Dokumen Baku Tata Naskah Dinas SPPG
+              Katalog {officialDocumentTemplates.length} Template Dokumen Baku Tata Naskah Dinas SPPG
             </h3>
             <p>
               Template di bawah ini adalah acuan baku sesuai petunjuk teknis Badan Gizi Nasional (BGN). Untuk menggunakan template, klik tombol <strong>"Buat Salinan Dokumen Baru"</strong> pada kartu template terkait. Sistem akan mengkloning format teks dan menyiapkan formulir mail merge tanpa mengubah cetak biru template asli.
@@ -1110,7 +1298,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Pilih Dokumen Acuan (8 Jenis Master)
+                Pilih Dokumen Acuan ({officialDocumentTemplates.length} Template Master)
               </label>
               <select
                 value={selectedTemplateId}
@@ -1145,7 +1333,20 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
               <input
                 type="date"
                 value={outgoingForm.date}
-                onChange={(e) => setOutgoingForm({ ...outgoingForm, date: e.target.value })}
+                onChange={(e) => {
+                  const nextDate = e.target.value;
+                  if (selectedTemplateId === 'tmpl-bast') {
+                    setOutgoingForm(prev =>
+                      syncBastFormForInstitutionAndDate(
+                        bastInstitutionId || institutions[0]?.id || '',
+                        nextDate,
+                        prev
+                      )
+                    );
+                  } else {
+                    setOutgoingForm(prev => ({ ...prev, date: nextDate }));
+                  }
+                }}
                 required
                 className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
@@ -1206,7 +1407,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
           {/* Dynamic Mail Merge Input Fields */}
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 bg-slate-50 dark:bg-slate-800/40 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 Variabel Mail Merge Template [{activeTemplate.codePrefix}]
               </span>
@@ -1214,6 +1415,40 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                 Data akan otomatis dimasukkan ke dalam teks surat
               </span>
             </div>
+
+            {selectedTemplateId === 'tmpl-bast' && (
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2">
+                <label className="block text-[11px] font-bold text-blue-950 dark:text-blue-200">
+                  Pilih Lembaga Penerima Manfaat (Sinkron Otomatis Master Data & Presensi Harian):
+                </label>
+                <select
+                  value={bastInstitutionId || institutions[0]?.id || ''}
+                  onChange={(e) => {
+                    const instId = e.target.value;
+                    setBastInstitutionId(instId);
+                    setOutgoingForm(prev =>
+                      syncBastFormForInstitutionAndDate(instId, prev.date, prev)
+                    );
+                  }}
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+                >
+                  {institutions.map(inst => {
+                    const att = beneficiaryAttendance.find(
+                      a => a.institutionId === inst.id && a.date === outgoingForm.date
+                    );
+                    const qty = att ? att.actualPortions : inst.totalPortions;
+                    return (
+                      <option key={inst.id} value={inst.id}>
+                        {inst.name} — {qty} porsi | PIC: {inst.picName || inst.contactPerson} ({inst.picPhone || inst.phone})
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-[10px] text-blue-700 dark:text-blue-300">
+                  Nama Lembaga, Jumlah Porsi, PIC, Nomor HP PIC, Hari & Tanggal otomatis terisi dari Master Data & Modul Penerima Manfaat.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {activeTemplate.fields.map(field => (
@@ -1327,60 +1562,119 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
           title={`Preview Salinan Dokumen Resmi: ${selectedOutgoing.letterNumber}`}
           maxWidth="4xl"
         >
-          <div className="space-y-4">
-            {/* Top Toolbar */}
-            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
-              <div className="text-xs text-slate-600 dark:text-slate-400">
-                Jenis Dokumen: <span className="font-bold text-slate-900 dark:text-white">{selectedOutgoing.type}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleCopyGoogleDocsText(selectedOutgoing)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  {copiedStatus ? 'Tersalin!' : 'Salin untuk Google Docs'}
-                </button>
-                <button
-                  onClick={() => triggerPrint()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Cetak / PDF
-                </button>
-              </div>
-            </div>
+          {(() => {
+            const isBastDoc =
+              selectedOutgoing.templateId === 'tmpl-bast' ||
+              selectedOutgoing.type === 'Berita Acara Serah Terima';
+            const bastData = isBastDoc
+              ? resolveBastAutoFields({
+                  institutions,
+                  beneficiaryAttendance,
+                  masterVolunteers,
+                  distributionLogs,
+                  sppgConfig,
+                  institutionName:
+                    selectedOutgoing.fieldsData?.NAMA_LEMBAGA ||
+                    selectedOutgoing.recipientInstitution,
+                  date: selectedOutgoing.date,
+                  bastNumber: selectedOutgoing.letterNumber,
+                  totalPortions:
+                    selectedOutgoing.fieldsData?.JUMLAH_PORSI ||
+                    selectedOutgoing.fieldsData?.TOTAL_PORSI
+                      ? Number(
+                          selectedOutgoing.fieldsData.JUMLAH_PORSI ||
+                            selectedOutgoing.fieldsData.TOTAL_PORSI
+                        )
+                      : undefined,
+                  picName:
+                    selectedOutgoing.fieldsData?.NAMA_PIC || selectedOutgoing.recipientName,
+                  picPhone: selectedOutgoing.fieldsData?.NO_HP_PIC,
+                  distributorName: selectedOutgoing.fieldsData?.NAMA_PETUGAS_DISTRIBUSI,
+                  distributorPhone: selectedOutgoing.fieldsData?.NO_HP_DISTRIBUSI,
+                  receiveTime: selectedOutgoing.fieldsData?.JAM_TERIMA,
+                  returnTime:
+                    selectedOutgoing.fieldsData?.JAM_KEMBALI === '........'
+                      ? ''
+                      : selectedOutgoing.fieldsData?.JAM_KEMBALI,
+                  headOfSppg: selectedOutgoing.signedBy || sppgConfig.headOfSppg,
+                })
+              : null;
 
-            {/* Document Paper Container */}
-            <div className="p-8 bg-white text-slate-900 border border-slate-200 rounded-xl shadow-lg print:shadow-none print:border-none print:p-0 font-serif leading-relaxed text-sm">
-              <PrintHeader
-                title={selectedOutgoing.type.toUpperCase()}
-                subtitle={`Program Makan Bergizi Gratis (MBG) - Badan Gizi Nasional`}
-                docNumber={selectedOutgoing.letterNumber}
-              />
-
-              <div className="whitespace-pre-line text-justify text-slate-800 font-sans text-xs sm:text-sm">
-                {selectedOutgoing.mergedBody}
-              </div>
-
-              {/* Tanda Tangan Resmi Footer */}
-              <div className="mt-8 pt-4 border-t border-slate-200 flex justify-between items-end text-xs font-sans">
-                <div className="text-[11px] text-slate-500">
-                  <div>Status Dokumen: <span className="font-semibold">{selectedOutgoing.status}</span></div>
-                  <div>Dicetak melalui: E-SPPG Management System (TMG2)</div>
-                  <div>Waktu Pembuatan: {selectedOutgoing.createdAt}</div>
-                </div>
-                <div className="text-center w-64">
-                  <div className="text-xs text-slate-600">Disahkan oleh:</div>
-                  <div className="h-16 flex items-center justify-center italic text-blue-900 font-bold text-sm">
-                    [Tanda Tangan Digital BGN]
+            return (
+              <div className="space-y-4">
+                {/* Top Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 print:hidden">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
+                    Jenis Dokumen:{' '}
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {selectedOutgoing.type}
+                    </span>
                   </div>
-                  <div className="font-bold underline text-slate-900">{selectedOutgoing.signedBy}</div>
-                  <div className="text-xs text-slate-600">{selectedOutgoing.signedRole}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => handleCopyGoogleDocsText(selectedOutgoing)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      {copiedStatus ? 'Tersalin!' : 'Salin untuk Google Docs'}
+                    </button>
+                    {bastData && (
+                      <button
+                        onClick={() => exportBastDocumentPDF(bastData)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Unduh PDF BAST
+                      </button>
+                    )}
+                    <button
+                      onClick={() => triggerPrint()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Cetak / PDF
+                    </button>
+                  </div>
                 </div>
+
+                {bastData ? (
+                  <BASTDocumentSheet data={bastData} />
+                ) : (
+                  /* Document Paper Container */
+                  <div className="p-8 bg-white text-slate-900 border border-slate-200 rounded-xl shadow-lg print:shadow-none print:border-none print:p-0 font-serif leading-relaxed text-sm">
+                    <PrintHeader
+                      title={selectedOutgoing.type.toUpperCase()}
+                      subtitle={`Program Makan Bergizi Gratis (MBG) - Badan Gizi Nasional`}
+                      docNumber={selectedOutgoing.letterNumber}
+                    />
+
+                    <div className="whitespace-pre-line text-justify text-slate-800 font-sans text-xs sm:text-sm">
+                      {selectedOutgoing.mergedBody}
+                    </div>
+
+                    {/* Tanda Tangan Resmi Footer */}
+                    <div className="mt-8 pt-4 border-t border-slate-200 flex justify-between items-end text-xs font-sans">
+                      <div className="text-[11px] text-slate-500">
+                        <div>
+                          Status Dokumen: <span className="font-semibold">{selectedOutgoing.status}</span>
+                        </div>
+                        <div>Dicetak melalui: E-SPPG Management System (TMG2)</div>
+                        <div>Waktu Pembuatan: {selectedOutgoing.createdAt}</div>
+                      </div>
+                      <div className="text-center w-64">
+                        <div className="text-xs text-slate-600">Disahkan oleh:</div>
+                        <div className="h-16 flex items-center justify-center italic text-blue-900 font-bold text-sm">
+                          [Tanda Tangan Digital BGN]
+                        </div>
+                        <div className="font-bold underline text-slate-900">{selectedOutgoing.signedBy}</div>
+                        <div className="text-xs text-slate-600">{selectedOutgoing.signedRole}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          </div>
+            );
+          })()}
         </Modal>
       )}
 
@@ -1885,10 +2179,10 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
           isOpen={!!viewingTemplate}
           onClose={() => setViewingTemplate(null)}
           title={`Template Master: [${viewingTemplate.codePrefix}] ${viewingTemplate.title}`}
-          maxWidth="3xl"
+          maxWidth="4xl"
         >
           <div className="space-y-4">
-            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs print:hidden">
               <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
                 <Lock className="w-4 h-4 text-amber-500" />
                 <span>Format Master Blueprint Resmi (Tidak Dapat Diubah)</span>
@@ -1905,7 +2199,27 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
               </button>
             </div>
 
-            <div>
+            {viewingTemplate.id === 'tmpl-bast' && (
+              <div>
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  Pratinjau Format Visual Resmi (Otomatis Terhubung Data Lembaga Penerima Manfaat):
+                </div>
+                <BASTDocumentSheet
+                  data={resolveBastAutoFields({
+                    institutions,
+                    beneficiaryAttendance,
+                    masterVolunteers,
+                    distributionLogs,
+                    sppgConfig,
+                    institutionId: institutions[0]?.id,
+                    date: new Date().toISOString().slice(0, 10),
+                    bastNumber: generateBastNumber(192),
+                  })}
+                />
+              </div>
+            )}
+
+            <div className="print:hidden">
               <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Teks Cetak Biru Baku:
               </div>
@@ -1914,7 +2228,7 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
               </pre>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-end print:hidden">
               <button
                 onClick={() => setViewingTemplate(null)}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"

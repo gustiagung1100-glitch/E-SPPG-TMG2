@@ -106,51 +106,71 @@ Kepala SPPG Temenggungan 2,
     type: 'Berita Acara Serah Terima',
     codePrefix: 'BAST',
     title: 'Berita Acara Serah Terima (BAST)',
-    description: 'Berita Acara Serah Terima makanan siap santap MBG antara petugas distribusi SPPG dan PIC pihak sekolah.',
-    defaultSubject: 'Berita Acara Serah Terima Makanan Bergizi Gratis (MBG)',
+    description: 'Berita Acara Penerimaan Paket Makanan dan Berita Acara Penyerahan Alat Makan Program Makan Bergizi Gratis (terintegrasi otomatis dengan Modul & Master Data Penerima Manfaat).',
+    defaultSubject: 'Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG)',
     fields: [
-      { key: 'NAMA_LEMBAGA', label: 'Nama Lembaga Penerima', placeholder: 'SDN Temenggungan 1 Krejengan', defaultValue: 'SDN Temenggungan 1 Krejengan' },
-      { key: 'NAMA_PIC', label: 'Nama PIC / Kepala Sekolah', placeholder: 'Drs. Slamet Hariyanto', defaultValue: 'Drs. Slamet Hariyanto' },
-      { key: 'JABATAN_PIC', label: 'Jabatan PIC', placeholder: 'Kepala Sekolah', defaultValue: 'Kepala Sekolah' },
-      { key: 'PORSI_KECIL', label: 'Jumlah Porsi Kecil (PAUD/SD 1-3)', placeholder: '180', defaultValue: '180', type: 'number' },
-      { key: 'PORSI_BESAR', label: 'Jumlah Porsi Besar (SD 4-6)', placeholder: '220', defaultValue: '220', type: 'number' },
-      { key: 'TOTAL_PORSI', label: 'Total Porsi Diserahkan', placeholder: '400', defaultValue: '400', type: 'number' },
-      { key: 'MENU_HARI_INI', label: 'Menu Makanan Hari Ini', placeholder: 'Nasi Pulen, Ayam Madu, Tempe Bacem, Sop Sayur, Pisang', defaultValue: 'Nasi Pulen, Ayam Fillet Saus Madu, Tempe Bacem, Sop Sayur Kaldu, Pisang Cavendish' },
-      { key: 'SUHU_MAKANAN', label: 'Suhu Makanan Saat Tiba (°C)', placeholder: '64.5', defaultValue: '64.5' },
-      { key: 'KONDISI_FISIK', label: 'Kondisi Kemasan / Ompreng', placeholder: 'Segel utuh, ompreng bersih food grade', defaultValue: 'Boks termal bersegel rapi, ompreng stainless steril tanpa cacat' },
+      { key: 'NAMA_LEMBAGA', label: 'Nama Lembaga Penerima Manfaat', placeholder: 'KB Aziziah / SDN Temenggungan 1', defaultValue: 'SDN Temenggungan 1' },
+      { key: 'JUMLAH_PORSI', label: 'Jumlah Porsi / Paket Alat Makan', placeholder: '400', defaultValue: '400', type: 'number' },
+      { key: 'NAMA_PIC', label: 'Nama PIC Lembaga Penerima', placeholder: 'Hariyanto, S.Pd.', defaultValue: 'Hariyanto, S.Pd.' },
+      { key: 'NO_HP_PIC', label: 'Nomor Telepon / HP PIC Lembaga', placeholder: '0812-9988-7711', defaultValue: '0812-9988-7711' },
+      { key: 'HARI_TANGGAL', label: 'Hari & Tanggal (Otomatis)', placeholder: 'Hari Kamis Tanggal 12/11/2026', defaultValue: 'Hari Kamis Tanggal 12/11/2026' },
+      { key: 'JAM_TERIMA', label: 'Jam Penerimaan Makanan (WIB)', placeholder: '07:00', defaultValue: '07:00' },
+      { key: 'JAM_KEMBALI', label: 'Jam Penyerahan Alat Makan (WIB)', placeholder: '........', defaultValue: '........' },
+      { key: 'NAMA_PETUGAS_DISTRIBUSI', label: 'PIC Tim Distribusi SPPG', placeholder: 'Agus Santoso', defaultValue: 'Agus Santoso' },
+      { key: 'NO_HP_DISTRIBUSI', label: 'Nomor Telepon Tim Distribusi', placeholder: '0813-1122-3344', defaultValue: '0813-1122-3344' },
     ],
-    templateBody: `BERITA ACARA SERAH TERIMA (BAST) MAKANAN BERGIZI GRATIS
-Nomor: {{NOMOR_SURAT}}
+    templateBody: `BERITA ACARA PENERIMAAN PAKET MAKANAN
+PROGRAM MAKAN BERGIZI
+NOMOR: {{NOMOR_SURAT}}
 
-Pada hari ini, {{TANGGAL_SURAT}}, bertempat di {{NAMA_LEMBAGA}}, telah dilaksanakan serah terima Makanan Bergizi Gratis (MBG) antara:
+Pada {{HARI_TANGGAL}} Jam {{JAM_TERIMA}} WIB
+Telah diterima Paket Makanan Bergizi Gratis (MBG) sejumlah: {{JUMLAH_PORSI}} porsi,
+dalam keadaan baik dan layak dikonsumsi dari Satuan Pelayanan Pemenuhan Gizi (SPPG)
+{{NAMA_SPPG}}, {{KECAMATAN_KABUPATEN}}.
 
-I. PIHAK PERTAMA (Yang Menyerahkan):
-   Nama      : {{NAMA_PETUGAS_DISTRIBUSI}}
-   Jabatan   : Petugas Distribusi & Logistik {{NAMA_SPPG}}
-   Alamat    : {{ALAMAT_SPPG}}
+Yang Menyerahkan: Tim Distribusi {{NAMA_SPPG}}
+Nomor Telepon: {{NO_HP_DISTRIBUSI}}
 
-II. PIHAK KEDUA (Yang Menerima):
-   Nama      : {{NAMA_PIC}}
-   Jabatan   : {{JABATAN_PIC}} {{NAMA_LEMBAGA}}
-   Alamat    : {{ALAMAT_LEMBAGA}}
+( {{NAMA_PETUGAS_DISTRIBUSI}} )
 
-PIHAK PERTAMA menyerahkan kepada PIHAK KEDUA, dan PIHAK KEDUA menyatakan telah menerima dengan baik dan cukup:
-1. Jenis Bantuan      : Makanan Siap Santap Program MBG Badan Gizi Nasional
-2. Menu Hari Ini      : {{MENU_HARI_INI}}
-3. Rincian Porsi      :
-   - Porsi Kecil (Kelas Bawah) : {{PORSI_KECIL}} Pack
-   - Porsi Besar (Kelas Atas)  : {{PORSI_BESAR}} Pack
-   - TOTAL PORSI               : {{TOTAL_PORSI}} Pack
-4. Kondisi Fisik      : {{KONDISI_FISIK}}
-5. Suhu Makanan       : {{SUHU_MAKANAN}}°C (Hangat & Lolos Uji Organoleptik Sensorik)
+Diterima Oleh Lembaga : {{NAMA_LEMBAGA}}
+PIC: {{NAMA_PIC}}
+Nomor Telepon: {{NO_HP_PIC}}
 
-Demikian Berita Acara Serah Terima ini dibuat dalam rangkap 2 (dua) untuk dipergunakan sebagaimana mestinya.
+({{NAMA_PIC}})
 
-PIHAK PERTAMA,                              PIHAK KEDUA,
-Petugas Distribusi SPPG,                    Kepala Sekolah / PIC Lembaga,
+Mengetahui:
 
+( {{PENANDATANGAN}} )
+Kepala {{NAMA_SPPG}}
 
-( {{NAMA_PETUGAS_DISTRIBUSI}} )             ( {{NAMA_PIC}} )`,
+--------------------------------------------------------------------------
+
+BERITA ACARA PENYERAHAN ALAT MAKAN
+PROGRAM MAKAN BERGIZI
+NOMOR: {{NOMOR_SURAT}}
+
+Pada {{HARI_TANGGAL}} Jam {{JAM_KEMBALI}} WIB
+Telah diterima kembali alat makan sejumlah: {{JUMLAH_PORSI}} paket alat makan bergizi
+dari Satuan Pelayanan Pemenuhan Gizi (SPPG) {{NAMA_SPPG}}, {{KECAMATAN_KABUPATEN}}.
+
+Yang Menyerahkan {{NAMA_LEMBAGA}}:
+PIC: {{NAMA_PIC}}
+Nomor Telepon: {{NO_HP_PIC}}
+
+({{NAMA_PIC}})
+
+Mengetahui:
+
+( {{PENANDATANGAN}} )
+Kepala {{NAMA_SPPG}}
+
+Diterima oleh: Tim Distribusi {{NAMA_SPPG}}
+PIC: {{NAMA_PETUGAS_DISTRIBUSI}}
+Nomor Telepon: {{NO_HP_DISTRIBUSI}}
+
+( {{NAMA_PETUGAS_DISTRIBUSI}} )
+Catatan: Apabila terdapat kerusakan dan/atau kehilangan alat makan (tutup dan tray/tempat makan), pihak penerima wajib bertanggung jawab dan mengganti kepada {{NAMA_SPPG}}.`,
   },
   {
     id: 'tmpl-bap-ppm',
@@ -275,6 +295,57 @@ Kepala SPPG Temenggungan 2,                 Pihak Pembuat Laporan,
 
 
 {{PENANDATANGAN}}                           ( Staf Pelapor )`,
+  },
+  {
+    id: 'tmpl-bap-suhu',
+    type: 'Berita Acara Lainnya',
+    codePrefix: 'BA-SUHU',
+    title: 'Berita Acara Pemantauan Suhu Ruang & Pendingin',
+    description: 'Surat pelaporan resmi pemantauan suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 unit pendingin pada Divisi Persiapan, Pengolahan, dan Pemorsian.',
+    defaultSubject: 'Berita Acara Pelaporan Suhu Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin',
+    fields: [
+      { key: 'RUANG_PEMORSIAN', label: 'Suhu Ruang Pemorsian (3 Divisi)', placeholder: 'Persiapan: 21.0°C | Pengolahan: 21.5°C | Pemorsian: 22.0°C', defaultValue: 'Div. Persiapan: 21.0°C | Div. Pengolahan: 21.5°C | Div. Pemorsian: 22.0°C (Standar ≤ 24°C)' },
+      { key: 'RUANG_PENGOLAHAN', label: 'Suhu Ruang Pengolahan (3 Divisi)', placeholder: 'Persiapan: 25.5°C | Pengolahan: 27.0°C | Pemorsian: 26.5°C', defaultValue: 'Div. Persiapan: 25.5°C | Div. Pengolahan: 27.0°C | Div. Pemorsian: 26.5°C (Standar ≤ 28°C)' },
+      { key: 'GUDANG_BASAH', label: 'Suhu Ruang Gudang Basah (3 Divisi)', placeholder: 'Persiapan: 14.0°C | Pengolahan: 14.5°C | Pemorsian: 14.2°C', defaultValue: 'Div. Persiapan: 14.0°C | Div. Pengolahan: 14.5°C | Div. Pemorsian: 14.2°C (Standar 10 - 16°C)' },
+      { key: 'GUDANG_KERING', label: 'Suhu Ruang Gudang Kering (3 Divisi)', placeholder: 'Persiapan: 22.8°C | Pengolahan: 23.0°C | Pemorsian: 23.2°C', defaultValue: 'Div. Persiapan: 22.8°C | Div. Pengolahan: 23.0°C | Div. Pemorsian: 23.2°C (Standar ≤ 25°C)' },
+      { key: 'UNIT_PENDINGIN', label: 'Ringkasan 6 Unit Pendingin (Freezer & Kulkas)', placeholder: 'F1: -19.0°C | F2: -20.5°C | K1: 5.0°C | K2: 6.0°C | K3: 5.2°C | K4: 4.0°C', defaultValue: 'Freezer 1 Daging (-19.0°C), Freezer 2 Ikan (-20.5°C), Kulkas 1 Telur (5.0°C), Kulkas 2 Sayur (6.0°C), Kulkas 3 Buah (5.2°C), Kulkas 4 Bumbu (4.0°C)', type: 'textarea' },
+      { key: 'KELENGKAPAN_FOTO', label: 'Status Upload Foto Dokumentasi', placeholder: '30/30 Foto bukti termometer terupload di sistem', defaultValue: 'Seluruh bukti foto digital Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 Pendingin telah terupload lengkap pada modul pelaporan Divisi Persiapan, Pengolahan, dan Pemorsian.' },
+      { key: 'PETUGAS_DIVISI', label: 'Petugas Pelapor (Persiapan, Pengolahan, Pemorsian)', placeholder: 'Siti Aminah, S.Gz., Chef Wahyu Ramadhan, Nurul Hidayah', defaultValue: 'Siti Aminah, S.Gz. (Persiapan), Chef Wahyu Ramadhan (Pengolahan), Nurul Hidayah (Pemorsian)' },
+      { key: 'KESIMPULAN_CCP', label: 'Kesimpulan Kepatuhan Higiene & Rantai Dingin', placeholder: 'Seluruh area produksi memenuhi batas standar BGN RI.', defaultValue: 'Seluruh titik kontrol suhu ruangan dan rantai dingin (cold chain) beroperasi optimal sesuai standar keamanan pangan Badan Gizi Nasional (BGN).' },
+    ],
+    templateBody: `BERITA ACARA PEMANTAUAN SUHU RUANG & 6 PENDINGIN (BA-SUHU)
+Nomor: {{NOMOR_SURAT}}
+
+Pada hari ini, {{TANGGAL_SURAT}}, bertempat di dapur operasional {{NAMA_SPPG}} (ID SPPG: {{ID_SPPG}}), telah dilaksanakan pemeriksaan, pencatatan suhu fasilitas, serta pengunggahan foto bukti digital pada tugas pelaporan Divisi Persiapan, Divisi Pengolahan, dan Divisi Pemorsian dengan hasil sebagai berikut:
+
+A. PEMANTAUAN SUHU RUANGAN PRODUKSI & GUDANG:
+1. Ruang Pemorsian     : {{RUANG_PEMORSIAN}}
+2. Ruang Pengolahan    : {{RUANG_PENGOLAHAN}}
+3. Ruang Gudang Basah  : {{GUDANG_BASAH}}
+4. Ruang Gudang Kering : {{GUDANG_KERING}}
+
+B. PEMANTAUAN 6 UNIT PENDINGIN (COLD CHAIN):
+{{UNIT_PENDINGIN}}
+
+C. KELENGKAPAN DOKUMENTASI FOTO UPLOAD:
+{{KELENGKAPAN_FOTO}}
+
+D. TIM PELAPOR 3 DIVISI:
+{{PETUGAS_DIVISI}}
+
+E. KESIMPULAN VERIFIKASI MUTU:
+{{KESIMPULAN_CCP}}
+
+Demikian Berita Acara Pemantauan Suhu Ruang & 6 Pendingin ini dibuat dengan sebenarnya sebagai dokumen pelaporan resmi operasional {{NAMA_SPPG}}.
+
+Temenggungan, {{TANGGAL_SURAT}}
+
+Mengetahui & Mengesahkan,                    Pengawas Higiene & Sanitasi,
+Kepala SPPG Temenggungan 2,
+
+
+{{PENANDATANGAN}}                           ( Siti Aminah, S.Gz. )
+{{JABATAN_PENANDATANGAN}}`,
   },
   {
     id: 'tmpl-su',
@@ -426,53 +497,79 @@ Kepala SPPG Temenggungan 2`,
   {
     id: 'out-02',
     letterCode: 'BAST',
-    letterNumber: 'BAST/MBG-TMG2/2026/11/0401',
+    letterNumber: '192/ BAST/SPPG-TMG2/XI/2026',
     type: 'Berita Acara Serah Terima',
     date: '2026-11-08',
-    subject: 'Berita Acara Serah Terima Makanan Bergizi Gratis (MBG) SDN Temenggungan 1',
-    recipientName: 'Drs. Slamet Hariyanto',
-    recipientInstitution: 'SDN Temenggungan 1 Krejengan',
-    recipientAddress: 'Desa Temenggungan, Kec. Krejengan',
+    subject: 'Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) SDN Temenggungan 1',
+    recipientName: 'Hariyanto, S.Pd.',
+    recipientInstitution: 'SDN Temenggungan 1',
+    recipientAddress: 'Dusun Krajan RT 01/RW 01, Desa Temenggungan, Kec. Krejengan',
     templateId: 'tmpl-bast',
-    mergedBody: `BERITA ACARA SERAH TERIMA (BAST) MAKANAN BERGIZI GRATIS
-Nomor: BAST/MBG-TMG2/2026/11/0401
+    mergedBody: `BERITA ACARA PENERIMAAN PAKET MAKANAN
+PROGRAM MAKAN BERGIZI
+NOMOR: 192/ BAST/SPPG-TMG2/XI/2026
 
-Pada hari ini, Minggu, 08 November 2026, bertempat di SDN Temenggungan 1 Krejengan, telah dilaksanakan serah terima Makanan Bergizi Gratis (MBG) antara:
+Pada Hari Minggu Tanggal 08/11/2026 Jam 07:00 WIB
+Telah diterima Paket Makanan Bergizi Gratis (MBG) sejumlah: 400 porsi,
+dalam keadaan baik dan layak dikonsumsi dari Satuan Pelayanan Pemenuhan Gizi (SPPG)
+SPPG Probolinggo Krejengan Temenggungan 2, Kecamatan Krejengan, Kabupaten Probolinggo.
 
-I. PIHAK PERTAMA (Yang Menyerahkan):
-   Nama      : Agus Santoso
-   Jabatan   : Petugas Distribusi & Logistik SPPG Probolinggo Krejengan Temenggungan 2
-   Alamat    : Dusun Krajan RT 03/RW 04 Desa Temenggungan Kecamatan Krejengan Kabupaten Probolinggo
+Yang Menyerahkan: Tim Distribusi SPPG Probolinggo Krejengan Temenggungan 2
+Nomor Telepon: 0813-1122-3344
 
-II. PIHAK KEDUA (Yang Menerima):
-   Nama      : Drs. Slamet Hariyanto
-   Jabatan   : Kepala Sekolah SDN Temenggungan 1 Krejengan
-   Alamat    : Desa Temenggungan, Kec. Krejengan
+( Agus Santoso )
 
-PIHAK PERTAMA menyerahkan kepada PIHAK KEDUA, dan PIHAK KEDUA menyatakan telah menerima dengan baik dan cukup:
-1. Jenis Bantuan      : Makanan Siap Santap Program MBG Badan Gizi Nasional
-2. Menu Hari Ini      : Nasi Pulen, Ayam Fillet Saus Madu, Tempe Bacem, Sop Sayur Kaldu, Pisang Cavendish
-3. Rincian Porsi      :
-   - Porsi Kecil (Kelas Bawah) : 180 Pack
-   - Porsi Besar (Kelas Atas)  : 220 Pack
-   - TOTAL PORSI               : 400 Pack
-4. Kondisi Fisik      : Boks termal bersegel rapi, ompreng stainless steril tanpa cacat
-5. Suhu Makanan       : 64.5°C (Hangat & Lolos Uji Organoleptik Sensorik)
+Diterima Oleh Lembaga : SDN Temenggungan 1
+PIC: Hariyanto, S.Pd.
+Nomor Telepon: 0812-9988-7711
 
-Demikian Berita Acara Serah Terima ini dibuat dalam rangkap 2 (dua) untuk dipergunakan sebagaimana mestinya.`,
+(Hariyanto, S.Pd.)
+
+Mengetahui:
+
+( Dr. H. Ahmad Zaini, S.Pd., M.M. )
+Kepala SPPG Probolinggo Krejengan Temenggungan 2
+
+--------------------------------------------------------------------------
+
+BERITA ACARA PENYERAHAN ALAT MAKAN
+PROGRAM MAKAN BERGIZI
+NOMOR: 192/ BAST/SPPG-TMG2/XI/2026
+
+Pada Hari Minggu Tanggal 08/11/2026 Jam 10:02 WIB
+Telah diterima kembali alat makan sejumlah: 400 paket alat makan bergizi
+dari Satuan Pelayanan Pemenuhan Gizi (SPPG) SPPG Probolinggo Krejengan Temenggungan 2, Kecamatan Krejengan, Kabupaten Probolinggo.
+
+Yang Menyerahkan SDN Temenggungan 1:
+PIC: Hariyanto, S.Pd.
+Nomor Telepon: 0812-9988-7711
+
+(Hariyanto, S.Pd.)
+
+Mengetahui:
+
+( Dr. H. Ahmad Zaini, S.Pd., M.M. )
+Kepala SPPG Probolinggo Krejengan Temenggungan 2
+
+Diterima oleh: Tim Distribusi SPPG Probolinggo Krejengan Temenggungan 2
+PIC: Agus Santoso
+Nomor Telepon: 0813-1122-3344
+
+( Agus Santoso )
+Catatan: Apabila terdapat kerusakan dan/atau kehilangan alat makan (tutup dan tray/tempat makan), pihak penerima wajib bertanggung jawab dan mengganti kepada SPPG Probolinggo Krejengan Temenggungan 2.`,
     fieldsData: {
-      NAMA_LEMBAGA: 'SDN Temenggungan 1 Krejengan',
-      NAMA_PIC: 'Drs. Slamet Hariyanto',
-      JABATAN_PIC: 'Kepala Sekolah',
-      PORSI_KECIL: '180',
-      PORSI_BESAR: '220',
-      TOTAL_PORSI: '400',
-      MENU_HARI_INI: 'Nasi Pulen, Ayam Fillet Saus Madu, Tempe Bacem, Sop Sayur Kaldu, Pisang Cavendish',
-      SUHU_MAKANAN: '64.5',
-      KONDISI_FISIK: 'Boks termal bersegel rapi, ompreng stainless steril tanpa cacat',
+      NAMA_LEMBAGA: 'SDN Temenggungan 1',
+      JUMLAH_PORSI: '400',
+      NAMA_PIC: 'Hariyanto, S.Pd.',
+      NO_HP_PIC: '0812-9988-7711',
+      HARI_TANGGAL: 'Hari Minggu Tanggal 08/11/2026',
+      JAM_TERIMA: '07:00',
+      JAM_KEMBALI: '10:02',
+      NAMA_PETUGAS_DISTRIBUSI: 'Agus Santoso',
+      NO_HP_DISTRIBUSI: '0813-1122-3344',
     },
-    signedBy: 'Agus Santoso',
-    signedRole: 'Petugas Distribusi SPPG',
+    signedBy: 'Dr. H. Ahmad Zaini, S.Pd., M.M.',
+    signedRole: 'Kepala SPPG Probolinggo Krejengan Temenggungan 2',
     status: 'Terkirim',
     createdAt: '2026-11-08 08:35:00',
   },

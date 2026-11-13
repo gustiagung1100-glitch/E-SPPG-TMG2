@@ -113,18 +113,18 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] overflow-hidden">
       {/* Top Header & Toolbar */}
-      <div className="p-5 border-b border-slate-200 dark:border-slate-800">
+      <div className="p-5 border-b border-[#E2E8F0] dark:border-slate-800">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             {title && (
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h3 className="text-lg font-bold text-[#1F2937] dark:text-white tracking-tight">
                 {title}
               </h3>
             )}
             {subtitle && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
                 {subtitle}
               </p>
             )}
@@ -137,7 +137,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onExportExcel}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-400 dark:hover:bg-emerald-900/50 rounded-lg transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#16A34A] bg-[#16A34A]/10 hover:bg-[#16A34A]/15 dark:bg-emerald-950/60 dark:text-emerald-400 dark:hover:bg-emerald-900/50 rounded-lg transition whitespace-nowrap"
                 title="Ekspor ke Excel (.xlsx)"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -148,7 +148,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onExportPDF}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:text-rose-400 dark:hover:bg-rose-900/50 rounded-lg transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#DC2626] bg-[#DC2626]/10 hover:bg-[#DC2626]/15 dark:bg-rose-950/60 dark:text-rose-400 dark:hover:bg-rose-900/50 rounded-lg transition whitespace-nowrap"
                 title="Ekspor ke PDF resmi"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -159,7 +159,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onPrint}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 rounded-lg transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#1F2937] bg-[#F4F7FA] hover:bg-slate-200/80 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 border border-[#E2E8F0] dark:border-slate-700 rounded-lg transition whitespace-nowrap"
                 title="Cetak format cetak"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -172,7 +172,7 @@ export function DataTable<T extends Record<string, any>>({
         {/* Search & Custom Filter Bar */}
         <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
             <input
               type="text"
               value={searchTerm}
@@ -181,13 +181,13 @@ export function DataTable<T extends Record<string, any>>({
                 setCurrentPage(1);
               }}
               placeholder={searchPlaceholder}
-              className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-900/30 dark:focus:ring-sky-500/40 transition"
+              className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-[#E2E8F0] dark:border-slate-700 bg-[#F4F7FA]/70 dark:bg-slate-800/70 text-[#1F2937] dark:text-white placeholder-[#64748B] focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]/25 focus:border-[#0F766E] transition"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-0.5"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#1F2937] dark:hover:text-slate-200 text-xs p-0.5"
                 title="Hapus pencarian"
               >
                 ✕
@@ -204,9 +204,9 @@ export function DataTable<T extends Record<string, any>>({
       {/* Table Element */}
       <div className="overflow-x-auto max-h-[calc(100vh-22rem)] scrollbar-thin">
         <table className="w-full text-left text-xs tabular-nums">
-          <thead className="sticky top-0 z-10 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 uppercase font-bold text-[10px] tracking-wider shadow-2xs">
+          <thead className="sticky top-0 z-10 bg-[#F4F7FA]/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-[#E2E8F0] dark:border-slate-700/80 text-[#1F2937] dark:text-slate-200 uppercase font-bold text-[10px] tracking-wider">
             <tr>
-              <th className="py-3 px-4 w-12 text-center text-slate-400">#</th>
+              <th className="py-3 px-4 w-12 text-center text-[#64748B]">#</th>
               {columns.map(col => {
                 const alignClass =
                   col.align === 'center'
@@ -228,12 +228,12 @@ export function DataTable<T extends Record<string, any>>({
                     <div className={`inline-flex items-center gap-1.5 ${col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : ''}`}>
                       <span>{col.header}</span>
                       {col.sortable !== false && (
-                        <span className="text-slate-400">
+                        <span className="text-[#64748B]">
                           {sortKey === col.key ? (
                             sortDirection === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400 font-bold" />
+                              <ArrowUp className="w-3.5 h-3.5 text-[#142B4A] dark:text-teal-400 font-bold" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400 font-bold" />
+                              <ArrowDown className="w-3.5 h-3.5 text-[#142B4A] dark:text-teal-400 font-bold" />
                             )
                           ) : (
                             <ArrowUpDown className="w-3 h-3 opacity-40 hover:opacity-80" />
@@ -246,20 +246,20 @@ export function DataTable<T extends Record<string, any>>({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+          <tbody className="divide-y divide-[#E2E8F0]/70 dark:divide-slate-800/70">
             {isLoading ? (
               <tr>
                 <td colSpan={columns.length + 1} className="py-12 text-center">
                   <div className="flex flex-col items-center justify-center">
-                    <div className="w-7 h-7 border-3 border-blue-900 dark:border-sky-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="mt-2 text-xs text-slate-500">Memuat data...</p>
+                    <div className="w-7 h-7 border-3 border-[#142B4A] dark:border-teal-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="mt-2 text-xs text-[#64748B]">Memuat data...</p>
                   </div>
                 </td>
               </tr>
             ) : paginatedData.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} className="py-12 text-center">
-                  <p className="text-slate-500 dark:text-slate-400">
+                  <p className="text-[#64748B] dark:text-slate-400">
                     Tidak ada data yang sesuai.
                   </p>
                 </td>
@@ -270,9 +270,9 @@ export function DataTable<T extends Record<string, any>>({
                 return (
                   <tr
                     key={keyExtractor(row)}
-                    className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition text-slate-800 dark:text-slate-200"
+                    className="hover:bg-[#F4F7FA]/75 dark:hover:bg-slate-800/40 transition text-[#1F2937] dark:text-slate-200"
                   >
-                    <td className="py-3 px-4 text-center text-slate-400 font-mono text-[11px]">
+                    <td className="py-3 px-4 text-center text-[#64748B] font-mono text-[11px]">
                       {rowNumber}
                     </td>
                     {columns.map(col => {
@@ -301,7 +301,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+      <div className="p-4 border-t border-[#E2E8F0] dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-slate-400">
         <div className="flex items-center gap-3">
           <span>
             Menampilkan {totalItems === 0 ? 0 : startIndex + 1} -{' '}
@@ -315,7 +315,7 @@ export function DataTable<T extends Record<string, any>>({
                 setItemsPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md py-1 px-2 text-slate-800 dark:text-slate-200 focus:outline-hidden"
+              className="bg-[#F4F7FA] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md py-1 px-2 text-[#1F2937] dark:text-slate-200 focus:outline-hidden"
             >
               {itemsPerPageOptions.map(opt => (
                 <option key={opt} value={opt}>
@@ -331,18 +331,18 @@ export function DataTable<T extends Record<string, any>>({
             type="button"
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="p-1.5 rounded-md border border-[#E2E8F0] dark:border-slate-700 hover:bg-[#F4F7FA] dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="px-3 py-1 font-medium text-slate-700 dark:text-slate-200">
+          <span className="px-3 py-1 font-semibold text-[#1F2937] dark:text-slate-200">
             Halaman {currentPage} dari {totalPages}
           </span>
           <button
             type="button"
             disabled={currentPage === totalPages}
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="p-1.5 rounded-md border border-[#E2E8F0] dark:border-slate-700 hover:bg-[#F4F7FA] dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

@@ -61,6 +61,11 @@ table tr {
 
 /* Print Optimization for Official BGN / SPPG Documents */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
   aside,
   header,
   footer,
@@ -87,4 +92,159 @@ table tr {
     box-shadow: none !important;
     border: none !important;
   }
+
+  body:has(.bast-print-sheet) #root *:not(:has(.bast-print-sheet)):not(.bast-print-sheet):not(.bast-print-sheet *) {
+    display: none !important;
+  }
+
+  .bast-print-sheet {
+    display: block !important;
+    width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
 }
+
+/* =========================================================
+   Enterprise Login Page Animations (150ms-300ms + Ambient)
+   GPU-composited transform/opacity only + reduced-motion
+   ========================================================= */
+@keyframes loginLogoEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes loginFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginCardSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginFloatSlow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(14px, -18px, 0) scale(1.04);
+  }
+}
+
+@keyframes loginFloatReverse {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-16px, 14px, 0) scale(0.97);
+  }
+}
+
+@keyframes loginParticleDrift {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.8);
+  }
+  25% {
+    opacity: 0.7;
+  }
+  75% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(10px, -42px, 0) scale(1.1);
+  }
+}
+
+@keyframes loginSoftGlow {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.05);
+  }
+}
+
+.login-logo-enter {
+  animation: loginLogoEnter 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.login-fade-up-1 {
+  animation: loginFadeUp 260ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+}
+
+.login-fade-up-2 {
+  animation: loginFadeUp 260ms cubic-bezier(0.16, 1, 0.3, 1) 160ms both;
+}
+
+.login-fade-up-3 {
+  animation: loginFadeUp 260ms cubic-bezier(0.16, 1, 0.3, 1) 240ms both;
+}
+
+.login-card-enter {
+  animation: loginCardSlideUp 280ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both;
+}
+
+.login-float-slow {
+  animation: loginFloatSlow 16s ease-in-out infinite;
+}
+
+.login-float-reverse {
+  animation: loginFloatReverse 20s ease-in-out infinite;
+}
+
+.login-particle {
+  animation: loginParticleDrift 9s ease-in-out infinite;
+}
+
+.login-soft-glow {
+  animation: loginSoftGlow 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-logo-enter,
+  .login-fade-up-1,
+  .login-fade-up-2,
+  .login-fade-up-3,
+  .login-card-enter,
+  .login-float-slow,
+  .login-float-reverse,
+  .login-particle,
+  .login-soft-glow {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+

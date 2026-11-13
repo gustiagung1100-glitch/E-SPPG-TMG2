@@ -41,30 +41,30 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-slate-950/70 backdrop-blur-xs transition-opacity duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-slate-950/70 backdrop-blur-xs transition-opacity duration-200 print:static print:inset-auto print:bg-white print:p-0 print:overflow-visible print:block">
       <div
-        className="fixed inset-0"
+        className="fixed inset-0 print:hidden"
         onClick={onClose}
         aria-hidden="true"
       />
       <div
-        className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800/90 my-6 sm:my-8 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150`}
+        className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-[#E2E8F0] dark:border-slate-800 my-6 sm:my-8 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150 print:max-w-full print:my-0 print:shadow-none print:border-none print:rounded-none print:overflow-visible`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-200/80 dark:border-slate-800/80 bg-slate-50/80 dark:bg-slate-800/60 backdrop-blur-xs">
+        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-[#E2E8F0] dark:border-slate-800 bg-[#F4F7FA]/80 dark:bg-slate-800/60 backdrop-blur-xs print:hidden">
           <div className="min-w-0 pr-3">
-            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate">
+            <h3 className="text-base sm:text-lg font-bold text-[#1F2937] dark:text-white truncate">
               {title}
             </h3>
             {subtitle && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+              <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5 truncate">
                 {subtitle}
               </p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition shrink-0"
+            className="p-1.5 text-[#64748B] hover:text-[#1F2937] dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition shrink-0"
             aria-label="Tutup modal"
           >
             <X className="w-5 h-5" />
@@ -72,7 +72,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-5 sm:p-6 max-h-[calc(85vh-7rem)] overflow-y-auto scrollbar-thin">
+        <div className="p-5 sm:p-6 max-h-[calc(85vh-7rem)] overflow-y-auto scrollbar-thin print:p-0 print:max-h-none print:overflow-visible">
           {children}
         </div>
       </div>

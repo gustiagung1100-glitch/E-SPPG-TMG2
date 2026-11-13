@@ -36,7 +36,13 @@ import {
   SupplierDocument,
   RABItem,
   QualityControlRecord,
+  WebAccessUser,
+  WebAccessPolicy,
 } from '../types';
+import {
+  hashLoginPassword,
+  isProtectedSuperAdminEmail,
+} from './authCrypto';
 import {
   initialInstitutionsData,
   initialMasterBahanData,
@@ -66,6 +72,7 @@ import {
 } from './plokData';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 export interface ToastMessage {
   id: string;
@@ -77,10 +84,39 @@ export interface ToastMessage {
 interface AppContextType {
   currentUser: UserProfile;
   setCurrentUser: (user: UserProfile) => void;
+  isAuthenticated: boolean;
+  authReady: boolean;
+  loginWithProfile: (user: UserProfile, rememberMe?: boolean) => void;
+  logout: () => Promise<void>;
   switchRole: (role: RoleType) => void;
   hasPermission: (module: ModuleKey, action: ActionPermission) => boolean;
   rolePermissions: RolePermissions;
   updateRolePermissions: (permissions: RolePermissions) => void;
+
+  // Pengaturan Akses Login Web Manual (Admin Utama)
+  webAccessUsers: WebAccessUser[];
+  webAccessPolicy: WebAccessPolicy;
+  addWebAccessUser: (payload: {
+    name: string;
+    email: string;
+    password: string;
+    role: RoleType;
+    division?: string;
+    supplierId?: string;
+    supplierName?: string;
+    isActive: boolean;
+    allowGoogleLogin: boolean;
+    notes?: string;
+  }) => Promise<boolean>;
+  updateWebAccessUser: (
+    id: string,
+    updates: Partial<Omit<WebAccessUser, 'id' | 'passwordHash'>> & { newPassword?: string }
+  ) => Promise<boolean>;
+  toggleWebAccessStatus: (id: string) => Promise<void>;
+  deleteWebAccessUser: (id: string) => Promise<boolean>;
+  updateWebAccessPolicy: (policy: Partial<WebAccessPolicy>) => Promise<void>;
+  recordWebLoginTimestamp: (email: string) => void;
+  findWebAccessUser: (identifier: string) => WebAccessUser | undefined;
 
   sppgConfig: SPPGConfig;
   updateSPPGConfig: (config: Partial<SPPGConfig>) => Promise<void>;
@@ -213,12 +249,15 @@ interface AppContextType {
   // 5 Divisi Dapur & Operasional
   prepRecords: PreparationInspectionRecord[];
   addPrepRecord: (rec: Omit<PreparationInspectionRecord, 'id'>) => Promise<void>;
+  updatePrepRecord: (id: string, rec: Partial<PreparationInspectionRecord>) => Promise<void>;
 
   cookingRecords: CookingInspectionRecord[];
   addCookingRecord: (rec: Omit<CookingInspectionRecord, 'id'>) => Promise<void>;
+  updateCookingRecord: (id: string, rec: Partial<CookingInspectionRecord>) => Promise<void>;
 
   portioningRecords: PortioningInspectionRecord[];
   addPortioningRecord: (rec: Omit<PortioningInspectionRecord, 'id'>) => Promise<void>;
+  updatePortioningRecord: (id: string, rec: Partial<PortioningInspectionRecord>) => Promise<void>;
 
   distributionDeliveries: DistributionDeliveryRecord[];
   addDistributionDelivery: (rec: Omit<DistributionDeliveryRecord, 'id'>) => Promise<void>;
@@ -232,6 +271,7 @@ interface AppContextType {
 
   washingWasteRecords: WashingWasteRecord[];
   addWashingWasteRecord: (rec: Omit<WashingWasteRecord, 'id'>) => Promise<void>;
+  updateWashingWasteRecord: (id: string, rec: Partial<WashingWasteRecord>) => Promise<void>;
 
   darkMode: boolean;
   toggleDarkMode: () => void;
@@ -281,7 +321,7 @@ const defaultPermissions: RolePermissions = {
   'Supplier / Mitra Pangan': { view: true, create: true, edit: true, delete: false, approve: false, print: true, export: true },
 };
 
-const initialUsers: UserProfile[] = [
+export const initialUsers: UserProfile[] = [
   { uid: 'u1', name: 'Gusti Agung (Admin Utama)', email: 'admin@sppg-tmg2.id', role: 'Admin Utama', isActive: true },
   { uid: 'u2', name: 'Dr. H. Ahmad Zaini, S.Pd.', email: 'kepala@sppg-tmg2.id', role: 'Kepala SPPG', isActive: true },
   { uid: 'u3', name: 'Siti Aminah, S.Gz.', email: 'gizi@sppg-tmg2.id', role: 'Pengawas Gizi', isActive: true },
@@ -298,6 +338,97 @@ const initialUsers: UserProfile[] = [
   { uid: 'u14', name: 'Pak Sugiono (CV Sembako & Bawang)', email: 'supplier.sembako@dringu.id', role: 'Supplier / Mitra Pangan', supplierId: 'sup-2', supplierName: 'Petani Bawang Dringu & CV Sembako', isActive: true },
   { uid: 'u15', name: 'Moch. Mansur (Kebun Pisang Gending)', email: 'supplier.pisang@gending.id', role: 'Supplier / Mitra Pangan', supplierId: 'sup-3', supplierName: 'Kebun Pisang Gending', isActive: true },
 ];
+
+export function resolveUserByIdentifier(identifier: string): UserProfile | undefined {
+  const normalized = identifier.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === 'sppgkrejengantemenggungan2@gmail.com' || normalized === 'sppgkrejengantemenggungan2') {
+    return {
+      uid: 'admin-sppg-tmg2',
+      name: 'Admin SPPG Temenggungan 2',
+      email: 'sppgkrejengantemenggungan2@gmail.com',
+      role: 'Admin Utama',
+      isActive: true,
+    };
+  }
+  if (normalized === 'gustiagung1100@gmail.com' || normalized === 'gustiagung1100') {
+    return {
+      uid: 'admin-gusti',
+      name: 'Gusti Agung (Admin Utama)',
+      email: 'gustiagung1100@gmail.com',
+      role: 'Admin Utama',
+      isActive: true,
+    };
+  }
+  return initialUsers.find(
+    u =>
+      u.email.toLowerCase() === normalized ||
+      u.email.split('@')[0].toLowerCase() === normalized
+  );
+}
+
+const DEFAULT_WEB_ACCESS_POLICY: WebAccessPolicy = {
+  strictWhitelistOnly: true,
+  allowSelfRegistration: false,
+  allowDemoPreview: false,
+};
+
+function buildDefaultWebAccessUsers(): WebAccessUser[] {
+  const now = '2026-11-01 08:00:00';
+  return [
+    {
+      id: 'wau-admin-sppg',
+      name: 'Admin SPPG Temenggungan 2',
+      email: 'sppgkrejengantemenggungan2@gmail.com',
+      role: 'Admin Utama',
+      passwordHash: hashLoginPassword('sppgkrejengantemenggungan2@gmail.com', 'Krejengan'),
+      isActive: true,
+      allowGoogleLogin: true,
+      isProtectedAdmin: true,
+      createdAt: now,
+      createdBy: 'Sistem Inti SPPG TMG2',
+      updatedAt: now,
+      updatedBy: 'Sistem Inti SPPG TMG2',
+      notes: 'Akun Admin Utama Resmi SPPG Krejengan Temenggungan 2',
+    },
+    {
+      id: 'wau-admin-gusti',
+      name: 'Gusti Agung (Admin Utama)',
+      email: 'gustiagung1100@gmail.com',
+      role: 'Admin Utama',
+      passwordHash: hashLoginPassword('gustiagung1100@gmail.com', 'Gusti123'),
+      isActive: true,
+      allowGoogleLogin: true,
+      isProtectedAdmin: true,
+      createdAt: now,
+      createdBy: 'Sistem Inti SPPG TMG2',
+      updatedAt: now,
+      updatedBy: 'Sistem Inti SPPG TMG2',
+      notes: 'Akun Super Admin Pengelola Sistem E-SPPG TMG2',
+    },
+  ];
+}
+
+function mergeProtectedAdmins(users: WebAccessUser[]): WebAccessUser[] {
+  const defaults = buildDefaultWebAccessUsers();
+  const list = Array.isArray(users) ? [...users] : [];
+  for (const def of defaults) {
+    const idx = list.findIndex(u => u.email.trim().toLowerCase() === def.email.toLowerCase());
+    if (idx === -1) {
+      list.unshift(def);
+    } else {
+      list[idx] = {
+        ...list[idx],
+        role: 'Admin Utama',
+        isActive: true,
+        allowGoogleLogin: true,
+        isProtectedAdmin: true,
+        passwordHash: list[idx].passwordHash || def.passwordHash,
+      };
+    }
+  }
+  return list;
+}
 
 const initialMenuItems: MenuItem[] = [
   {
@@ -1170,6 +1301,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : initialUsers[0];
   });
 
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const localSess = localStorage.getItem('esppg_auth_session');
+      const tabSess = sessionStorage.getItem('esppg_auth_session');
+      const raw = localSess || tabSess;
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      return Boolean(parsed?.authenticated);
+    } catch {
+      return false;
+    }
+  });
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const explicitLogoutRef = React.useRef<boolean>(false);
+
+  const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_web_access_users_v1');
+      if (!saved) return buildDefaultWebAccessUsers();
+      return mergeProtectedAdmins(JSON.parse(saved));
+    } catch {
+      return buildDefaultWebAccessUsers();
+    }
+  });
+
+  const [webAccessPolicy, setWebAccessPolicy] = useState<WebAccessPolicy>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_web_access_policy_v1');
+      if (!saved) return DEFAULT_WEB_ACCESS_POLICY;
+      return { ...DEFAULT_WEB_ACCESS_POLICY, ...JSON.parse(saved) };
+    } catch {
+      return DEFAULT_WEB_ACCESS_POLICY;
+    }
+  });
+
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => {
     const saved = localStorage.getItem('esppg_role_permissions');
     return saved ? JSON.parse(saved) : defaultPermissions;
@@ -1458,6 +1624,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [volunteerAbsences]);
 
   useEffect(() => {
+    localStorage.setItem('esppg_web_access_users_v1', JSON.stringify(webAccessUsers));
+  }, [webAccessUsers]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_web_access_policy_v1', JSON.stringify(webAccessPolicy));
+  }, [webAccessPolicy]);
+
+  useEffect(() => {
     localStorage.setItem('esppg_dark_mode', String(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -1483,6 +1657,94 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDarkMode(prev => !prev);
   };
 
+  // Sync Firebase Auth active session on load
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, fbUser => {
+      if (fbUser && !explicitLogoutRef.current) {
+        const emailLower = (fbUser.email || '').trim().toLowerCase();
+        const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+        const matched = fbUser.email ? resolveUserByIdentifier(fbUser.email) : undefined;
+        if (webEntry) {
+          setCurrentUser({
+            uid: fbUser.uid,
+            name: webEntry.name || fbUser.displayName || webEntry.email,
+            email: webEntry.email,
+            role: webEntry.role,
+            division: webEntry.division,
+            supplierId: webEntry.supplierId,
+            supplierName: webEntry.supplierName,
+            isActive: webEntry.isActive,
+          });
+        } else if (matched) {
+          setCurrentUser(prev =>
+            prev.email === matched.email ? prev : { ...matched, uid: fbUser.uid, name: fbUser.displayName || matched.name }
+          );
+        } else if (fbUser.email) {
+          setCurrentUser(prev => {
+            if (prev.email.toLowerCase() === fbUser.email!.toLowerCase()) return prev;
+            return {
+              uid: fbUser.uid,
+              name: fbUser.displayName || fbUser.email!.split('@')[0],
+              email: fbUser.email!,
+              role: isProtectedSuperAdminEmail(fbUser.email) ? 'Admin Utama' : 'Kepala SPPG',
+              isActive: true,
+            };
+          });
+        }
+        setIsAuthenticated(true);
+      }
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const loginWithProfile = (user: UserProfile, rememberMe: boolean = false) => {
+    explicitLogoutRef.current = false;
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    const payload = JSON.stringify({
+      authenticated: true,
+      uid: user.uid,
+      email: user.email,
+      rememberMe,
+      loggedInAt: new Date().toISOString(),
+    });
+    if (rememberMe) {
+      localStorage.setItem('esppg_auth_session', payload);
+      sessionStorage.removeItem('esppg_auth_session');
+    } else {
+      sessionStorage.setItem('esppg_auth_session', payload);
+      localStorage.removeItem('esppg_auth_session');
+    }
+    const loginAudit: AuditLog = {
+      id: 'aud-' + Date.now(),
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      userId: user.uid,
+      userName: user.name,
+      userRole: user.role,
+      action: 'LOGIN',
+      module: 'auth',
+      details: `Berhasil masuk ke sistem E-SPPG TMG2 sebagai ${user.name} (${user.role})`,
+    };
+    setAuditLogs(prev => [loginAudit, ...prev]);
+  };
+
+  const logout = async () => {
+    explicitLogoutRef.current = true;
+    await logAudit('LOGOUT', 'auth', `Keluar dari sesi E-SPPG TMG2 (${currentUser.name})`);
+    localStorage.removeItem('esppg_auth_session');
+    sessionStorage.removeItem('esppg_auth_session');
+    try {
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+    setIsAuthenticated(false);
+    addToast('info', 'Keluar Sistem', 'Anda telah keluar dari sistem E-SPPG TMG2.');
+  };
+
   // Role Switcher helper
   const switchRole = (role: RoleType) => {
     const matchedUser = initialUsers.find(u => u.role === role) || {
@@ -1495,6 +1757,247 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(matchedUser);
     logAudit('LOGIN', 'auth', `Berganti peran aktif ke ${role}`);
     addToast('info', 'Peran Diperbarui', `Sekarang Anda bertindak sebagai: ${role}`);
+  };
+
+  // Manual Web Login Access Management (Admin Utama Only)
+  const syncWebAccessToFirestoreSafely = async (userRecord: WebAccessUser) => {
+    if (!auth.currentUser) return;
+    try {
+      const safeDocId = `wau_${userRecord.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      await setDoc(
+        doc(db, 'users', safeDocId),
+        {
+          id: safeDocId,
+          sppgId: 'GFBQSYXD',
+          uid: safeDocId,
+          name: userRecord.name,
+          email: userRecord.email,
+          roleId: userRecord.role === 'Admin Utama' ? 'role-admin' : 'role-staff',
+          roleName: userRecord.role,
+          division: userRecord.division || '',
+          isActive: userRecord.isActive,
+          allowGoogleLogin: userRecord.allowGoogleLogin,
+          status: userRecord.isActive ? 'Aktif' : 'Nonaktif',
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name,
+        },
+        { merge: true }
+      );
+    } catch {
+      // Non-blocking fallback when offline or guest Firebase session
+    }
+  };
+
+  const findWebAccessUser = (identifier: string): WebAccessUser | undefined => {
+    const normalized = identifier.trim().toLowerCase();
+    if (!normalized) return undefined;
+    return webAccessUsers.find(
+      u =>
+        u.email.toLowerCase() === normalized ||
+        u.email.split('@')[0].toLowerCase() === normalized
+    );
+  };
+
+  const recordWebLoginTimestamp = (email: string) => {
+    const normalized = email.trim().toLowerCase();
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    setWebAccessUsers(prev =>
+      prev.map(u =>
+        u.email.toLowerCase() === normalized ? { ...u, lastLoginAt: now } : u
+      )
+    );
+  };
+
+  const addWebAccessUser = async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    role: RoleType;
+    division?: string;
+    supplierId?: string;
+    supplierName?: string;
+    isActive: boolean;
+    allowGoogleLogin: boolean;
+    notes?: string;
+  }): Promise<boolean> => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mendaftarkan akses login.');
+      return false;
+    }
+    const cleanEmail = payload.email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      addToast('error', 'Email Tidak Valid', 'Masukkan alamat email yang valid.');
+      return false;
+    }
+    if (!payload.password || payload.password.length < 4) {
+      addToast('error', 'Kata Sandi Terlalu Pendek', 'Kata sandi minimal 4 karakter.');
+      return false;
+    }
+    const exists = webAccessUsers.some(u => u.email.toLowerCase() === cleanEmail);
+    if (exists) {
+      addToast('error', 'Email Sudah Terdaftar', `Akun ${cleanEmail} sudah ada di daftar akses login.`);
+      return false;
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const newUser: WebAccessUser = {
+      id: `wau-${Date.now()}`,
+      name: payload.name.trim() || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: payload.role,
+      division: payload.division,
+      supplierId: payload.supplierId,
+      supplierName: payload.supplierName,
+      passwordHash: hashLoginPassword(cleanEmail, payload.password),
+      isActive: payload.isActive,
+      allowGoogleLogin: payload.allowGoogleLogin,
+      isProtectedAdmin: isProtectedSuperAdminEmail(cleanEmail),
+      createdAt: now,
+      createdBy: currentUser.name,
+      updatedAt: now,
+      updatedBy: currentUser.name,
+      notes: payload.notes?.trim() || undefined,
+    };
+
+    setWebAccessUsers(prev => [newUser, ...prev]);
+    await syncWebAccessToFirestoreSafely(newUser);
+    await logAudit(
+      'CREATE',
+      'settings',
+      `Mendaftarkan akses login web manual untuk ${newUser.email} (${newUser.role}) — Status: ${newUser.isActive ? 'Diizinkan' : 'Dinonaktifkan'}`
+    );
+    addToast('success', 'Akses Login Ditambahkan', `Akun ${newUser.email} berhasil didaftarkan.`);
+    return true;
+  };
+
+  const updateWebAccessUser = async (
+    id: string,
+    updates: Partial<Omit<WebAccessUser, 'id' | 'passwordHash'>> & { newPassword?: string }
+  ): Promise<boolean> => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah akses login.');
+      return false;
+    }
+    const target = webAccessUsers.find(u => u.id === id);
+    if (!target) return false;
+
+    const isProtected = Boolean(target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email));
+    const nextEmail = (updates.email ?? target.email).trim().toLowerCase();
+
+    if (nextEmail !== target.email.toLowerCase()) {
+      const dup = webAccessUsers.some(u => u.id !== id && u.email.toLowerCase() === nextEmail);
+      if (dup) {
+        addToast('error', 'Email Duplikat', `Email ${nextEmail} sudah dipakai oleh akun lain.`);
+        return false;
+      }
+    }
+
+    if (isProtected && updates.isActive === false) {
+      addToast('warning', 'Akun Terlindungi', 'Akun Admin Utama inti tidak dapat dinonaktifkan.');
+      return false;
+    }
+    if (isProtected && updates.role && updates.role !== 'Admin Utama') {
+      addToast('warning', 'Akun Terlindungi', 'Peran Admin Utama inti tidak dapat diturunkan.');
+      return false;
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const updatedUser: WebAccessUser = {
+      ...target,
+      ...updates,
+      email: isProtected ? target.email : nextEmail,
+      role: isProtected ? 'Admin Utama' : (updates.role ?? target.role),
+      isActive: isProtected ? true : (updates.isActive ?? target.isActive),
+      passwordHash:
+        updates.newPassword && updates.newPassword.trim().length > 0
+          ? hashLoginPassword(isProtected ? target.email : nextEmail, updates.newPassword)
+          : target.passwordHash,
+      updatedAt: now,
+      updatedBy: currentUser.name,
+    };
+
+    setWebAccessUsers(prev => prev.map(u => (u.id === id ? updatedUser : u)));
+    await syncWebAccessToFirestoreSafely(updatedUser);
+    await logAudit(
+      'UPDATE',
+      'settings',
+      `Memperbarui akses login web ${updatedUser.email} (${updatedUser.role}${updates.newPassword ? ', reset sandi' : ''})`
+    );
+    addToast('success', 'Akses Login Diperbarui', `Pengaturan akun ${updatedUser.email} disimpan.`);
+    return true;
+  };
+
+  const toggleWebAccessStatus = async (id: string) => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengaktifkan/menonaktifkan akses login.');
+      return;
+    }
+    const target = webAccessUsers.find(u => u.id === id);
+    if (!target) return;
+    if (target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email)) {
+      addToast('warning', 'Akun Terlindungi', 'Akun Admin Utama inti harus tetap aktif agar sistem tetap dapat dikelola.');
+      return;
+    }
+    const nextActive = !target.isActive;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const updatedUser = { ...target, isActive: nextActive, updatedAt: now, updatedBy: currentUser.name };
+    setWebAccessUsers(prev => prev.map(u => (u.id === id ? updatedUser : u)));
+    await syncWebAccessToFirestoreSafely(updatedUser);
+    await logAudit(
+      'UPDATE',
+      'settings',
+      `${nextActive ? 'Mengaktifkan' : 'Menonaktifkan'} izin login web untuk ${target.email}`
+    );
+    addToast(
+      nextActive ? 'success' : 'warning',
+      nextActive ? 'Akses Login Diaktifkan' : 'Akses Login Dinonaktifkan',
+      `${target.email} sekarang ${nextActive ? 'diizinkan' : 'diblokir untuk'} masuk ke aplikasi.`
+    );
+  };
+
+  const deleteWebAccessUser = async (id: string): Promise<boolean> => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat menghapus akun akses login.');
+      return false;
+    }
+    const target = webAccessUsers.find(u => u.id === id);
+    if (!target) return false;
+    if (target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email)) {
+      addToast('warning', 'Tidak Dapat Dihapus', 'Akun Admin Utama inti dilindungi oleh sistem.');
+      return false;
+    }
+    setWebAccessUsers(prev => prev.filter(u => u.id !== id));
+    await logAudit('DELETE', 'settings', `Menghapus akun akses login web: ${target.email}`);
+    addToast('info', 'Akun Dihapus', `Akses login untuk ${target.email} telah dihapus.`);
+    return true;
+  };
+
+  const updateWebAccessPolicy = async (policy: Partial<WebAccessPolicy>) => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah kebijakan login.');
+      return;
+    }
+    const nextPolicy = { ...webAccessPolicy, ...policy };
+    setWebAccessPolicy(nextPolicy);
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'web_access_policy'),
+          {
+            id: 'web_access_policy',
+            sppgId: 'GFBQSYXD',
+            ...nextPolicy,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking
+      }
+    }
+    await logAudit('UPDATE', 'settings', `Memperbarui kebijakan akses login web`);
+    addToast('success', 'Kebijakan Login Tersimpan', 'Pengaturan kontrol akses login berhasil diperbarui.');
   };
 
   // Permission Check
@@ -2074,9 +2577,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Modul PLOK: Quality Control Handlers with Automated Stock Addition
   const addQualityControlRecord = async (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => {
     const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const uniqueSuffix = Math.random().toString(36).slice(2, 6);
+    const differenceQuantity =
+      qc.differenceQuantity !== undefined
+        ? qc.differenceQuantity
+        : qc.receivedQuantity - qc.orderedQuantity;
     const newQC: QualityControlRecord = {
       ...qc,
-      id: 'qc-' + Date.now(),
+      differenceQuantity,
+      id: `qc-${Date.now()}-${uniqueSuffix}`,
       inspectedAt,
     };
     setQualityControlRecords(prev => [newQC, ...prev]);
@@ -2296,6 +2805,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit('CREATE', 'production', `Mencatat inspeksi bahan rusak & suhu Divisi Persiapan: ${rec.damagedVegetable.name}`);
   };
 
+  const updatePrepRecord = async (id: string, update: Partial<PreparationInspectionRecord>) => {
+    setPrepRecords(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
+    addToast('success', 'Laporan Persiapan Diperbarui', 'Pembaruan suhu & bukti foto Divisi Persiapan berhasil disimpan.');
+    await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Persiapan (${id})`);
+  };
+
   const addCookingRecord = async (rec: Omit<CookingInspectionRecord, 'id'>) => {
     const newRec: CookingInspectionRecord = {
       ...rec,
@@ -2306,6 +2821,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit('CREATE', 'production', `Mencatat suhu makanan matang Divisi Pengolahan oleh ${rec.officerName}`);
   };
 
+  const updateCookingRecord = async (id: string, update: Partial<CookingInspectionRecord>) => {
+    setCookingRecords(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
+    addToast('success', 'Laporan Pengolahan Diperbarui', 'Pembaruan suhu & bukti foto Divisi Pengolahan berhasil disimpan.');
+    await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Pengolahan (${id})`);
+  };
+
   const addPortioningRecord = async (rec: Omit<PortioningInspectionRecord, 'id'>) => {
     const newRec: PortioningInspectionRecord = {
       ...rec,
@@ -2314,6 +2835,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPortioningRecords(prev => [newRec, ...prev]);
     addToast('success', 'Data Pemorsian Tersimpan', `Penimbangan porsi kecil (${rec.smallPortionWeightGrams}g) & besar (${rec.largePortionWeightGrams}g) dicatat.`);
     await logAudit('CREATE', 'production', `Mencatat pemorsian ompreng steril oleh ${rec.officerName}`);
+  };
+
+  const updatePortioningRecord = async (id: string, update: Partial<PortioningInspectionRecord>) => {
+    setPortioningRecords(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
+    addToast('success', 'Laporan Pemorsian Diperbarui', 'Pembaruan suhu & bukti foto Divisi Pemorsian berhasil disimpan.');
+    await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Pemorsian (${id})`);
   };
 
   const addDistributionDelivery = async (rec: Omit<DistributionDeliveryRecord, 'id'>) => {
@@ -2328,7 +2855,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateDistributionDelivery = async (id: string, update: Partial<DistributionDeliveryRecord>) => {
     setDistributionDeliveries(prev => prev.map(d => d.id === id ? { ...d, ...update } : d));
-    addToast('info', 'Status Distribusi Diperbarui', 'Pembaruan data serah terima distribusi berhasil disimpan.');
+    addToast('info', 'Status Distribusi Diperbarui', 'Pembaruan data & dokumentasi distribusi berhasil disimpan.');
     await logAudit('UPDATE', 'distribution', `Memperbarui log distribusi ${id}`);
   };
 
@@ -2360,6 +2887,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setWashingWasteRecords(prev => [newRec, ...prev]);
     addToast('success', 'Food Waste & Cuci Ompreng Dicatat', `Total limbah makanan ${rec.totalWasteWeight} kg berhasil direkam.`);
     await logAudit('CREATE', 'production', `Mencatat audit sisa makanan (food waste) ${rec.totalWasteWeight} kg`);
+  };
+
+  const updateWashingWasteRecord = async (id: string, update: Partial<WashingWasteRecord>) => {
+    setWashingWasteRecords(prev => prev.map(w => (w.id === id ? { ...w, ...update } : w)));
+    addToast('success', 'Laporan Sanitasi Diperbarui', 'Pembaruan suhu & bukti foto Divisi Cuci Ompreng berhasil disimpan.');
+    await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Cuci Ompreng (${id})`);
   };
 
   // 14. Modul Administrasi Surat (Mailing & Salinan Template)
@@ -2567,10 +3100,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         currentUser,
         setCurrentUser,
+        isAuthenticated,
+        authReady,
+        loginWithProfile,
+        logout,
         switchRole,
         hasPermission,
         rolePermissions,
         updateRolePermissions,
+        webAccessUsers,
+        webAccessPolicy,
+        addWebAccessUser,
+        updateWebAccessUser,
+        toggleWebAccessStatus,
+        deleteWebAccessUser,
+        updateWebAccessPolicy,
+        recordWebLoginTimestamp,
+        findWebAccessUser,
         sppgConfig,
         updateSPPGConfig,
         institutions,
@@ -2667,10 +3213,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateKitchenProgress,
         prepRecords,
         addPrepRecord,
+        updatePrepRecord,
         cookingRecords,
         addCookingRecord,
+        updateCookingRecord,
         portioningRecords,
         addPortioningRecord,
+        updatePortioningRecord,
         distributionDeliveries,
         addDistributionDelivery,
         updateDistributionDelivery,
@@ -2680,6 +3229,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addFuelLog,
         washingWasteRecords,
         addWashingWasteRecord,
+        updateWashingWasteRecord,
         darkMode,
         toggleDarkMode,
         toasts,

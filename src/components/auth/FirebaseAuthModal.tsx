@@ -4,13 +4,13 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import { useApp } from '../../lib/store';
+import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
 import { saveDocument, CURRENT_SPPG_ID } from '../../lib/databaseService';
 import { Modal } from '../common/Modal';
 import {
@@ -33,7 +33,7 @@ interface FirebaseAuthModalProps {
 }
 
 export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, switchRole, addToast } = useApp();
+  const { currentUser, switchRole, addToast, logout, webAccessUsers, webAccessPolicy } = useApp();
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login');
   const [email, setEmail] = useState('');
@@ -57,6 +57,23 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
       provider.setCustomParameters({ prompt: 'select_account' });
       const cred = await signInWithPopup(auth, provider);
       const user = cred.user;
+      const emailLower = (user.email || '').trim().toLowerCase();
+      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+
+      if (webEntry && (!webEntry.isActive || !webEntry.allowGoogleLogin)) {
+        setAuthError('Akses login Google untuk akun ini dinonaktifkan oleh Admin Utama.');
+        await logout();
+        return;
+      }
+
+      if (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
+        setAuthError(`Akun ${user.email} belum didaftarkan untuk akses login oleh Admin Utama.`);
+        await logout();
+        return;
+      }
+
+      const assignedRole = isSuperAdmin ? 'Admin Utama' : (webEntry?.role || currentUser.role);
 
       // Sync user profile to Firestore 'users' collection
       await saveDocument(
@@ -64,11 +81,11 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         user.uid,
         {
           uid: user.uid,
-          name: user.displayName || 'Petugas SPPG',
+          name: webEntry?.name || user.displayName || 'Petugas SPPG',
           email: user.email || '',
-          roleName: user.email === 'gustiagung1100@gmail.com' ? 'Admin Utama' : currentUser.role,
-          roleId: user.email === 'gustiagung1100@gmail.com' ? 'role-admin' : 'role-staff',
-          division: currentUser.division,
+          roleName: assignedRole,
+          roleId: assignedRole === 'Admin Utama' ? 'role-admin' : 'role-staff',
+          division: webEntry?.division || currentUser.division,
           sppgId: CURRENT_SPPG_ID,
           isActive: true,
           status: 'Terverifikasi',
@@ -78,7 +95,7 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         user.displayName || 'Google User'
       );
 
-      if (user.email === 'gustiagung1100@gmail.com') {
+      if (isSuperAdmin) {
         switchRole('Admin Utama');
       }
 
@@ -160,9 +177,9 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      await logout();
       setFirebaseUser(null);
-      addToast('info', 'Keluar Akun', 'Sesi Firebase Auth telah ditutup.');
+      onClose();
     } catch (err: any) {
       addToast('error', 'Gagal Keluar', err.message);
     }

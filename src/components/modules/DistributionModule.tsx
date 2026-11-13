@@ -2,7 +2,12 @@ import React, { useState } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
-import { PrintHeader } from '../common/PrintHeader';
+import {
+  BASTDocumentSheet,
+  resolveBastAutoFields,
+  generateBastNumber,
+  exportBastDocumentPDF,
+} from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint } from '../../lib/exportUtils';
 import { DistributionLog } from '../../types';
 import {
@@ -16,12 +21,15 @@ import {
   Printer,
   ShieldCheck,
   FileCheck,
+  Download,
 } from 'lucide-react';
 
 export const DistributionModule: React.FC = () => {
   const {
     distributionLogs,
     institutions,
+    beneficiaryAttendance,
+    masterVolunteers,
     addDistributionLog,
     updateDistributionLog,
     currentUser,
@@ -33,6 +41,7 @@ export const DistributionModule: React.FC = () => {
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [bastReturnTimeInput, setBastReturnTimeInput] = useState('');
 
   // Status Update Form State
   const [newStatus, setNewStatus] = useState<DistributionLog['status']>('Selesai Serah Terima');
@@ -50,11 +59,12 @@ export const DistributionModule: React.FC = () => {
   const [dispatchTemp, setDispatchTemp] = useState<number>(68.0);
 
   const handleOpenUpdate = (log: DistributionLog) => {
+    const matchedInst = institutions.find(i => i.id === log.institutionId);
     setSelectedLog(log);
     setNewStatus(log.status);
     setNewArrivalTime(log.arrivalTime || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB');
-    setNewReceivedBy(log.receivedBy || '');
-    setNewReceiverTitle(log.receiverTitle || 'Kepala Sekolah / Guru Piket');
+    setNewReceivedBy(log.receivedBy || matchedInst?.picName || matchedInst?.contactPerson || '');
+    setNewReceiverTitle(log.receiverTitle || 'PIC Penerima Manfaat / Kepala Sekolah');
     setArrivalTemp(log.foodTempAtArrival || 64.0);
     setNotesInput(log.notes || '');
     setIsUpdateOpen(true);
@@ -62,12 +72,15 @@ export const DistributionModule: React.FC = () => {
 
   const handleOpenDetail = (log: DistributionLog) => {
     setSelectedLog(log);
+    setBastReturnTimeInput('');
     setIsDetailOpen(true);
   };
 
   const handleSaveStatus = async () => {
     if (!selectedLog) return;
-    const bastNumber = selectedLog.bastNumber || `BAST/MBG-TMG2/2026/11/04${Math.floor(Math.random() * 80) + 10}`;
+    const bastNumber =
+      selectedLog.bastNumber ||
+      generateBastNumber(191 + (institutions.findIndex(i => i.id === selectedLog.institutionId) + 1 || 1), selectedLog.date);
     await updateDistributionLog(selectedLog.id, {
       status: newStatus,
       arrivalTime: newArrivalTime,
@@ -540,102 +553,97 @@ export const DistributionModule: React.FC = () => {
         <Modal
           isOpen={isDetailOpen}
           onClose={() => setIsDetailOpen(false)}
-          title={`Surat Jalan & Berita Acara Serah Terima (BAST)`}
-          subtitle={`No. BAST: ${selectedLog.bastNumber || 'BAST/MBG-TMG2/2026/11/0401'}`}
-          maxWidth="2xl"
+          title={`Berita Acara Serah Terima (BAST) & Alat Makan`}
+          subtitle={`No. BAST: ${
+            selectedLog.bastNumber ||
+            generateBastNumber(
+              191 + (institutions.findIndex(i => i.id === selectedLog.institutionId) + 1 || 1),
+              selectedLog.date
+            )
+          }`}
+          maxWidth="4xl"
         >
-          <div className="space-y-4 print-section">
-            <PrintHeader
-              title="Surat Jalan & Berita Acara Serah Terima (BAST) MBG"
-              subtitle={`Program Makan Bergizi Gratis (MBG) • SPPG Temenggungan 2`}
-              docNumber={selectedLog.bastNumber || 'BAST/MBG-TMG2/2026/11/0401'}
-            />
+          {(() => {
+            const instIndex = institutions.findIndex(i => i.id === selectedLog.institutionId);
+            const fallbackNum = generateBastNumber(191 + (instIndex >= 0 ? instIndex + 1 : 1), selectedLog.date);
+            const matchedAtt = beneficiaryAttendance.find(
+              a => a.institutionId === selectedLog.institutionId && a.date === selectedLog.date
+            );
+            const bastData = resolveBastAutoFields({
+              institutions,
+              beneficiaryAttendance,
+              masterVolunteers,
+              distributionLogs,
+              sppgConfig,
+              institutionId: selectedLog.institutionId,
+              institutionName: selectedLog.institutionName,
+              date: selectedLog.date,
+              bastNumber: selectedLog.bastNumber || fallbackNum,
+              totalPortions: matchedAtt ? matchedAtt.actualPortions : selectedLog.totalPortions,
+              picName: selectedLog.receivedBy || undefined,
+              distributorName: selectedLog.driverName,
+              receiveTime: selectedLog.arrivalTime !== '-' ? selectedLog.arrivalTime : selectedLog.departureTime,
+              returnTime: bastReturnTimeInput,
+            });
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs space-y-2">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Pihak Pertama (Penyedia):</span>
-                <span className="font-bold text-slate-900 dark:text-white">{sppgConfig.sppgName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Pihak Kedua (Penerima):</span>
-                <span className="font-bold text-blue-900 dark:text-sky-400">{selectedLog.institutionName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Tanggal Pengiriman:</span>
-                <span className="font-mono">{selectedLog.date}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Armada / Pengemudi:</span>
-                <span>{selectedLog.vehicleNumber} ({selectedLog.driverName})</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Jam Tiba & Suhu:</span>
-                <span className="font-mono font-bold text-emerald-600">
-                  {selectedLog.arrivalTime} • Suhu: {selectedLog.foodTempAtArrival || selectedLog.foodTempAtDispatch}°C
-                </span>
-              </div>
-            </div>
-
-            <table className="w-full text-xs text-left border border-slate-200 dark:border-slate-700">
-              <thead className="bg-slate-100 dark:bg-slate-800 font-bold">
-                <tr>
-                  <th className="p-2">Uraian Barang BAST</th>
-                  <th className="p-2 text-center">Spesifikasi</th>
-                  <th className="p-2 text-right">Jumlah Porsi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
-                <tr>
-                  <td className="p-2 font-sans font-medium">Boks Ompreng Porsi Kecil (PAUD / SD 1-3)</td>
-                  <td className="p-2 text-center font-sans">Stainless Steel Food Grade</td>
-                  <td className="p-2 text-right font-bold">{selectedLog.smallPortions} Porsi</td>
-                </tr>
-                <tr>
-                  <td className="p-2 font-sans font-medium">Boks Ompreng Porsi Besar (SD 4-6 / SMP)</td>
-                  <td className="p-2 text-center font-sans">Stainless Steel Food Grade</td>
-                  <td className="p-2 text-right font-bold">{selectedLog.largePortions} Porsi</td>
-                </tr>
-                <tr className="bg-slate-50 dark:bg-slate-800 font-bold">
-                  <td colSpan={2} className="p-2 text-right font-sans">Total Makanan Diterima:</td>
-                  <td className="p-2 text-right text-blue-900 dark:text-sky-400 text-sm font-black">{selectedLog.totalPortions} Porsi</td>
-                </tr>
-              </tbody>
-            </table>
-
-            {/* Signature Block */}
-            <div className="pt-8 grid grid-cols-2 text-center text-xs">
-              <div>
-                <div className="text-slate-500">Yang Menyerahkan (Driver SPPG):</div>
-                <div className="font-bold text-slate-800 dark:text-slate-200 mt-14">
-                  {selectedLog.driverName}
+            return (
+              <div className="space-y-4 print-section">
+                {/* Info Armada & Jam Kembali (Hidden on Print) */}
+                <div className="print:hidden p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-xs grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                  <div>
+                    <div className="text-[10px] text-slate-500">Armada / Pengemudi</div>
+                    <div className="font-bold text-slate-800 dark:text-slate-100">
+                      {selectedLog.vehicleNumber} ({selectedLog.driverName})
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500">Suhu Wadah & Rincian Porsi</div>
+                    <div className="font-mono font-bold text-emerald-600">
+                      {selectedLog.foodTempAtArrival || selectedLog.foodTempAtDispatch}°C • {selectedLog.smallPortions}K / {selectedLog.largePortions}B
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                      Jam Penyerahan Alat Makan (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Kosongkan untuk ........ WIB"
+                      value={bastReturnTimeInput}
+                      onChange={e => setBastReturnTimeInput(e.target.value)}
+                      className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="text-[10px] text-slate-400">Relawan Div. Distribusi</div>
-              </div>
-              <div>
-                <div className="text-slate-500">Yang Menerima (Sekolah):</div>
-                <div className="font-bold text-slate-800 dark:text-slate-200 mt-14">
-                  {selectedLog.receivedBy || 'Kepala Sekolah / Guru Piket'}
-                </div>
-                <div className="text-[10px] text-slate-400">{selectedLog.receiverTitle || 'Penanggung Jawab MBG'}</div>
-              </div>
-            </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-              <button
-                onClick={triggerPrint}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-bold rounded-lg transition flex items-center gap-1.5"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Cetak Lembar BAST</span>
-              </button>
-              <button
-                onClick={() => setIsDetailOpen(false)}
-                className="px-4 py-2 bg-blue-900 text-white rounded-lg text-xs font-bold"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
+                {/* Official BAST Sheet */}
+                <BASTDocumentSheet data={bastData} />
+
+                <div className="print:hidden flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    onClick={() => exportBastDocumentPDF(bastData)}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh PDF BAST</span>
+                  </button>
+                  <button
+                    onClick={triggerPrint}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Cetak Lembar BAST</span>
+                  </button>
+                  <button
+                    onClick={() => setIsDetailOpen(false)}
+                    className="px-4 py-2 bg-blue-900 text-white rounded-lg text-xs font-bold"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </Modal>
       )}
     </div>

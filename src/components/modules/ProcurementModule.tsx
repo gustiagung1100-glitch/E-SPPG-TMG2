@@ -55,9 +55,90 @@ import {
   HelpCircle,
   Info,
   Check,
+  Upload,
+  X,
+  Trash2,
+  Calculator,
+  FileEdit,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
+import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
 
 type SubModuleTab = 'rab' | 'purchase_order' | 'quality_control';
+
+const getQCPhotos = (record: { photoUrl?: string; photoUrls?: string[] }): string[] => {
+  if (record.photoUrls && record.photoUrls.length > 0) return record.photoUrls;
+  if (record.photoUrl) return [record.photoUrl];
+  return [];
+};
+
+interface QCModalItemDraft {
+  key: string;
+  itemName: string;
+  unit: string;
+  orderedQuantity: number;
+  receivedQuantity: number;
+  condition: 'Baik' | 'Kemasan Cacat' | 'Rusak Ringan' | 'Busuk/Tercemar';
+  qualityGrade: 'Grade A (Sangat Baik)' | 'Grade B (Standar)' | 'Afkir (Tidak Layak)';
+  receivingTemp: number;
+  expiryDate: string;
+  photoUrls: string[];
+  notes: string;
+  status: QCStatusPLOK;
+}
+
+const QCManualNotesCell: React.FC<{
+  initialNotes: string;
+  onSave: (nextNotes: string) => void;
+}> = ({ initialNotes, onSave }) => {
+  const [draft, setDraft] = useState(initialNotes);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  React.useEffect(() => {
+    setDraft(initialNotes);
+  }, [initialNotes]);
+
+  const isDirty = draft !== initialNotes;
+
+  const commitSave = () => {
+    if (!isDirty) return;
+    onSave(draft);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1800);
+  };
+
+  return (
+    <div className="min-w-[190px] max-w-[240px] space-y-1">
+      <textarea
+        rows={2}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commitSave}
+        placeholder="Tulis keterangan manual..."
+        className="w-full px-2 py-1.5 text-[11px] leading-snug rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-600 resize-y"
+      />
+      <div className="flex items-center justify-between gap-1 text-[10px]">
+        {isDirty ? (
+          <button
+            type="button"
+            onClick={commitSave}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-900 hover:bg-blue-800 text-white font-bold transition"
+          >
+            <Check className="w-3 h-3" />
+            <span>Simpan Keterangan</span>
+          </button>
+        ) : savedFlash ? (
+          <span className="text-emerald-600 font-bold inline-flex items-center gap-0.5">
+            <CheckCircle2 className="w-3 h-3" /> Tersimpan
+          </span>
+        ) : (
+          <span className="text-slate-400">Ketik langsung & klik luar untuk simpan</span>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const ProcurementModule: React.FC = () => {
   const {
@@ -77,6 +158,7 @@ export const ProcurementModule: React.FC = () => {
     approveRABItem,
     qualityControlRecords,
     addQualityControlRecord,
+    updateQualityControlRecord,
   } = useApp();
 
   // Active Sub-Module Tab
@@ -123,20 +205,21 @@ export const ProcurementModule: React.FC = () => {
   const qcList = qualityControlRecords;
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
   const [selectedPOForQC, setSelectedPOForQC] = useState<PurchaseOrder | null>(null);
-
-  // Form State for QC Inspection
-  const [qcFormReceivedQty, setQcFormReceivedQty] = useState<number>(0);
-  const [qcFormCondition, setQcFormCondition] = useState<'Baik' | 'Kemasan Cacat' | 'Rusak Ringan' | 'Busuk/Tercemar'>('Baik');
-  const [qcFormQualityGrade, setQcFormQualityGrade] = useState<'Grade A (Sangat Baik)' | 'Grade B (Standar)' | 'Afkir (Tidak Layak)'>('Grade A (Sangat Baik)');
-  const [qcFormTemp, setQcFormTemp] = useState<number>(3.0);
-  const [qcFormExpiryDate, setQcFormExpiryDate] = useState<string>('2026-11-15');
-  const [qcFormPhotoUrl, setQcFormPhotoUrl] = useState<string>('');
-  const [qcFormNotes, setQcFormNotes] = useState<string>('Bahan segar sesuai standar, kemasan higienis, timbangan cocok.');
-  const [qcFormStatus, setQcFormStatus] = useState<QCStatusPLOK>('Diterima');
+  const [qcEntrySourceMode, setQcEntrySourceMode] = useState<'po' | 'manual'>('po');
+  const [qcSelectedPOId, setQcSelectedPOId] = useState<string>('');
+  const [qcManualPONumber, setQcManualPONumber] = useState<string>('');
+  const [qcManualSupplierName, setQcManualSupplierName] = useState<string>(
+    masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar'
+  );
+  const [qcItemDrafts, setQcItemDrafts] = useState<QCModalItemDraft[]>([]);
   const [qcFormInspector, setQcFormInspector] = useState<string>(currentUser.name);
 
-  // Zoom / View QC Photo Modal
-  const [viewPhotoUrl, setViewPhotoUrl] = useState<string | null>(null);
+  // Zoom / View QC Photo Gallery Modal
+  const [viewGallery, setViewGallery] = useState<{
+    urls: string[];
+    index: number;
+    title: string;
+  } | null>(null);
 
   // ---------------------------------------------------------------------------
   // FILTERED & COMPUTED VALUES
@@ -367,67 +450,254 @@ export const ProcurementModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   // HANDLERS: SUBMODUL C (QUALITY CONTROL & PENAMBAHAN STOK GUDANG)
   // ---------------------------------------------------------------------------
+  const buildDraftsFromPO = (po: PurchaseOrder): QCModalItemDraft[] => {
+    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
+    if (!po.items || po.items.length === 0) {
+      return [
+        {
+          key: `draft-${Date.now()}-0`,
+          itemName: 'Bahan Pangan MBG',
+          unit: 'kg',
+          orderedQuantity: 100,
+          receivedQuantity: 100,
+          condition: 'Baik',
+          qualityGrade: 'Grade A (Sangat Baik)',
+          receivingTemp: 24.0,
+          expiryDate: defaultExp,
+          photoUrls: [],
+          notes: '',
+          status: 'Diterima',
+        },
+      ];
+    }
+    return po.items.map((item, idx) => {
+      const lowerName = item.itemName.toLowerCase();
+      const isCold =
+        lowerName.includes('ayam') ||
+        lowerName.includes('daging') ||
+        lowerName.includes('ikan') ||
+        lowerName.includes('fillet');
+      return {
+        key: `draft-${Date.now()}-${idx}`,
+        itemName: item.itemName,
+        unit: item.unit || 'kg',
+        orderedQuantity: item.quantity,
+        receivedQuantity: item.quantity,
+        condition: 'Baik',
+        qualityGrade: 'Grade A (Sangat Baik)',
+        receivingTemp: isCold ? 2.5 : 24.0,
+        expiryDate: defaultExp,
+        photoUrls: [],
+        notes: '',
+        status: 'Diterima',
+      };
+    });
+  };
+
   const handleOpenQCModal = (po: PurchaseOrder) => {
+    setQcEntrySourceMode('po');
     setSelectedPOForQC(po);
-    const item = po.items[0];
-    setQcFormReceivedQty(item?.quantity || 100);
-    setQcFormCondition('Baik');
-    setQcFormQualityGrade('Grade A (Sangat Baik)');
-    setQcFormTemp(po.items[0]?.itemName.toLowerCase().includes('ayam') || po.items[0]?.itemName.toLowerCase().includes('daging') ? 2.5 : 24.0);
-    setQcFormExpiryDate(new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10));
-    setQcFormPhotoUrl('https://images.unsplash.com/photo-1604503468506-a8da13d82791?auto=format&fit=crop&w=600&q=80');
-    setQcFormNotes('Pemeriksaan fisik bahan segar lolos organoleptik, bebas cacat, kemasan steril.');
-    setQcFormStatus('Diterima');
+    setQcSelectedPOId(po.id);
+    setQcManualPONumber(po.poNumber);
+    setQcManualSupplierName(po.supplierName);
+    setQcItemDrafts(buildDraftsFromPO(po));
     setQcFormInspector(currentUser.name);
     setIsQCModalOpen(true);
   };
 
-  const handleUploadQCPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setQcFormPhotoUrl(reader.result as string);
-        addToast('success', 'Foto Terunggah', 'Foto dokumentasi fisik QC berhasil diunggah.');
-      };
-      reader.readAsDataURL(file);
+  const handleOpenDirectQCModal = () => {
+    const arrivingPO = purchaseOrders.find(
+      p => p.status === 'Dikirim ke supplier' || p.status === 'Sebagian diterima'
+    );
+    if (arrivingPO) {
+      handleOpenQCModal(arrivingPO);
+      return;
     }
+    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
+    setQcEntrySourceMode('manual');
+    setSelectedPOForQC(null);
+    setQcSelectedPOId('MANUAL');
+    setQcManualPONumber(`RCV/SPPG-TMG2/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/0${qcList.length + 1}`);
+    setQcManualSupplierName(masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar');
+    setQcItemDrafts([
+      {
+        key: `draft-${Date.now()}-0`,
+        itemName: '',
+        unit: 'kg',
+        orderedQuantity: 50,
+        receivedQuantity: 50,
+        condition: 'Baik',
+        qualityGrade: 'Grade A (Sangat Baik)',
+        receivingTemp: 24.0,
+        expiryDate: defaultExp,
+        photoUrls: [],
+        notes: '',
+        status: 'Diterima',
+      },
+    ]);
+    setQcFormInspector(currentUser.name);
+    setIsQCModalOpen(true);
+  };
+
+  const handleSelectPOSourceInQCModal = (val: string) => {
+    setQcSelectedPOId(val);
+    if (val === 'MANUAL') {
+      setQcEntrySourceMode('manual');
+      setSelectedPOForQC(null);
+      setQcManualPONumber(`RCV/SPPG-TMG2/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/0${qcList.length + 1}`);
+      setQcManualSupplierName(masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar');
+      if (qcItemDrafts.length === 0) {
+        const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
+        setQcItemDrafts([
+          {
+            key: `draft-${Date.now()}-0`,
+            itemName: '',
+            unit: 'kg',
+            orderedQuantity: 50,
+            receivedQuantity: 50,
+            condition: 'Baik',
+            qualityGrade: 'Grade A (Sangat Baik)',
+            receivingTemp: 24.0,
+            expiryDate: defaultExp,
+            photoUrls: [],
+            notes: '',
+            status: 'Diterima',
+          },
+        ]);
+      }
+      return;
+    }
+
+    const foundPO = purchaseOrders.find(p => p.id === val);
+    if (foundPO) {
+      setQcEntrySourceMode('po');
+      setSelectedPOForQC(foundPO);
+      setQcManualPONumber(foundPO.poNumber);
+      setQcManualSupplierName(foundPO.supplierName);
+      setQcItemDrafts(buildDraftsFromPO(foundPO));
+    }
+  };
+
+  const handleUpdateQCItemDraft = (key: string, patch: Partial<QCModalItemDraft>) => {
+    setQcItemDrafts(prev =>
+      prev.map(item => {
+        if (item.key !== key) return item;
+        const next = { ...item, ...patch };
+        if (patch.receivedQuantity !== undefined || patch.orderedQuantity !== undefined) {
+          const ordered = Number(next.orderedQuantity);
+          const received = Number(next.receivedQuantity);
+          if (received <= 0) {
+            next.status = 'Ditolak';
+          } else if (ordered > 0 && received < ordered) {
+            next.status = 'Diterima sebagian';
+          } else {
+            next.status = 'Diterima';
+          }
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleAppendPhotosToDraft = (key: string, newUrls: string[], itemLabel: string) => {
+    setQcItemDrafts(prev =>
+      prev.map(item =>
+        item.key === key
+          ? { ...item, photoUrls: [...item.photoUrls, ...newUrls] }
+          : item
+      )
+    );
+    addToast(
+      'success',
+      'Foto Terunggah',
+      `${newUrls.length} foto untuk ${itemLabel} berhasil ditambahkan.`
+    );
+  };
+
+  const handleRemovePhotoFromDraft = (key: string, photoIdx: number) => {
+    setQcItemDrafts(prev =>
+      prev.map(item =>
+        item.key === key
+          ? { ...item, photoUrls: item.photoUrls.filter((_, i) => i !== photoIdx) }
+          : item
+      )
+    );
+  };
+
+  const handleAddQCItemRow = () => {
+    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
+    setQcItemDrafts(prev => [
+      ...prev,
+      {
+        key: `draft-${Date.now()}-${prev.length}`,
+        itemName: '',
+        unit: 'kg',
+        orderedQuantity: 25,
+        receivedQuantity: 25,
+        condition: 'Baik',
+        qualityGrade: 'Grade A (Sangat Baik)',
+        receivingTemp: 24.0,
+        expiryDate: defaultExp,
+        photoUrls: [],
+        notes: '',
+        status: 'Diterima',
+      },
+    ]);
+  };
+
+  const handleRemoveQCItemRow = (key: string) => {
+    if (qcItemDrafts.length <= 1) return;
+    setQcItemDrafts(prev => prev.filter(item => item.key !== key));
   };
 
   const handleSaveQCInspection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPOForQC) return;
+    const validDrafts = qcItemDrafts.filter(d => d.itemName.trim().length > 0);
+    if (validDrafts.length === 0) {
+      addToast('error', 'Data Bahan Kosong', 'Harap isi minimal 1 nama bahan/barang yang diterima.');
+      return;
+    }
 
-    const item = selectedPOForQC.items[0];
-    const orderedQty = item ? item.quantity : 100;
-    const receivedQty = Number(qcFormReceivedQty);
+    const activePO = qcEntrySourceMode === 'po' ? selectedPOForQC : null;
+    const poId = activePO ? activePO.id : `manual-${Date.now()}`;
+    const poNumber = activePO ? activePO.poNumber : qcManualPONumber.trim() || `RCV-${Date.now().toString().slice(-6)}`;
+    const supplierName = activePO ? activePO.supplierName : qcManualSupplierName;
 
-    // KETENTUAN PENTING:
-    // Stok gudang HANYA bertambah berdasarkan jumlah yang benar-benar diterima dan disetujui!
-    const shouldAddStock = (qcFormStatus === 'Diterima' || qcFormStatus === 'Diterima sebagian') && receivedQty > 0;
+    for (const draft of validDrafts) {
+      const orderedQty = Number(draft.orderedQuantity) || 0;
+      const receivedQty = Number(draft.receivedQuantity) || 0;
+      const diffQty = receivedQty - orderedQty;
 
-    const newQCRecord: QualityControlRecord = {
-      id: `qc-${Date.now()}`,
-      poId: selectedPOForQC.id,
-      poNumber: selectedPOForQC.poNumber,
-      supplierName: selectedPOForQC.supplierName,
-      itemName: item?.itemName || 'Bahan Pangan MBG',
-      orderedQuantity: orderedQty,
-      unit: item?.unit || 'kg',
-      receivedQuantity: receivedQty,
-      condition: qcFormCondition,
-      qualityGrade: qcFormQualityGrade,
-      receivingTemp: qcFormTemp,
-      expiryDate: qcFormExpiryDate,
-      photoUrl: qcFormPhotoUrl || undefined,
-      notes: qcFormNotes,
-      inspectorName: qcFormInspector,
-      status: qcFormStatus,
-      inspectedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      inventoryAdded: shouldAddStock,
-    };
+      // KETENTUAN PENTING:
+      // Stok gudang HANYA bertambah berdasarkan jumlah yang benar-benar diterima dan disetujui!
+      const shouldAddStock =
+        (draft.status === 'Diterima' || draft.status === 'Diterima sebagian' || draft.status === 'Lolos Penuh') &&
+        receivedQty > 0;
 
-    await addQualityControlRecord(newQCRecord);
+      const newQCRecord: Omit<QualityControlRecord, 'id' | 'inspectedAt'> = {
+        poId,
+        poNumber,
+        supplierName,
+        itemName: draft.itemName.trim(),
+        orderedQuantity: orderedQty,
+        unit: draft.unit.trim() || 'kg',
+        receivedQuantity: receivedQty,
+        differenceQuantity: diffQty,
+        condition: draft.condition,
+        qualityGrade: draft.qualityGrade,
+        receivingTemp: Number(draft.receivingTemp),
+        expiryDate: draft.expiryDate,
+        photoUrl: draft.photoUrls[0] || undefined,
+        photoUrls: draft.photoUrls,
+        notes: draft.notes.trim(),
+        inspectorName: qcFormInspector,
+        status: draft.status,
+        inventoryAdded: shouldAddStock,
+      };
+
+      await addQualityControlRecord(newQCRecord);
+    }
+
     setIsQCModalOpen(false);
   };
 
@@ -481,23 +751,80 @@ export const ProcurementModule: React.FC = () => {
     exportTableToPDF({
       title: 'Laporan Rekapitulasi Quality Control (QC) Penerimaan Barang',
       subtitle: 'SPPG Probolinggo Krejengan Temenggungan 2 - Program MBG BGN',
-      headers: ['No. PO', 'Supplier', 'Barang', 'Pesan vs Terima', 'Kondisi & Kualitas', 'Suhu (°C)', 'Pemeriksa', 'Status QC'],
-      rows: qcList.map(q => [
-        q.poNumber,
-        q.supplierName,
-        q.itemName,
-        `${q.orderedQuantity} ${q.unit} → ${q.receivedQuantity} ${q.unit}`,
-        `${q.condition} (${q.qualityGrade})`,
-        q.receivingTemp !== undefined ? `${q.receivingTemp}°C` : '-',
-        q.inspectorName,
-        q.status,
-      ]),
+      headers: [
+        'No. PO',
+        'Supplier',
+        'Barang',
+        'Dipesan',
+        'Diterima',
+        'Selisih',
+        'Kondisi & Kualitas',
+        'Suhu (°C)',
+        'Keterangan',
+        'Status QC',
+      ],
+      rows: qcList.map(q => {
+        const diff = q.receivedQuantity - q.orderedQuantity;
+        const diffText =
+          diff === 0
+            ? `Sesuai (0 ${q.unit})`
+            : `${diff > 0 ? '+' : ''}${diff} ${q.unit}`;
+        return [
+          q.poNumber,
+          q.supplierName,
+          q.itemName,
+          `${q.orderedQuantity} ${q.unit}`,
+          `${q.receivedQuantity} ${q.unit}`,
+          diffText,
+          `${q.condition} (${q.qualityGrade})`,
+          q.receivingTemp !== undefined ? `${q.receivingTemp}°C` : '-',
+          q.notes || '-',
+          q.status,
+        ];
+      }),
       fileName: 'Laporan_QC_Penerimaan_Bahan_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.nutritionOfficer,
       signerRole: 'Pengawas Gizi Dietisien SPPG',
     });
   };
+
+  const handleExportQCExcel = () => {
+    const data = qcList.map(q => {
+      const diff = q.receivedQuantity - q.orderedQuantity;
+      const pct = q.orderedQuantity > 0 ? ((q.receivedQuantity / q.orderedQuantity) * 100).toFixed(1) : '0';
+      const photos = getQCPhotos(q);
+      return {
+        'No. PO / Referensi': q.poNumber,
+        'Waktu Inspeksi': q.inspectedAt,
+        'Supplier': q.supplierName,
+        'Nama Bahan / Barang': q.itemName,
+        'Satuan': q.unit,
+        'Jumlah Dipesan': q.orderedQuantity,
+        'Jumlah Diterima': q.receivedQuantity,
+        'Selisih (Diterima - Dipesan)': diff,
+        'Persentase Terpenuhi (%)': `${pct}%`,
+        'Kondisi Fisik': q.condition,
+        'Mutu Grade': q.qualityGrade,
+        'Suhu (°C)': q.receivingTemp ?? '-',
+        'Foto Terdokumentasi': photos.length > 0 ? `${photos.length} Foto` : 'Belum Ada Foto',
+        'Keterangan Manual': q.notes || '-',
+        'Pemeriksa': q.inspectorName,
+        'Status QC': q.status,
+      };
+    });
+    exportToExcel(data, 'Laporan_QC_Penerimaan_Bahan_SPPG_TMG2', 'QC Penerimaan');
+  };
+
+  const qcTotals = useMemo(() => {
+    const ordered = qcList.reduce((acc, q) => acc + (Number(q.orderedQuantity) || 0), 0);
+    const received = qcList.reduce((acc, q) => acc + (Number(q.receivedQuantity) || 0), 0);
+    const diff = received - ordered;
+    const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+    const photoCount = qcList.filter(q => getQCPhotos(q).length > 0).length;
+    const totalPhotos = qcList.reduce((acc, q) => acc + getQCPhotos(q).length, 0);
+    return { ordered, received, diff, pct, photoCount, totalPhotos };
+  }, [qcList]);
 
   return (
     <div className="space-y-6">
@@ -543,6 +870,17 @@ export const ProcurementModule: React.FC = () => {
             >
               <Plus className="w-4 h-4" />
               <span>Terbitkan PO (Dari RAB)</span>
+            </button>
+          )}
+
+          {activeTab === 'quality_control' && (
+            <button
+              type="button"
+              onClick={handleOpenDirectQCModal}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Data Barang yang Diterima</span>
             </button>
           )}
         </div>
@@ -1113,12 +1451,56 @@ export const ProcurementModule: React.FC = () => {
             <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="font-bold">
-                Kaidah Penerimaan Stok Gudang:
+                Kaidah Penerimaan Stok Gudang & Verifikasi Quality Control (QC):
               </div>
               <p className="leading-relaxed">
-                Data QC otomatis mengambil nomor PO, supplier, nama barang, dan jumlah pesanan.
-                <strong> Stok gudang HANYA bertambah berdasarkan jumlah yang benar-benar diterima dan disetujui petugas</strong>, bukan berdasarkan jumlah pesanan awal PO.
+                Data QC otomatis mengambil nomor PO, supplier, nama barang, dan jumlah pesanan serta menghitung selisih antara barang dipesan dan diterima.
+                <strong> Stok gudang HANYA bertambah berdasarkan jumlah yang benar-benar diterima dan disetujui petugas</strong>. Setiap item bahan/barang dapat langsung diunggah foto fisiknya dan diisi keterangan manual.
               </p>
+            </div>
+          </div>
+
+          {/* Calculation & Photo Completeness Summary Bar */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Total Qty Dipesan</div>
+              <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                {formatNumber(qcTotals.ordered)} unit
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Total Qty Diterima</div>
+              <div className="text-lg font-black font-mono text-emerald-600 mt-0.5">
+                {formatNumber(qcTotals.received)} unit
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
+                <Calculator className="w-3 h-3 text-blue-600" />
+                <span>Perhitungan Selisih</span>
+              </div>
+              <div
+                className={`text-lg font-black font-mono mt-0.5 ${
+                  qcTotals.diff === 0
+                    ? 'text-emerald-600'
+                    : qcTotals.diff < 0
+                    ? 'text-rose-600'
+                    : 'text-sky-600'
+                }`}
+              >
+                {qcTotals.diff === 0
+                  ? '0 (100% Sesuai)'
+                  : `${qcTotals.diff > 0 ? '+' : ''}${formatNumber(qcTotals.diff)} unit (${qcTotals.pct}%)`}
+              </div>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
+                <Camera className="w-3 h-3 text-indigo-600" />
+                <span>Foto Bahan Terupload</span>
+              </div>
+              <div className="text-lg font-black font-mono text-indigo-600 mt-0.5">
+                {qcTotals.photoCount}/{qcList.length} Item ({qcTotals.totalPhotos} Foto)
+              </div>
             </div>
           </div>
 
@@ -1129,19 +1511,37 @@ export const ProcurementModule: React.FC = () => {
                 Rekam Jejak Inspeksi Quality Control Penerimaan Bahan
               </h3>
               <p className="text-xs text-slate-500">
-                Pemeriksaan fisik, pemantauan rantai dingin (suhu), tanggal kedaluwarsa, dan foto bukti penerimaan
+                Upload foto per masing-masing bahan/barang, pantau perhitungan selisih dipesan vs diterima, dan isi keterangan manual
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
+                onClick={handleOpenDirectQCModal}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Input Barang Diterima</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportQCExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-700 hover:bg-teal-600 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel QC</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleExportQCPDF}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-2xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <FileText className="w-3.5 h-3.5" />
                 <span>PDF Laporan QC</span>
               </button>
               <button
+                type="button"
                 onClick={triggerPrint}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
               >
@@ -1154,11 +1554,11 @@ export const ProcurementModule: React.FC = () => {
           {/* DataTable QC */}
           <DataTable
             title="Log Inspeksi Quality Control (QC)"
-            subtitle="Pemeriksaan organoleptik, suhu cold chain, mutu grade bahan pangan MBG"
+            subtitle="Pemeriksaan organoleptik, perhitungan selisih pesanan vs penerimaan, foto per bahan & keterangan manual"
             data={qcList}
             keyExtractor={item => item.id}
-            searchPlaceholder="Cari no PO, barang, supplier, pemeriksa..."
-            searchKeys={['poNumber', 'supplierName', 'itemName', 'inspectorName', 'condition', 'qualityGrade']}
+            searchPlaceholder="Cari no PO, barang, supplier, pemeriksa, keterangan..."
+            searchKeys={['poNumber', 'supplierName', 'itemName', 'inspectorName', 'condition', 'qualityGrade', 'notes']}
             columns={[
               {
                 key: 'poNumber',
@@ -1170,6 +1570,9 @@ export const ProcurementModule: React.FC = () => {
                     </span>
                     <div className="text-[10px] text-slate-400">
                       {row.inspectedAt}
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-sans mt-0.5">
+                      PIC: {row.inspectorName}
                     </div>
                   </div>
                 ),
@@ -1190,21 +1593,55 @@ export const ProcurementModule: React.FC = () => {
               },
               {
                 key: 'quantities',
-                header: 'Pesanan vs Diterima',
+                header: 'Dipesan vs Diterima',
                 render: row => (
-                  <div className="font-mono text-xs">
-                    <div>
-                      Pesan: <strong>{row.orderedQuantity} {row.unit}</strong>
+                  <div className="font-mono text-xs space-y-0.5">
+                    <div className="text-slate-600 dark:text-slate-300">
+                      Dipesan: <strong className="text-slate-900 dark:text-white">{formatNumber(row.orderedQuantity)} {row.unit}</strong>
                     </div>
                     <div className="text-emerald-700 dark:text-emerald-400 font-black">
-                      Terima: {row.receivedQuantity} {row.unit}
+                      Diterima: {formatNumber(row.receivedQuantity)} {row.unit}
                     </div>
                   </div>
                 ),
               },
               {
+                key: 'variance',
+                header: 'Perhitungan Selisih',
+                render: row => {
+                  const diff = row.receivedQuantity - row.orderedQuantity;
+                  const pct = row.orderedQuantity > 0
+                    ? Math.round((row.receivedQuantity / row.orderedQuantity) * 100)
+                    : 0;
+                  const isExact = diff === 0;
+                  const isShort = diff < 0;
+                  return (
+                    <div className="font-mono text-xs space-y-1 min-w-[130px]">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-black ${
+                          isExact
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            : isShort
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                            : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                        }`}
+                      >
+                        {isExact
+                          ? `Sesuai (0 ${row.unit})`
+                          : isShort
+                          ? `Kurang ${Math.abs(diff)} ${row.unit}`
+                          : `Lebih +${diff} ${row.unit}`}
+                      </span>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {row.receivedQuantity} − {row.orderedQuantity} = {diff > 0 ? `+${diff}` : diff} ({pct}%)
+                      </div>
+                    </div>
+                  );
+                },
+              },
+              {
                 key: 'quality',
-                header: 'Kondisi & Mutu Grade',
+                header: 'Kondisi, Mutu & Suhu',
                 render: row => (
                   <div className="text-xs space-y-0.5">
                     <span
@@ -1221,45 +1658,108 @@ export const ProcurementModule: React.FC = () => {
                     <div className="text-[11px] text-slate-600 dark:text-slate-400">
                       Kondisi: {row.condition}
                     </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'temp',
-                header: 'Suhu & Kadaluarsa',
-                render: row => (
-                  <div className="font-mono text-xs">
-                    <div className="flex items-center gap-1 font-bold text-slate-800 dark:text-slate-200">
-                      <Thermometer className="w-3.5 h-3.5 text-sky-600" />
+                    <div className="flex items-center gap-1 font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                      <Thermometer className="w-3 h-3 text-sky-600" />
                       <span>{row.receivingTemp !== undefined ? `${row.receivingTemp}°C` : 'Suhu Ruang'}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Exp: {formatIndonesianDate(row.expiryDate)}
+                      <span className="text-slate-400">• Exp {formatIndonesianDate(row.expiryDate)}</span>
                     </div>
                   </div>
                 ),
               },
               {
                 key: 'photoUrl',
-                header: 'Foto Inspeksi',
-                render: row => (
-                  <div>
-                    {row.photoUrl ? (
-                      <button
-                        onClick={() => setViewPhotoUrl(row.photoUrl || null)}
-                        className="group relative w-12 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 block"
-                        title="Klik untuk perbesar foto QC"
-                      >
-                        <img
-                          src={row.photoUrl}
-                          alt="QC"
-                          className="w-full h-full object-cover group-hover:scale-110 transition"
+                header: 'Foto Bahan / Barang (Multi Foto)',
+                render: row => {
+                  const photos = getQCPhotos(row);
+                  return (
+                    <div className="flex flex-col gap-2 min-w-[165px]">
+                      {photos.length > 0 ? (
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap gap-1.5">
+                            {photos.map((url, photoIdx) => (
+                              <div
+                                key={`${row.id}-photo-${photoIdx}`}
+                                className="relative group w-14 h-12 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Foto ${row.itemName} #${photoIdx + 1}`}
+                                  onClick={() =>
+                                    setViewGallery({
+                                      urls: photos,
+                                      index: photoIdx,
+                                      title: `${row.itemName} (${row.poNumber})`,
+                                    })
+                                  }
+                                  className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition"
+                                />
+                                <span className="pointer-events-none absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded bg-slate-900/75 text-white text-[8px] font-mono font-bold">
+                                  #{photoIdx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    const nextPhotos = photos.filter((_, idx) => idx !== photoIdx);
+                                    updateQualityControlRecord(row.id, {
+                                      photoUrls: nextPhotos,
+                                      photoUrl: nextPhotos[0] || undefined,
+                                    });
+                                  }}
+                                  className="print:hidden opacity-0 group-hover:opacity-100 absolute top-0.5 right-0.5 p-0.5 rounded bg-rose-600 text-white hover:bg-rose-500 transition"
+                                  title="Hapus foto ini"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-[10px] font-mono font-bold text-indigo-700 dark:text-sky-300">
+                            {photos.length} foto terlampir (klik untuk perbesar)
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="w-24 h-11 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center text-slate-400 text-[9px]">
+                          <Camera className="w-3.5 h-3.5 mb-0.5" />
+                          <span>Belum ada foto</span>
+                        </div>
+                      )}
+
+                      <label className="print:hidden inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg bg-blue-900 hover:bg-blue-800 text-white text-[10px] font-bold cursor-pointer transition w-fit shadow-2xs">
+                        <Upload className="w-3 h-3 shrink-0" />
+                        <span>{photos.length > 0 ? '+ Tambah Foto' : '+ Upload Foto'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={e =>
+                            processMultipleImageUploads(
+                              e,
+                              newUrls => {
+                                const nextPhotos = [...photos, ...newUrls];
+                                updateQualityControlRecord(row.id, {
+                                  photoUrls: nextPhotos,
+                                  photoUrl: nextPhotos[0],
+                                });
+                              },
+                              msg => addToast('error', 'Upload Foto Gagal', msg)
+                            )
+                          }
                         />
-                      </button>
-                    ) : (
-                      <span className="text-slate-400 text-[10px]">Tidak ada foto</span>
-                    )}
-                  </div>
+                      </label>
+                    </div>
+                  );
+                },
+              },
+              {
+                key: 'notes',
+                header: 'Keterangan (Manual)',
+                render: row => (
+                  <QCManualNotesCell
+                    initialNotes={row.notes || ''}
+                    onSave={nextNotes => updateQualityControlRecord(row.id, { notes: nextNotes })}
+                  />
                 ),
               },
               {
@@ -1269,9 +1769,9 @@ export const ProcurementModule: React.FC = () => {
                   <div className="space-y-0.5">
                     <span
                       className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                        row.status === 'Diterima'
+                        row.status === 'Diterima' || row.status === 'Lolos Penuh'
                           ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : row.status === 'Diterima sebagian'
+                          : row.status === 'Diterima sebagian' || row.status === 'Lolos Sebagian'
                           ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
                           : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
                       }`}
@@ -1650,213 +2150,500 @@ export const ProcurementModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: QUALITY CONTROL & PENERIMAAN STOK */}
+      {/* MODAL: QUALITY CONTROL & INPUT DATA BARANG YANG DITERIMA */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isQCModalOpen}
         onClose={() => setIsQCModalOpen(false)}
-        title="Form Inspeksi Quality Control (QC) & Penerimaan Barang"
-        subtitle={selectedPOForQC ? `Verifikasi fisik pengiriman PO: ${selectedPOForQC.poNumber}` : ''}
-        maxWidth="lg"
+        title="Input Data Barang yang Diterima & Inspeksi Quality Control (QC)"
+        subtitle={
+          qcEntrySourceMode === 'po' && selectedPOForQC
+            ? `Verifikasi fisik penerimaan per bahan/barang untuk PO: ${selectedPOForQC.poNumber}`
+            : 'Input penerimaan bahan/barang beserta upload foto per item, perhitungan selisih & keterangan manual'
+        }
+        maxWidth="2xl"
       >
-        {selectedPOForQC && (
-          <form onSubmit={handleSaveQCInspection} className="space-y-4">
-            {/* Read-only PO Meta (Otomatis mengambil data) */}
-            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-              <div>
-                <span className="text-[10px] text-slate-400">Nomor PO:</span>
-                <div className="font-bold text-slate-900 dark:text-white">{selectedPOForQC.poNumber}</div>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-400">Supplier:</span>
-                <div className="font-bold text-slate-900 dark:text-white truncate">{selectedPOForQC.supplierName}</div>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-400">Nama Barang:</span>
-                <div className="font-bold text-slate-900 dark:text-white truncate">{selectedPOForQC.items[0]?.itemName}</div>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-400">Jumlah Pesanan:</span>
-                <div className="font-bold text-blue-900 dark:text-sky-300">
-                  {selectedPOForQC.items[0]?.quantity} {selectedPOForQC.items[0]?.unit}
-                </div>
-              </div>
+        <form onSubmit={handleSaveQCInspection} className="space-y-4">
+          {/* Sumber Penerimaan & Info Header */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                Sumber Purchase Order / Penerimaan
+              </label>
+              <select
+                value={qcSelectedPOId || 'MANUAL'}
+                onChange={e => handleSelectPOSourceInQCModal(e.target.value)}
+                className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+              >
+                <option value="MANUAL">+ Penerimaan Langsung / Input Manual</option>
+                {purchaseOrders.map(po => (
+                  <option key={po.id} value={po.id}>
+                    {po.poNumber} — {po.supplierName} ({po.status})
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Input QC: Jumlah Diterima & Kondisi */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-300 mb-1">
-                  Jumlah yang Diterima & Lolos ({selectedPOForQC.items[0]?.unit}) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max={selectedPOForQC.items[0]?.quantity || 1000}
-                  required
-                  value={qcFormReceivedQty}
-                  onChange={e => setQcFormReceivedQty(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
-                />
-                <span className="text-[10px] text-slate-400">
-                  *Stok gudang hanya bertambah sebesar nilai ini
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Kondisi Bahan *
-                </label>
-                <select
-                  value={qcFormCondition}
-                  onChange={e => setQcFormCondition(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                >
-                  <option value="Baik">Baik (Segar, Utuh, Bersih)</option>
-                  <option value="Kemasan Cacat">Kemasan Cacat (Bahan Masih Baik)</option>
-                  <option value="Rusak Ringan">Rusak Ringan (Ada yang Patah/Cacat)</option>
-                  <option value="Busuk/Tercemar">Busuk / Bau / Tercemar (Wajib Tolak)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Kualitas & Suhu */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Kualitas Mutu Grade *
-                </label>
-                <select
-                  value={qcFormQualityGrade}
-                  onChange={e => setQcFormQualityGrade(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                >
-                  <option value="Grade A (Sangat Baik)">Grade A (Sangat Baik / Premium)</option>
-                  <option value="Grade B (Standar)">Grade B (Standar Layak Konsumsi)</option>
-                  <option value="Afkir (Tidak Layak)">Afkir (Tidak Layak / Buang)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Suhu Penerimaan Bahan (°C)
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={qcFormTemp}
-                    onChange={e => setQcFormTemp(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                  />
-                  <Thermometer className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
-                </div>
-                <span className="text-[10px] text-slate-400">
-                  Daging/Ayam chilled: 0 s.d. 4°C | Kering: suhu ruang
-                </span>
-              </div>
-            </div>
-
-            {/* Tanggal Kedaluwarsa & Petugas */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tanggal Kedaluwarsa (Expired) *
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={qcFormExpiryDate}
-                  onChange={e => setQcFormExpiryDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Petugas Pemeriksa QC *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={qcFormInspector}
-                  onChange={e => setQcFormInspector(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            {/* Status QC & Upload Foto */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Status Hasil QC *
-                </label>
-                <select
-                  value={qcFormStatus}
-                  onChange={e => setQcFormStatus(e.target.value as QCStatusPLOK)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-                >
-                  <option value="Diterima">Diterima Penuh (Masuk Gudang)</option>
-                  <option value="Diterima sebagian">Diterima Sebagian (Masuk Gudang parsial)</option>
-                  <option value="Ditolak">Ditolak (Kembalikan ke Supplier, Tidak Masuk Stok)</option>
-                  <option value="Perlu pemeriksaan ulang">Perlu Pemeriksaan Ulang (Karantina)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Foto Bukti Fisik Bahan (Dokumentasi QC)
-                </label>
-                <div className="flex items-center gap-2">
-                  <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer border border-slate-300 dark:border-slate-700 transition">
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Unggah Foto</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleUploadQCPhoto}
-                    />
+            {qcEntrySourceMode === 'manual' ? (
+              <>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    No. Referensi / Surat Jalan *
                   </label>
-                  {qcFormPhotoUrl && (
-                    <div className="w-10 h-9 rounded overflow-hidden border border-emerald-500">
-                      <img src={qcFormPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
-                    </div>
-                  )}
+                  <input
+                    type="text"
+                    required
+                    value={qcManualPONumber}
+                    onChange={e => setQcManualPONumber(e.target.value)}
+                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                  />
                 </div>
-              </div>
-            </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Supplier / Rekanan *
+                  </label>
+                  <select
+                    value={qcManualSupplierName}
+                    onChange={e => setQcManualSupplierName(e.target.value)}
+                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                  >
+                    {masterSuppliers.map(s => (
+                      <option key={s.id} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Supplier Rekanan
+                  </span>
+                  <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white truncate">
+                    {selectedPOForQC?.supplierName}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                    Petugas Pemeriksa QC *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={qcFormInspector}
+                    onChange={e => setQcFormInspector(e.target.value)}
+                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                  />
+                </div>
+              </>
+            )}
+          </div>
 
+          {qcEntrySourceMode === 'manual' && (
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Keterangan & Catatan Pemeriksaan Organoleptik
+                Petugas Pemeriksa QC *
               </label>
-              <textarea
-                rows={2}
-                value={qcFormNotes}
-                onChange={e => setQcFormNotes(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              <input
+                type="text"
+                required
+                value={qcFormInspector}
+                onChange={e => setQcFormInspector(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
               />
             </div>
+          )}
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+          {/* Daftar Bahan & Barang yang Diterima (Per-Item Upload Foto, Perhitungan Selisih, Keterangan Manual) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                <PackageCheck className="w-4 h-4 text-emerald-600" />
+                <span>Daftar Bahan & Barang yang Diterima ({qcItemDrafts.length} Item)</span>
+              </div>
               <button
                 type="button"
-                onClick={() => setIsQCModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                onClick={handleAddQCItemRow}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[11px] font-bold transition"
               >
-                Batal
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
-              >
-                Simpan QC & Tambah ke Stok Gudang
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Bahan / Barang</span>
               </button>
             </div>
-          </form>
-        )}
+
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+              {qcItemDrafts.map((draft, idx) => {
+                const ordered = Number(draft.orderedQuantity) || 0;
+                const received = Number(draft.receivedQuantity) || 0;
+                const diff = received - ordered;
+                const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+
+                return (
+                  <div
+                    key={draft.key}
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80 space-y-3 shadow-2xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                      <span className="text-[11px] font-black text-blue-900 dark:text-sky-300 uppercase tracking-wide">
+                        Item #{idx + 1} {draft.itemName ? `— ${draft.itemName}` : ''}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
+                            diff === 0
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : diff < 0
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                          }`}
+                        >
+                          Selisih: {diff === 0 ? `0 ${draft.unit} (Sesuai)` : `${diff > 0 ? '+' : ''}${diff} ${draft.unit}`} ({pct}%)
+                        </span>
+                        {qcItemDrafts.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveQCItemRow(draft.key)}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                            title="Hapus baris item ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Row 1: Nama Bahan, Satuan, Jumlah Dipesan, Jumlah Diterima, Perhitungan Selisih */}
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                      <div className="sm:col-span-4">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Nama Bahan / Barang *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: Daging Ayam Fillet"
+                          value={draft.itemName}
+                          onChange={e => handleUpdateQCItemDraft(draft.key, { itemName: e.target.value })}
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Satuan *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="kg / pcs"
+                          value={draft.unit}
+                          onChange={e => handleUpdateQCItemDraft(draft.key, { unit: e.target.value })}
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Dipesan ({draft.unit}) *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          required
+                          value={draft.orderedQuantity}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, {
+                              orderedQuantity: Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300 mb-1">
+                          Diterima ({draft.unit}) *
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          required
+                          value={draft.receivedQuantity}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, {
+                              receivedQuantity: Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-emerald-400 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Hasil Hitung Selisih
+                        </label>
+                        <div
+                          className={`px-2.5 py-1.5 rounded-lg border text-xs font-mono font-black text-center ${
+                            diff === 0
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                              : diff < 0
+                              ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                              : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+                          }`}
+                        >
+                          {diff > 0 ? `+${diff}` : diff} {draft.unit}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Kondisi, Mutu Grade, Suhu, Kadaluarsa, Status QC */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Kondisi Bahan
+                        </label>
+                        <select
+                          value={draft.condition}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, { condition: e.target.value as any })
+                          }
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        >
+                          <option value="Baik">Baik (Segar & Utuh)</option>
+                          <option value="Kemasan Cacat">Kemasan Cacat</option>
+                          <option value="Rusak Ringan">Rusak Ringan</option>
+                          <option value="Busuk/Tercemar">Busuk / Tercemar</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Mutu Grade
+                        </label>
+                        <select
+                          value={draft.qualityGrade}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, { qualityGrade: e.target.value as any })
+                          }
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        >
+                          <option value="Grade A (Sangat Baik)">Grade A</option>
+                          <option value="Grade B (Standar)">Grade B</option>
+                          <option value="Afkir (Tidak Layak)">Afkir</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Suhu (°C)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={draft.receivingTemp}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, {
+                              receivingTemp: Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Tgl Expired
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={draft.expiryDate}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, { expiryDate: e.target.value })
+                          }
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Status Hasil QC
+                        </label>
+                        <select
+                          value={draft.status}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, {
+                              status: e.target.value as QCStatusPLOK,
+                            })
+                          }
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                        >
+                          <option value="Diterima">Diterima Penuh</option>
+                          <option value="Diterima sebagian">Diterima Sebagian</option>
+                          <option value="Ditolak">Ditolak</option>
+                          <option value="Perlu pemeriksaan ulang">Karantina</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Row 3: Upload Foto Per Bahan (> 1 foto) + Keterangan Manual Per Bahan */}
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 items-start">
+                      <div className="sm:col-span-6 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                            Foto Bukti Bahan / Barang #{idx + 1} ({draft.photoUrls.length} Foto)
+                          </label>
+                          <label className="inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg bg-blue-900 hover:bg-blue-800 text-white text-[10px] font-bold cursor-pointer transition shadow-2xs">
+                            <Upload className="w-3 h-3 shrink-0" />
+                            <span>{draft.photoUrls.length > 0 ? '+ Tambah Foto' : '+ Upload Foto'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              className="hidden"
+                              onChange={e =>
+                                processMultipleImageUploads(
+                                  e,
+                                  newUrls =>
+                                    handleAppendPhotosToDraft(
+                                      draft.key,
+                                      newUrls,
+                                      draft.itemName || `Item #${idx + 1}`
+                                    ),
+                                  msg => addToast('error', 'Upload Foto Gagal', msg)
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+
+                        {draft.photoUrls.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {draft.photoUrls.map((url, photoIdx) => (
+                              <div
+                                key={`${draft.key}-thumb-${photoIdx}`}
+                                className="relative group w-16 h-13 rounded-lg overflow-hidden border border-emerald-500 bg-slate-100 dark:bg-slate-800"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Preview ${draft.itemName} #${photoIdx + 1}`}
+                                  onClick={() =>
+                                    setViewGallery({
+                                      urls: draft.photoUrls,
+                                      index: photoIdx,
+                                      title: draft.itemName || `Item #${idx + 1}`,
+                                    })
+                                  }
+                                  className="w-full h-full object-cover cursor-pointer"
+                                />
+                                <span className="pointer-events-none absolute bottom-0.5 left-0.5 px-1 rounded bg-slate-900/75 text-white text-[8px] font-mono">
+                                  #{photoIdx + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemovePhotoFromDraft(draft.key, photoIdx)}
+                                  className="absolute top-0.5 right-0.5 p-0.5 rounded bg-rose-600 text-white hover:bg-rose-500"
+                                  title="Hapus foto ini"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-2.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 flex items-center gap-2 text-slate-400 text-[10px]">
+                            <Camera className="w-4 h-4 shrink-0" />
+                            <span>Bisa pilih & upload lebih dari 1 foto sekaligus untuk item ini</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="sm:col-span-6">
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
+                          <FileEdit className="w-3 h-3 text-blue-600" />
+                          <span>Kolom Keterangan Manual (Item #{idx + 1})</span>
+                        </label>
+                        <textarea
+                          rows={3}
+                          placeholder="Isi keterangan kondisi, selisih barang, atau catatan QC secara manual..."
+                          value={draft.notes}
+                          onChange={e =>
+                            handleUpdateQCItemDraft(draft.key, { notes: e.target.value })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Live Calculation Summary Bar Inside Modal */}
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-4 font-mono">
+              <span>
+                Total Dipesan:{' '}
+                <strong>
+                  {formatNumber(
+                    qcItemDrafts.reduce((s, d) => s + (Number(d.orderedQuantity) || 0), 0)
+                  )}
+                </strong>
+              </span>
+              <span>
+                Total Diterima:{' '}
+                <strong className="text-emerald-700 dark:text-emerald-400">
+                  {formatNumber(
+                    qcItemDrafts.reduce((s, d) => s + (Number(d.receivedQuantity) || 0), 0)
+                  )}
+                </strong>
+              </span>
+              <span>
+                Total Selisih:{' '}
+                <strong className="text-blue-900 dark:text-sky-300">
+                  {(() => {
+                    const totOrd = qcItemDrafts.reduce(
+                      (s, d) => s + (Number(d.orderedQuantity) || 0),
+                      0
+                    );
+                    const totRec = qcItemDrafts.reduce(
+                      (s, d) => s + (Number(d.receivedQuantity) || 0),
+                      0
+                    );
+                    const totDiff = totRec - totOrd;
+                    return `${totDiff > 0 ? '+' : ''}${formatNumber(totDiff)}`;
+                  })()}
+                </strong>
+              </span>
+            </div>
+            <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+              Foto Terlampir:{' '}
+              {qcItemDrafts.reduce((s, d) => s + d.photoUrls.length, 0)} Foto (
+              {qcItemDrafts.filter(d => d.photoUrls.length > 0).length} / {qcItemDrafts.length} Bahan)
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsQCModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
+            >
+              Simpan QC & Data Barang Diterima
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* ========================================================================= */}
@@ -1964,24 +2751,92 @@ export const ProcurementModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: ZOOM / LIHAT FOTO QC */}
+      {/* MODAL: ZOOM / LIHAT GALERI FOTO QC (MULTI-FOTO) */}
       {/* ========================================================================= */}
       <Modal
-        isOpen={Boolean(viewPhotoUrl)}
-        onClose={() => setViewPhotoUrl(null)}
-        title="Dokumentasi Foto Inspeksi Quality Control"
-        subtitle="Bukti fisik penerimaan bahan pangan di pos penerimaan SPPG"
-        maxWidth="md"
+        isOpen={Boolean(viewGallery)}
+        onClose={() => setViewGallery(null)}
+        title={`Dokumentasi Foto QC — ${viewGallery?.title || ''}`}
+        subtitle={
+          viewGallery
+            ? `Foto ke-${viewGallery.index + 1} dari ${viewGallery.urls.length} dokumentasi fisik penerimaan`
+            : 'Bukti fisik penerimaan bahan pangan di pos penerimaan SPPG'
+        }
+        maxWidth="lg"
       >
-        {viewPhotoUrl && (
+        {viewGallery && viewGallery.urls.length > 0 && (
           <div className="space-y-3">
-            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black">
-              <img src={viewPhotoUrl} alt="Inspeksi QC" className="w-full max-h-96 object-contain mx-auto" />
+            <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black flex items-center justify-center">
+              <img
+                src={viewGallery.urls[viewGallery.index]}
+                alt={`Inspeksi QC #${viewGallery.index + 1}`}
+                className="w-full max-h-96 object-contain mx-auto"
+              />
+              {viewGallery.urls.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setViewGallery(prev =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: (prev.index - 1 + prev.urls.length) % prev.urls.length,
+                            }
+                          : null
+                      )
+                    }
+                    className="absolute left-2 p-2 rounded-full bg-slate-900/75 hover:bg-slate-900 text-white transition"
+                    title="Foto sebelumnya"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setViewGallery(prev =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: (prev.index + 1) % prev.urls.length,
+                            }
+                          : null
+                      )
+                    }
+                    className="absolute right-2 p-2 rounded-full bg-slate-900/75 hover:bg-slate-900 text-white transition"
+                    title="Foto berikutnya"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
             </div>
+
+            {viewGallery.urls.length > 1 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {viewGallery.urls.map((u, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() =>
+                      setViewGallery(prev => (prev ? { ...prev, index: idx } : null))
+                    }
+                    className={`w-14 h-12 rounded-lg overflow-hidden border-2 shrink-0 transition ${
+                      idx === viewGallery.index
+                        ? 'border-blue-600 ring-2 ring-blue-500/30'
+                        : 'border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={u} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => setViewPhotoUrl(null)}
+                onClick={() => setViewGallery(null)}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
               >
                 Tutup Pratinjau

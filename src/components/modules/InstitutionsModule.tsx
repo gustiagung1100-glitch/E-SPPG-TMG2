@@ -3,7 +3,12 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
-import { PrintHeader } from '../common/PrintHeader';
+import {
+  BASTDocumentSheet,
+  resolveBastAutoFields,
+  generateBastNumber,
+  exportBastDocumentPDF,
+} from '../common/BASTDocumentSheet';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -43,6 +48,7 @@ import {
   ArrowRight,
   ClipboardCheck,
   Users2,
+  Download,
 } from 'lucide-react';
 
 type TabKey =
@@ -63,6 +69,8 @@ export const InstitutionsModule: React.FC = () => {
     beneficiaryAttendance,
     recordBeneficiaryAttendance,
     beneficiaryQuotaHistory,
+    masterVolunteers,
+    distributionLogs,
     hasPermission,
     sppgConfig,
     currentUser,
@@ -131,6 +139,9 @@ export const InstitutionsModule: React.FC = () => {
 
   // Detail Modal for BAST / Print
   const [selectedAttendanceForBast, setSelectedAttendanceForBast] = useState<BeneficiaryAttendanceLog | null>(null);
+  const [bastPrintReceiveTime, setBastPrintReceiveTime] = useState('07:00');
+  const [bastPrintReturnTime, setBastPrintReturnTime] = useState('');
+  const [bastPrintNumberOverride, setBastPrintNumberOverride] = useState('');
 
   // Filtered institutions
   const filteredInstitutions = useMemo(() => {
@@ -2051,103 +2062,119 @@ export const InstitutionsModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={Boolean(selectedAttendanceForBast)}
-        onClose={() => setSelectedAttendanceForBast(null)}
-        title="Berita Acara Serah Terima (BAST) & Presensi Kehadiran"
-        subtitle="Dokumen resmi serah terima makanan bergizi gratis antara SPPG dan Sekolah"
-        maxWidth="lg"
+        onClose={() => {
+          setSelectedAttendanceForBast(null);
+          setBastPrintReturnTime('');
+          setBastPrintNumberOverride('');
+        }}
+        title="Berita Acara Serah Terima (BAST) & Alat Makan"
+        subtitle="Format resmi BGN terhubung otomatis dengan Master Data & Presensi Penerima Manfaat"
+        maxWidth="4xl"
       >
-        {selectedAttendanceForBast && (
-          <div className="space-y-4 text-xs">
-            <PrintHeader
-              title="BERITA ACARA SERAH TERIMA (BAST) MAKANAN BERGIZI GRATIS"
-              docNumber={`BAST-MBG/TMG2/${selectedAttendanceForBast.date.replace(/-/g, '')}/${selectedAttendanceForBast.institutionId}`}
-            />
+        {selectedAttendanceForBast && (() => {
+          const matchedDist = distributionLogs.find(
+            d =>
+              d.institutionId === selectedAttendanceForBast.institutionId &&
+              d.date === selectedAttendanceForBast.date
+          );
+          const autoBastNum =
+            matchedDist?.bastNumber ||
+            generateBastNumber(
+              191 + (institutions.findIndex(i => i.id === selectedAttendanceForBast.institutionId) + 1 || 1),
+              selectedAttendanceForBast.date
+            );
+          const bastData = resolveBastAutoFields({
+            institutions,
+            beneficiaryAttendance,
+            masterVolunteers,
+            distributionLogs,
+            sppgConfig,
+            institutionId: selectedAttendanceForBast.institutionId,
+            institutionName: selectedAttendanceForBast.institutionName,
+            date: selectedAttendanceForBast.date,
+            bastNumber: bastPrintNumberOverride.trim() || autoBastNum,
+            totalPortions: selectedAttendanceForBast.actualPortions,
+            receiveTime: bastPrintReceiveTime || matchedDist?.arrivalTime || '07:00',
+            returnTime: bastPrintReturnTime,
+          });
 
-            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl space-y-2 border border-slate-200 dark:border-slate-800">
-              <div className="grid grid-cols-2 gap-2">
+          return (
+            <div className="space-y-4 text-xs">
+              {/* Quick Parameter Adjustment Bar (Hidden on Print) */}
+              <div className="print:hidden p-3 bg-slate-50 dark:bg-slate-800/70 rounded-xl border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <span className="text-slate-500">Tanggal Serah Terima:</span>
-                  <div className="font-bold text-slate-900 dark:text-white">
-                    {formatIndonesianDate(selectedAttendanceForBast.date)}
-                  </div>
+                  <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    Nomor BAST (Opsional Ubah)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={autoBastNum}
+                    value={bastPrintNumberOverride}
+                    onChange={e => setBastPrintNumberOverride(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                  />
                 </div>
                 <div>
-                  <span className="text-slate-500">Lembaga Sasaran:</span>
-                  <div className="font-bold text-slate-900 dark:text-white">
-                    {selectedAttendanceForBast.institutionName}
-                  </div>
+                  <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    Jam Penerimaan Paket (WIB)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="07:00"
+                    value={bastPrintReceiveTime}
+                    onChange={e => setBastPrintReceiveTime(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    Jam Penyerahan Alat Makan (Kosong = ........)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Kosongkan untuk titik-titik manual"
+                    value={bastPrintReturnTime}
+                    onChange={e => setBastPrintReturnTime(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                  />
                 </div>
               </div>
 
-              <div className="border-t border-slate-200 dark:border-slate-800 pt-2 grid grid-cols-3 gap-2 font-mono">
-                <div>
-                  <span className="text-slate-500 text-[10px]">Terdaftar:</span>
-                  <div className="font-bold">{selectedAttendanceForBast.totalRegistered}</div>
-                </div>
-                <div>
-                  <span className="text-rose-600 text-[10px]">Tidak Hadir:</span>
-                  <div className="font-bold text-rose-600">{selectedAttendanceForBast.totalAbsent}</div>
-                </div>
-                <div>
-                  <span className="text-emerald-600 text-[10px]">Porsi Aktual:</span>
-                  <div className="font-black text-emerald-700 text-sm">
-                    {selectedAttendanceForBast.actualPortions}
-                  </div>
-                </div>
-              </div>
+              {/* Exact Two-Part BAST Document Sheet */}
+              <BASTDocumentSheet data={bastData} />
 
-              <div className="border-t border-slate-200 dark:border-slate-800 pt-2">
-                <span className="text-slate-500 text-[10px]">Catatan Kondisi Makanan:</span>
-                <div className="text-slate-800 dark:text-slate-200 italic">
-                  "{selectedAttendanceForBast.notes || 'Ompreng higienis, suhu hangat, lengkap lauk dan buah.'}"
-                </div>
+              <div className="print:hidden flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAttendanceForBast(null);
+                    setBastPrintReturnTime('');
+                    setBastPrintNumberOverride('');
+                  }}
+                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportBastDocumentPDF(bastData)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-700 text-white shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh PDF BAST</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={triggerPrint}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak Lembar BAST</span>
+                </button>
               </div>
             </div>
-
-            {/* Signature Block */}
-            <div className="grid grid-cols-2 gap-4 text-center pt-4 border-t border-slate-200 dark:border-slate-800">
-              <div>
-                <div className="text-[11px] text-slate-500">Pihak Pertama (Pengirim):</div>
-                <div className="font-bold text-slate-800 dark:text-slate-200 mt-1">Petugas Armada SPPG TMG2</div>
-                <div className="h-14 flex items-center justify-center text-[10px] text-slate-400 italic">
-                  [Telah Terverifikasi Digital]
-                </div>
-                <div className="font-semibold text-slate-700 dark:text-slate-300">
-                  {selectedAttendanceForBast.recordedBy}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] text-slate-500">Pihak Kedua (Penerima):</div>
-                <div className="font-bold text-slate-800 dark:text-slate-200 mt-1">PIC Guru MBG Sekolah</div>
-                <div className="h-14 flex items-center justify-center text-[10px] text-slate-400 italic">
-                  [Tanda Tangan & Cap Sekolah]
-                </div>
-                <div className="font-semibold text-slate-700 dark:text-slate-300">
-                  Kepala Sekolah / PIC MBG
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setSelectedAttendanceForBast(null)}
-                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-              >
-                Tutup
-              </button>
-              <button
-                type="button"
-                onClick={triggerPrint}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Cetak Lembar BAST</span>
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* Confirmation Dialog: Delete Lembaga */}

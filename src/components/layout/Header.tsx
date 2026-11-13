@@ -12,6 +12,7 @@ import {
   Clock,
   Sparkles,
   KeyRound,
+  LogOut,
 } from 'lucide-react';
 import { RoleType } from '../../types';
 import { SPPGLogo, BGNLogo } from '../common/OfficialLogos';
@@ -33,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
     purchaseOrders,
     volunteerAttendance,
     menuItems,
+    logout,
   } = useApp();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -239,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
             )}
           </div>
 
-          {/* User Profile Mini Block */}
+          {/* User Profile Mini Block & Logout */}
           <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200 dark:border-slate-800">
             <div className="w-8 h-8 rounded-full bg-blue-900 dark:bg-sky-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
               {currentUser.name.charAt(0)}
@@ -252,6 +254,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
                 {currentUser.role}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={logout}
+              title="Keluar dari sistem"
+              aria-label="Keluar dari sistem"
+              className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200 dark:hover:text-rose-300 dark:hover:bg-rose-950/50 dark:hover:border-rose-800 text-xs font-semibold transition-all active:scale-95"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">Keluar</span>
+            </button>
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
 import { RoleSwitcher } from './components/auth/RoleSwitcher';
 import { FirebaseAuthModal } from './components/auth/FirebaseAuthModal';
+import { LoginPage } from './components/auth/LoginPage';
 
 // Module Components
 import { DashboardModule } from './components/modules/DashboardModule';
@@ -186,15 +187,24 @@ const MainContent: React.FC = () => {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
-      <ToastContainer />
     </div>
+  );
+};
+
+const AuthGate: React.FC = () => {
+  const { isAuthenticated } = useApp();
+  return (
+    <>
+      {isAuthenticated ? <MainContent /> : <LoginPage />}
+      <ToastContainer />
+    </>
   );
 };
 
 export default function App() {
   return (
     <AppProvider>
-      <MainContent />
+      <AuthGate />
     </AppProvider>
   );
 }

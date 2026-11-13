@@ -59,7 +59,13 @@ import {
   DollarSign,
   UserCheck,
   Check,
+  Camera,
+  Upload,
+  Eye,
+  X,
+  Calculator,
 } from 'lucide-react';
+import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
 
 type InventoryTab =
   | 'stok_gudang'
@@ -128,15 +134,18 @@ export const InventoryModule: React.FC = () => {
   const [mutationForm, setMutationForm] = useState({
     itemId: items[0]?.id || 'inv-1',
     type: 'Barang Masuk' as MutationType,
+    orderedQuantity: 50,
     quantity: 50,
     referenceNumber: `IN-PO-26110${defaultStockMutations.length + 1}`,
     batchNumber: `BATCH-261108-${Math.floor(Math.random() * 80) + 10}`,
     expiryDate: new Date(Date.now() + 86400000 * 10).toISOString().slice(0, 10),
     supplierName: masterSuppliers[0]?.name || 'Koperasi Pasar Krejengan',
     recipientOrDepartment: 'Div. Pengolahan / Dapur Utama',
+    photoUrl: '',
     notes: 'Penerimaan bahan pangan sesuai standar mutu',
     operatorName: currentUser.name,
   });
+  const [viewMutationPhotoUrl, setViewMutationPhotoUrl] = useState<string | null>(null);
 
   // Modal: Stok Opname
   const [isOpnameModalOpen, setIsOpnameModalOpen] = useState(false);
@@ -336,6 +345,7 @@ export const InventoryModule: React.FC = () => {
     setMutationForm({
       itemId: item.id,
       type,
+      orderedQuantity: type === 'Barang Masuk' ? 50 : 0,
       quantity: type === 'Barang Keluar' ? Math.min(item.currentStock, 30) : 50,
       referenceNumber:
         type === 'Barang Masuk'
@@ -347,6 +357,7 @@ export const InventoryModule: React.FC = () => {
       expiryDate: new Date(Date.now() + 86400000 * 8).toISOString().slice(0, 10),
       supplierName: item.supplierName,
       recipientOrDepartment: type === 'Barang Keluar' ? 'Div. Pengolahan' : item.supplierName,
+      photoUrl: '',
       notes:
         type === 'Barang Masuk'
           ? 'Penerimaan bahan tambahan dari supplier'
@@ -383,6 +394,12 @@ export const InventoryModule: React.FC = () => {
     const qtyIn = isOutflow ? 0 : qty;
     const qtyOut = isOutflow ? qty : 0;
     const newStockBalance = selectedItemForMutation.currentStock + qtyIn - qtyOut;
+    const orderedQty =
+      mutationForm.type === 'Barang Masuk'
+        ? Number(mutationForm.orderedQuantity) || qty
+        : undefined;
+    const diffQty =
+      orderedQty !== undefined ? qty - orderedQty : undefined;
 
     // Create immutable mutation record
     const newMutation: StockMutation = {
@@ -401,11 +418,14 @@ export const InventoryModule: React.FC = () => {
           ? mutationForm.supplierName
           : undefined,
       unit: selectedItemForMutation.unit,
+      orderedQuantity: orderedQty,
       quantityIn: qtyIn,
       quantityOut: qtyOut,
+      differenceQuantity: diffQty,
       balance: newStockBalance,
       unitPrice: selectedItemForMutation.pricePerUnit,
       totalPrice: qty * selectedItemForMutation.pricePerUnit,
+      photoUrl: mutationForm.photoUrl || undefined,
       notes: mutationForm.notes,
       operatorName: mutationForm.operatorName,
       recipientOrDepartment: mutationForm.recipientOrDepartment,
@@ -1147,21 +1167,46 @@ export const InventoryModule: React.FC = () => {
               },
               {
                 key: 'movement',
-                header: 'Masuk / Keluar',
-                render: row => (
-                  <div className="font-mono text-xs">
-                    {row.quantityIn > 0 && (
-                      <span className="text-emerald-600 font-bold">
-                        +{formatNumber(row.quantityIn)} {row.unit}
-                      </span>
-                    )}
-                    {row.quantityOut > 0 && (
-                      <span className="text-rose-600 font-bold">
-                        -{formatNumber(row.quantityOut)} {row.unit}
-                      </span>
-                    )}
-                  </div>
-                ),
+                header: 'Dipesan vs Diterima / Keluar',
+                render: row => {
+                  const ordered = row.orderedQuantity;
+                  const diff =
+                    ordered !== undefined
+                      ? row.quantityIn - ordered
+                      : undefined;
+                  return (
+                    <div className="font-mono text-xs space-y-0.5">
+                      {ordered !== undefined && (
+                        <div className="text-[11px] text-slate-500">
+                          Pesan: <strong>{formatNumber(ordered)} {row.unit}</strong>
+                        </div>
+                      )}
+                      {row.quantityIn > 0 && (
+                        <span className="text-emerald-600 font-bold block">
+                          Terima: +{formatNumber(row.quantityIn)} {row.unit}
+                        </span>
+                      )}
+                      {row.quantityOut > 0 && (
+                        <span className="text-rose-600 font-bold block">
+                          Keluar: -{formatNumber(row.quantityOut)} {row.unit}
+                        </span>
+                      )}
+                      {diff !== undefined && (
+                        <span
+                          className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-black ${
+                            diff === 0
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : diff < 0
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                          }`}
+                        >
+                          Selisih: {diff > 0 ? `+${diff}` : diff} {row.unit}
+                        </span>
+                      )}
+                    </div>
+                  );
+                },
               },
               {
                 key: 'balance',
@@ -1173,13 +1218,70 @@ export const InventoryModule: React.FC = () => {
                 ),
               },
               {
-                key: 'notes',
-                header: 'Keterangan & Tujuan',
+                key: 'photoUrl',
+                header: 'Foto Bukti Barang',
                 render: row => (
-                  <div className="text-xs text-slate-600 dark:text-slate-300 max-w-xs">
-                    <div>{row.notes}</div>
+                  <div className="flex flex-col gap-1 min-w-[95px]">
+                    {row.photoUrl && (
+                      <div className="relative group w-16 h-12 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700">
+                        <img
+                          src={row.photoUrl}
+                          alt={row.itemName}
+                          onClick={() => setViewMutationPhotoUrl(row.photoUrl || null)}
+                          className="w-full h-full object-cover cursor-pointer"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setViewMutationPhotoUrl(row.photoUrl || null)}
+                          className="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-slate-900/75 text-white text-[9px] font-bold"
+                        >
+                          <Eye className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    )}
+                    <label className="print:hidden inline-flex items-center justify-center gap-1 px-2 py-1 rounded bg-blue-900 hover:bg-blue-800 text-white text-[10px] font-bold cursor-pointer w-fit">
+                      <Upload className="w-3 h-3" />
+                      <span>{row.photoUrl ? 'Ganti Foto' : 'Upload Foto'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e =>
+                          processFacilityImageUpload(
+                            e,
+                            url => {
+                              setMutations(prev =>
+                                prev.map(m => (m.id === row.id ? { ...m, photoUrl: url } : m))
+                              );
+                              addToast('success', 'Foto Terunggah', `Foto untuk ${row.itemName} tersimpan.`);
+                            },
+                            msg => addToast('error', 'Upload Gagal', msg)
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                ),
+              },
+              {
+                key: 'notes',
+                header: 'Keterangan Manual',
+                render: row => (
+                  <div className="text-xs text-slate-600 dark:text-slate-300 min-w-[170px] max-w-xs space-y-1">
+                    <textarea
+                      rows={2}
+                      value={row.notes}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setMutations(prev =>
+                          prev.map(m => (m.id === row.id ? { ...m, notes: val } : m))
+                        );
+                      }}
+                      placeholder="Isi keterangan manual..."
+                      className="w-full px-2 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+                    />
                     {row.recipientOrDepartment && (
-                      <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                      <div className="text-[10px] text-slate-400 font-semibold">
                         Tujuan/Rekanan: {row.recipientOrDepartment}
                       </div>
                     )}
@@ -1551,7 +1653,7 @@ export const InventoryModule: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Nomor Referensi Dokumen / Reff *
@@ -1567,9 +1669,30 @@ export const InventoryModule: React.FC = () => {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kuantitas / Jumlah Mutasi ({selectedItemForMutation?.unit}) *
+            {mutationForm.type === 'Barang Masuk' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Jumlah Dipesan ({selectedItemForMutation?.unit}) *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  value={mutationForm.orderedQuantity}
+                  onChange={e =>
+                    setMutationForm({ ...mutationForm, orderedQuantity: Number(e.target.value) })
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+            )}
+
+            <div className={mutationForm.type === 'Barang Masuk' ? '' : 'sm:col-span-2'}>
+              <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-300 mb-1">
+                {mutationForm.type === 'Barang Masuk'
+                  ? `Jumlah Diterima (${selectedItemForMutation?.unit}) *`
+                  : `Kuantitas / Jumlah Mutasi (${selectedItemForMutation?.unit}) *`}
               </label>
               <input
                 type="number"
@@ -1580,10 +1703,38 @@ export const InventoryModule: React.FC = () => {
                 onChange={e =>
                   setMutationForm({ ...mutationForm, quantity: Number(e.target.value) })
                 }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-emerald-400 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
               />
             </div>
           </div>
+
+          {mutationForm.type === 'Barang Masuk' && (
+            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <div className="flex items-center gap-1.5 text-blue-900 dark:text-sky-300 font-bold">
+                <Calculator className="w-4 h-4" />
+                <span>Perhitungan Dipesan vs Diterima:</span>
+              </div>
+              {(() => {
+                const ordered = Number(mutationForm.orderedQuantity) || 0;
+                const received = Number(mutationForm.quantity) || 0;
+                const diff = received - ordered;
+                const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+                return (
+                  <span
+                    className={`px-2.5 py-1 rounded-lg font-black ${
+                      diff === 0
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                        : diff < 0
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                        : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                    }`}
+                  >
+                    Selisih: {diff > 0 ? `+${diff}` : diff} {selectedItemForMutation?.unit} ({pct}% terpenuhi)
+                  </span>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Batch & Expired (Optional/FEFO) */}
           <div className="grid grid-cols-2 gap-3">
@@ -1616,26 +1767,78 @@ export const InventoryModule: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              {mutationForm.type === 'Barang Keluar' ? 'Divisi / Ruang Penerima' : 'Pemasok / Supplier'}
-            </label>
-            <input
-              type="text"
-              value={mutationForm.recipientOrDepartment}
-              onChange={e =>
-                setMutationForm({ ...mutationForm, recipientOrDepartment: e.target.value })
-              }
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                {mutationForm.type === 'Barang Keluar' ? 'Divisi / Ruang Penerima' : 'Pemasok / Supplier'}
+              </label>
+              <input
+                type="text"
+                value={mutationForm.recipientOrDepartment}
+                onChange={e =>
+                  setMutationForm({ ...mutationForm, recipientOrDepartment: e.target.value })
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Foto Bukti Bahan / Barang Diterima
+              </label>
+              <div className="flex items-center gap-2">
+                {mutationForm.photoUrl ? (
+                  <img
+                    src={mutationForm.photoUrl}
+                    alt="Preview"
+                    onClick={() => setViewMutationPhotoUrl(mutationForm.photoUrl)}
+                    className="w-11 h-9 rounded-lg object-cover border border-emerald-500 cursor-pointer shrink-0"
+                  />
+                ) : (
+                  <div className="w-11 h-9 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                )}
+                <label className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold cursor-pointer transition">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{mutationForm.photoUrl ? 'Ganti Foto' : 'Upload Foto'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e =>
+                      processFacilityImageUpload(
+                        e,
+                        url => {
+                          setMutationForm(prev => ({ ...prev, photoUrl: url }));
+                          addToast('success', 'Foto Terunggah', 'Foto bukti barang berhasil dilampirkan.');
+                        },
+                        msg => addToast('error', 'Upload Gagal', msg)
+                      )
+                    }
+                  />
+                </label>
+                {mutationForm.photoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setMutationForm(prev => ({ ...prev, photoUrl: '' }))}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600"
+                    title="Hapus foto"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Catatan / Alasan Mutasi
+              Keterangan Manual / Catatan Penerimaan Barang
             </label>
             <textarea
               rows={2}
+              placeholder="Isi keterangan kondisi bahan atau selisih penerimaan secara manual..."
               value={mutationForm.notes}
               onChange={e => setMutationForm({ ...mutationForm, notes: e.target.value })}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
@@ -1939,6 +2142,31 @@ export const InventoryModule: React.FC = () => {
         confirmLabel="Ya, Hapus Item"
         isDestructive
       />
+      {/* Modal Zoom Foto Mutasi Barang Masuk */}
+      <Modal
+        isOpen={Boolean(viewMutationPhotoUrl)}
+        onClose={() => setViewMutationPhotoUrl(null)}
+        title="Bukti Foto Barang Masuk / Penerimaan Gudang"
+        subtitle="Dokumentasi fisik bahan/barang saat diterima di gudang SPPG"
+        maxWidth="md"
+      >
+        {viewMutationPhotoUrl && (
+          <div className="space-y-3">
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black">
+              <img src={viewMutationPhotoUrl} alt="Bukti Barang" className="w-full max-h-96 object-contain mx-auto" />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewMutationPhotoUrl(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+              >
+                Tutup Pratinjau
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

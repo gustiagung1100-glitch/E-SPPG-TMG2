@@ -28,30 +28,30 @@ export const SimpleBarChart: React.FC<BarChartProps> = ({
   );
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
       {(title || subtitle) && (
         <div className="mb-4 flex items-center justify-between">
           <div>
             {title && (
-              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+              <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
                 {title}
               </h4>
             )}
             {subtitle && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
                 {subtitle}
               </p>
             )}
           </div>
           {(primaryLabel || secondaryLabel) && (
-            <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
+            <div className="flex items-center gap-3 text-xs text-[#64748B] dark:text-slate-300">
               <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-900 dark:bg-sky-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#142B4A] dark:bg-teal-500" />
                 {primaryLabel}
               </span>
               {secondaryLabel && (
                 <span className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-400 dark:bg-sky-300" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#0F766E] dark:bg-teal-300" />
                   {secondaryLabel}
                 </span>
               )}
@@ -79,13 +79,13 @@ export const SimpleBarChart: React.FC<BarChartProps> = ({
             >
               {/* Tooltip */}
               {isHovered && (
-                <div className="absolute -top-12 z-20 bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1.5 px-3 rounded-lg shadow-xl border border-slate-700/60 whitespace-nowrap pointer-events-none tabular-nums animate-in fade-in zoom-in-95 duration-100">
-                  <div className="font-bold text-sky-400">{item.label}</div>
-                  <div className="text-slate-200">
+                <div className="absolute -top-12 z-20 bg-[#142B4A]/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1.5 px-3 rounded-lg shadow-xl border border-white/10 whitespace-nowrap pointer-events-none tabular-nums animate-in fade-in zoom-in-95 duration-100">
+                  <div className="font-bold text-[#F2D58B]">{item.label}</div>
+                  <div className="text-slate-100">
                     {primaryLabel}: {valueFormatter(item.value)}
                   </div>
                   {item.secondaryValue !== undefined && secondaryLabel && (
-                    <div className="text-sky-300">
+                    <div className="text-teal-300">
                       {secondaryLabel}: {valueFormatter(item.secondaryValue)}
                     </div>
                   )}
@@ -96,7 +96,7 @@ export const SimpleBarChart: React.FC<BarChartProps> = ({
               <div className="w-full flex items-end justify-center gap-1 h-full">
                 {/* Primary Bar */}
                 <div
-                  className="w-full max-w-[28px] rounded-t-md transition-all duration-300 relative bg-blue-900 hover:bg-blue-800 dark:bg-sky-500 dark:hover:bg-sky-400"
+                  className="w-full max-w-[28px] rounded-t-md transition-all duration-300 relative bg-[#142B4A] hover:bg-[#102D63] dark:bg-teal-500 dark:hover:bg-teal-400"
                   style={{
                     height: `${Math.max(primaryHeightPct, 4)}%`,
                     backgroundColor: item.color,
@@ -106,14 +106,14 @@ export const SimpleBarChart: React.FC<BarChartProps> = ({
                 {/* Secondary Bar if exists */}
                 {item.secondaryValue !== undefined && (
                   <div
-                    className="w-full max-w-[28px] rounded-t-md transition-all duration-300 bg-sky-400 hover:bg-sky-300 dark:bg-sky-300"
+                    className="w-full max-w-[28px] rounded-t-md transition-all duration-300 bg-[#0F766E] hover:bg-teal-600 dark:bg-teal-300"
                     style={{ height: `${Math.max(secondaryHeightPct, 4)}%` }}
                   />
                 )}
               </div>
 
               {/* Label below */}
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 truncate w-full text-center group-hover:text-slate-900 dark:group-hover:text-white transition">
+              <span className="text-[10px] text-[#64748B] dark:text-slate-400 mt-2 truncate w-full text-center group-hover:text-[#1F2937] dark:group-hover:text-white transition">
                 {item.label}
               </span>
             </div>
@@ -142,15 +142,14 @@ export const DonutChart: React.FC<DonutChartProps> = ({
   const total = data.reduce((acc, cur) => acc + cur.value, 0) || 1;
   let accumulatedAngle = 0;
 
-  // Generate SVG conic path or segments
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
       <div className="mb-3">
-        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+        <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
           {title}
         </h4>
         {subtitle && (
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+          <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
             {subtitle}
           </p>
         )}
@@ -183,12 +182,12 @@ export const DonutChart: React.FC<DonutChartProps> = ({
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
             {centerValue && (
-              <span className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white leading-none tabular-nums">
+              <span className="text-base sm:text-lg font-extrabold text-[#1F2937] dark:text-white leading-none tabular-nums">
                 {centerValue}
               </span>
             )}
             {centerLabel && (
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 uppercase font-semibold tracking-wider">
+              <span className="text-[10px] text-[#64748B] dark:text-slate-400 mt-1 uppercase font-semibold tracking-wider">
                 {centerLabel}
               </span>
             )}
@@ -206,15 +205,15 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                     className="w-3 h-3 rounded-xs shrink-0 shadow-2xs"
                     style={{ backgroundColor: item.color }}
                   />
-                  <span className="text-slate-700 dark:text-slate-300 font-medium">
+                  <span className="text-[#1F2937] dark:text-slate-300 font-medium">
                     {item.label}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900 dark:text-white">
+                  <span className="font-bold text-[#1F2937] dark:text-white">
                     {formatNumber(item.value)}
                   </span>
-                  <span className="text-slate-400 text-[11px] font-mono">({pct}%)</span>
+                  <span className="text-[#64748B] text-[11px] font-mono">({pct}%)</span>
                 </div>
               </div>
             );
@@ -244,25 +243,25 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
   const minVal = 10000;
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+          <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
             {title}
           </h4>
           {subtitle && (
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
               {subtitle}
             </p>
           )}
         </div>
         <div className="flex items-center gap-3 text-xs">
-          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-            <span className="w-3 h-0.5 bg-blue-900 dark:bg-sky-400" />
+          <span className="flex items-center gap-1.5 text-[#64748B] dark:text-slate-300">
+            <span className="w-3 h-0.5 bg-[#0F766E] dark:bg-teal-400" />
             {actualLabel}
           </span>
-          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-            <span className="w-3 h-0.5 border-t border-dashed border-rose-500" />
+          <span className="flex items-center gap-1.5 text-[#64748B] dark:text-slate-300">
+            <span className="w-3 h-0.5 border-t border-dashed border-[#DC2626]" />
             {targetLabel}
           </span>
         </div>
@@ -271,12 +270,12 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
       <div className="h-44 w-full relative pt-4 pb-2">
         {/* Horizontal target threshold line */}
         <div
-          className="absolute left-0 right-0 border-b border-dashed border-rose-400 dark:border-rose-500 z-0 flex items-center justify-end"
+          className="absolute left-0 right-0 border-b border-dashed border-[#DC2626] dark:border-rose-500 z-0 flex items-center justify-end"
           style={{
             top: `${100 - ((15000 - minVal) / (maxVal - minVal)) * 100}%`,
           }}
         >
-          <span className="text-[10px] text-rose-600 dark:text-rose-400 bg-white dark:bg-slate-900 px-1 font-mono font-semibold">
+          <span className="text-[10px] text-[#DC2626] dark:text-rose-400 bg-white dark:bg-slate-900 px-1 font-mono font-semibold">
             Plafon Rp 15.000
           </span>
         </div>
@@ -296,16 +295,16 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
                   className="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-slate-900 shadow-sm transition group-hover:scale-125 z-10"
                   style={{
                     marginBottom: `${Math.max(pct, 5)}%`,
-                    backgroundColor: isUnderBudget ? '#0284c7' : '#e11d48',
+                    backgroundColor: isUnderBudget ? '#0F766E' : '#DC2626',
                   }}
                 />
 
                 {/* Tooltip */}
-                <div className="opacity-0 group-hover:opacity-100 transition-all duration-150 absolute -top-9 bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1 px-2.5 rounded-lg shadow-xl border border-slate-700/60 pointer-events-none whitespace-nowrap z-20 tabular-nums">
-                  <span className="font-bold text-sky-300">{item.label}</span>: {formatRupiah(item.actual)}
+                <div className="opacity-0 group-hover:opacity-100 transition-all duration-150 absolute -top-9 bg-[#142B4A]/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-1 px-2.5 rounded-lg shadow-xl border border-white/10 pointer-events-none whitespace-nowrap z-20 tabular-nums">
+                  <span className="font-bold text-[#F2D58B]">{item.label}</span>: {formatRupiah(item.actual)}
                 </div>
 
-                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-2">
+                <span className="text-[10px] font-medium text-[#64748B] dark:text-slate-400 mt-2">
                   {item.label}
                 </span>
               </div>

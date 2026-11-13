@@ -3,8 +3,22 @@ import { useApp } from '../../lib/store';
 import { PrintHeader } from '../common/PrintHeader';
 import { Modal } from '../common/Modal';
 import { DataTable, Column } from '../common/DataTable';
+import {
+  BASTDocumentSheet,
+  resolveBastAutoFields,
+  generateBastNumber,
+  exportBastDocumentPDF,
+} from '../common/BASTDocumentSheet';
+import {
+  FacilityTempReportPanel,
+  FacilityTempModalGrid,
+  FacilityPhotoKey,
+  processFacilityImageUpload,
+  getFacilityTempValue,
+  applyFacilityPhotoPatch,
+} from '../common/FacilityTempUploadSection';
 import { formatNumber, formatRupiah, formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
-import { monthlyWasteSummary } from '../../lib/productionData';
+import { monthlyWasteSummary, defaultFacilityTemperatures } from '../../lib/productionData';
 import {
   PreparationInspectionRecord,
   CookingInspectionRecord,
@@ -42,6 +56,7 @@ import {
   Layers,
   Check,
   Eye,
+  Download,
 } from 'lucide-react';
 
 type ProductionTab = 'prep' | 'cooking' | 'portioning' | 'distribution' | 'washing';
@@ -52,10 +67,13 @@ export const ProductionModule: React.FC = () => {
     institutions,
     prepRecords,
     addPrepRecord,
+    updatePrepRecord,
     cookingRecords,
     addCookingRecord,
+    updateCookingRecord,
     portioningRecords,
     addPortioningRecord,
+    updatePortioningRecord,
     distributionDeliveries,
     addDistributionDelivery,
     updateDistributionDelivery,
@@ -65,9 +83,13 @@ export const ProductionModule: React.FC = () => {
     addFuelLog,
     washingWasteRecords,
     addWashingWasteRecord,
+    beneficiaryAttendance,
+    masterVolunteers,
+    distributionLogs,
     kitchenProgress,
     updateKitchenProgress,
     currentUser,
+    addToast,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<ProductionTab>('prep');
@@ -81,16 +103,63 @@ export const ProductionModule: React.FC = () => {
   const [isFuelModalOpen, setIsFuelModalOpen] = useState(false);
   const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
   const [viewPhotoUrl, setViewPhotoUrl] = useState<string | null>(null);
+  const [selectedDeliveryForBast, setSelectedDeliveryForBast] = useState<DistributionDeliveryRecord | null>(null);
 
-  // Helper file uploader to base64 for instant preview
+  const handleUploadError = (msg: string) => {
+    addToast('error', 'Upload Foto Gagal', msg);
+  };
+
+  // Helper file uploader to base64 (with validation & compression) for instant preview
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        callback(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    processFacilityImageUpload(e, callback, handleUploadError);
+  };
+
+  // Direct Upload Foto from Suhu Ruang & 6 Pendingin report cards across all 5 divisions
+  const handleDirectFacilityPhotoUpload = async (
+    division: ProductionTab,
+    photoKey: FacilityPhotoKey,
+    dataUrl: string,
+    unitLabel: string
+  ) => {
+    if (division === 'prep' && prepRecords[0]) {
+      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
+        prepRecords[0].facilityTemps,
+        photoKey,
+        dataUrl
+      );
+      await updatePrepRecord(prepRecords[0].id, { facilityTemps: nextTemps });
+      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Persiapan) berhasil disimpan.`);
+      return;
+    }
+    if (division === 'cooking' && cookingRecords[0]) {
+      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
+        cookingRecords[0].facilityTemps,
+        photoKey,
+        dataUrl
+      );
+      await updateCookingRecord(cookingRecords[0].id, { facilityTemps: nextTemps });
+      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Pengolahan) berhasil disimpan.`);
+      return;
+    }
+    if (division === 'portioning' && portioningRecords[0]) {
+      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
+        portioningRecords[0].facilityTemps,
+        photoKey,
+        dataUrl
+      );
+      await updatePortioningRecord(portioningRecords[0].id, { facilityTemps: nextTemps });
+      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Pemorsian) berhasil disimpan.`);
+      return;
+    }
+    if (division === 'distribution' && distributionDeliveries[0]) {
+      const currentTemps = distributionDeliveries[0].facilityTemps || defaultFacilityTemperatures;
+      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
+        currentTemps,
+        photoKey,
+        dataUrl
+      );
+      await updateDistributionDelivery(distributionDeliveries[0].id, { facilityTemps: nextTemps });
+      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Distribusi & Armada) berhasil disimpan.`);
     }
   };
 
@@ -119,23 +188,15 @@ export const ProductionModule: React.FC = () => {
     fruitUnit: 'kg',
     fruitTemp: 19.5,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
-    // Suhu Ruangan & 6 Pendingin
-    prepRoomTemp: 21.0,
-    prepRoomPhoto: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=500&q=80',
-    cookingRoomTemp: 25.5,
-    cookingRoomPhoto: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=500&q=80',
-    freezer1Temp: -19.5,
-    freezer1Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
-    freezer2Temp: -20.2,
-    freezer2Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
-    fridge1Temp: 4.8,
-    fridge1Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge2Temp: 6.2,
-    fridge2Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge3Temp: 5.5,
-    fridge3Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge4Temp: 4.2,
-    fridge4Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+    // Suhu Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      prepRoomTemp: 21.0,
+      portioningRoomTemp: 21.0,
+      cookingRoomTemp: 25.5,
+      wetWarehouseTemp: 14.0,
+      dryWarehouseTemp: 22.8,
+    } as FacilityTemperatures,
     notes: 'Pembersihan dan sortir bahan segar batch subuh. Suhu seluruh chiller dan freezer dalam batas standar CCP.',
   });
 
@@ -167,22 +228,7 @@ export const ProductionModule: React.FC = () => {
         photoUrl: prepForm.fruitPhoto,
       },
       facilityTemps: {
-        prepRoomTemp: Number(prepForm.prepRoomTemp),
-        prepRoomPhoto: prepForm.prepRoomPhoto,
-        cookingRoomTemp: Number(prepForm.cookingRoomTemp),
-        cookingRoomPhoto: prepForm.cookingRoomPhoto,
-        freezer1Temp: Number(prepForm.freezer1Temp),
-        freezer1Photo: prepForm.freezer1Photo,
-        freezer2Temp: Number(prepForm.freezer2Temp),
-        freezer2Photo: prepForm.freezer2Photo,
-        fridge1Temp: Number(prepForm.fridge1Temp),
-        fridge1Photo: prepForm.fridge1Photo,
-        fridge2Temp: Number(prepForm.fridge2Temp),
-        fridge2Photo: prepForm.fridge2Photo,
-        fridge3Temp: Number(prepForm.fridge3Temp),
-        fridge3Photo: prepForm.fridge3Photo,
-        fridge4Temp: Number(prepForm.fridge4Temp),
-        fridge4Photo: prepForm.fridge4Photo,
+        ...prepForm.facilityTemps,
       },
       notes: prepForm.notes,
     });
@@ -206,23 +252,17 @@ export const ProductionModule: React.FC = () => {
     vegPhoto: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
     fruitTemp: 18.0,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
-    // Suhu Ruang & Pendingin
-    prepRoomTemp: 21.5,
-    prepRoomPhoto: 'https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=500&q=80',
-    cookingRoomTemp: 27.0,
-    cookingRoomPhoto: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=500&q=80',
-    freezer1Temp: -19.2,
-    freezer1Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
-    freezer2Temp: -20.0,
-    freezer2Photo: 'https://images.unsplash.com/photo-1584992236310-6edddc08acff?auto=format&fit=crop&w=500&q=80',
-    fridge1Temp: 5.0,
-    fridge1Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge2Temp: 6.0,
-    fridge2Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge3Temp: 5.2,
-    fridge3Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
-    fridge4Temp: 4.1,
-    fridge4Photo: 'https://images.unsplash.com/photo-1571175443880-49e1d25b2bc5?auto=format&fit=crop&w=500&q=80',
+    // Suhu Ruang & 6 Pendingin
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      cookingRoomTemp: 27.0,
+      freezer1Temp: -19.2,
+      freezer2Temp: -20.0,
+      fridge1Temp: 5.0,
+      fridge2Temp: 6.0,
+      fridge3Temp: 5.2,
+      fridge4Temp: 4.1,
+    },
     notes: 'Pemasakan inti daging ayam di atas 75°C. Minyak goreng jernih. Organoleptik aroma harum alami tanpa MSG berlebih.',
   });
 
@@ -240,22 +280,7 @@ export const ProductionModule: React.FC = () => {
         fruit: { temp: Number(cookingForm.fruitTemp), photoUrl: cookingForm.fruitPhoto },
       },
       facilityTemps: {
-        prepRoomTemp: Number(cookingForm.prepRoomTemp),
-        prepRoomPhoto: cookingForm.prepRoomPhoto,
-        cookingRoomTemp: Number(cookingForm.cookingRoomTemp),
-        cookingRoomPhoto: cookingForm.cookingRoomPhoto,
-        freezer1Temp: Number(cookingForm.freezer1Temp),
-        freezer1Photo: cookingForm.freezer1Photo,
-        freezer2Temp: Number(cookingForm.freezer2Temp),
-        freezer2Photo: cookingForm.freezer2Photo,
-        fridge1Temp: Number(cookingForm.fridge1Temp),
-        fridge1Photo: cookingForm.fridge1Photo,
-        fridge2Temp: Number(cookingForm.fridge2Temp),
-        fridge2Photo: cookingForm.fridge2Photo,
-        fridge3Temp: Number(cookingForm.fridge3Temp),
-        fridge3Photo: cookingForm.fridge3Photo,
-        fridge4Temp: Number(cookingForm.fridge4Temp),
-        fridge4Photo: cookingForm.fridge4Photo,
+        ...cookingForm.facilityTemps,
       },
       notes: cookingForm.notes,
     });
@@ -275,14 +300,14 @@ export const ProductionModule: React.FC = () => {
     plantTemp: 68.0,
     vegTemp: 67.5,
     fruitTemp: 18.0,
-    prepRoomTemp: 22.0,
-    cookingRoomTemp: 26.5,
-    freezer1Temp: -19.5,
-    freezer2Temp: -20.2,
-    fridge1Temp: 4.8,
-    fridge2Temp: 6.2,
-    fridge3Temp: 5.5,
-    fridge4Temp: 4.2,
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+      prepRoomTemp: 22.0,
+      portioningRoomTemp: 22.0,
+      cookingRoomTemp: 26.5,
+      wetWarehouseTemp: 14.2,
+      dryWarehouseTemp: 23.2,
+    } as FacilityTemperatures,
     smallPortionGrams: 395,
     largePortionGrams: 585,
     smallPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
@@ -305,14 +330,7 @@ export const ProductionModule: React.FC = () => {
         fruit: { temp: Number(portioningForm.fruitTemp) },
       },
       facilityTemps: {
-        prepRoomTemp: Number(portioningForm.prepRoomTemp),
-        cookingRoomTemp: Number(portioningForm.cookingRoomTemp),
-        freezer1Temp: Number(portioningForm.freezer1Temp),
-        freezer2Temp: Number(portioningForm.freezer2Temp),
-        fridge1Temp: Number(portioningForm.fridge1Temp),
-        fridge2Temp: Number(portioningForm.fridge2Temp),
-        fridge3Temp: Number(portioningForm.fridge3Temp),
-        fridge4Temp: Number(portioningForm.fridge4Temp),
+        ...portioningForm.facilityTemps,
       },
       smallPortionWeightGrams: Number(portioningForm.smallPortionGrams),
       largePortionWeightGrams: Number(portioningForm.largePortionGrams),
@@ -335,15 +353,19 @@ export const ProductionModule: React.FC = () => {
     activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
     handoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
     picOrganolepticPhoto: 'https://images.unsplash.com/photo-1577495508326-19a1b3cf65b7?auto=format&fit=crop&w=500&q=80',
+    facilityTemps: {
+      ...defaultFacilityTemperatures,
+    },
     notes: 'Boks termal tersegel rapi, suhu tiba 64.5°C, uji organoleptik PIC disetujui.',
   });
 
   const handleSaveDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === deliveryForm.institutionId) || institutions[0];
-    const bastNumber = `BAST/MBG-TMG2/2026/11/${Math.floor(Math.random() * 8900) + 1000}`;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const bastNumber = generateBastNumber(191 + distributionDeliveries.length + 1, todayStr);
     await addDistributionDelivery({
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr,
       institutionId: inst.id,
       institutionName: inst.name,
       smallPortions: inst.smallPortions,
@@ -359,6 +381,7 @@ export const ProductionModule: React.FC = () => {
       bastNumber,
       picName: inst.picName || 'Kepala Sekolah',
       status: 'Selesai Serah Terima',
+      facilityTemps: { ...deliveryForm.facilityTemps },
       notes: deliveryForm.notes,
     });
     setIsDeliveryModalOpen(false);
@@ -637,7 +660,7 @@ export const ProductionModule: React.FC = () => {
                 Standar CCP & Inspeksi Bahan Rusak Divisi Persiapan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu & foto bahan rusak (sayur, lauk hewani, buah) serta suhu ruangan & 6 unit pendingin.
+                Pencatatan suhu & foto bahan rusak (sayur, lauk hewani, buah) serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 unit pendingin.
               </p>
             </div>
             <button
@@ -650,32 +673,19 @@ export const ProductionModule: React.FC = () => {
             </button>
           </div>
 
-          {/* Latest Facility Temps Card */}
+          {/* Latest Facility Temps Card (Suhu Ruang & 6 Pendingin + Upload Foto) */}
           {prepRecords[0] && (
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Thermometer className="w-5 h-5 text-blue-900 dark:text-sky-400" />
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                    Pemantauan Suhu Ruangan & Cold Storage (Pemeriksaan Terakhir: {prepRecords[0].date} {prepRecords[0].time})
-                  </h4>
-                </div>
-                <span className="text-xs text-slate-500 font-mono">
-                  Petugas: {prepRecords[0].officerName}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-                {renderTempBadge('Ruang Persiapan', prepRecords[0].facilityTemps.prepRoomTemp, '< 24°C', prepRecords[0].facilityTemps.prepRoomTemp <= 24, prepRecords[0].facilityTemps.prepRoomPhoto)}
-                {renderTempBadge('Ruang Pengolahan', prepRecords[0].facilityTemps.cookingRoomTemp, '< 28°C', prepRecords[0].facilityTemps.cookingRoomTemp <= 28, prepRecords[0].facilityTemps.cookingRoomPhoto)}
-                {renderTempBadge('Freezer 1 (Daging)', prepRecords[0].facilityTemps.freezer1Temp, '≤ -18°C', prepRecords[0].facilityTemps.freezer1Temp <= -18, prepRecords[0].facilityTemps.freezer1Photo)}
-                {renderTempBadge('Freezer 2 (Ikan)', prepRecords[0].facilityTemps.freezer2Temp, '≤ -18°C', prepRecords[0].facilityTemps.freezer2Temp <= -18, prepRecords[0].facilityTemps.freezer2Photo)}
-                {renderTempBadge('Kulkas 1 (Telur)', prepRecords[0].facilityTemps.fridge1Temp, '4 - 7°C', prepRecords[0].facilityTemps.fridge1Temp <= 7, prepRecords[0].facilityTemps.fridge1Photo)}
-                {renderTempBadge('Kulkas 2 (Sayur)', prepRecords[0].facilityTemps.fridge2Temp, '5 - 8°C', prepRecords[0].facilityTemps.fridge2Temp <= 8, prepRecords[0].facilityTemps.fridge2Photo)}
-                {renderTempBadge('Kulkas 3 (Buah)', prepRecords[0].facilityTemps.fridge3Temp, '5 - 8°C', prepRecords[0].facilityTemps.fridge3Temp <= 8, prepRecords[0].facilityTemps.fridge3Photo)}
-                {renderTempBadge('Kulkas 4 (Bumbu)', prepRecords[0].facilityTemps.fridge4Temp, '4 - 6°C', prepRecords[0].facilityTemps.fridge4Temp <= 6, prepRecords[0].facilityTemps.fridge4Photo)}
-              </div>
-            </div>
+            <FacilityTempReportPanel
+              divisionLabel="Divisi Persiapan"
+              subtitleMeta={`Pemeriksaan Terakhir: ${prepRecords[0].date} ${prepRecords[0].time} • Petugas: ${prepRecords[0].officerName}`}
+              facilityTemps={prepRecords[0].facilityTemps}
+              onUploadUnitPhoto={(photoKey, url, label) =>
+                handleDirectFacilityPhotoUpload('prep', photoKey, url, label)
+              }
+              onViewPhoto={setViewPhotoUrl}
+              onOpenInputModal={() => setIsPrepModalOpen(true)}
+              onUploadError={handleUploadError}
+            />
           )}
 
           {/* Damaged Materials Cards */}
@@ -804,7 +814,7 @@ export const ProductionModule: React.FC = () => {
                     <div className="text-xs text-slate-500 space-y-0.5 sm:text-right">
                       <div>Rusak: Sayur {r.damagedVegetable.quantity}kg • Hewani {r.damagedAnimal.quantity}kg • Buah {r.damagedFruit.quantity}kg</div>
                       <div className="font-mono text-[11px] text-blue-900 dark:text-sky-400">
-                        Ruang: {r.facilityTemps.prepRoomTemp}°C | F1: {r.facilityTemps.freezer1Temp}°C | K1: {r.facilityTemps.fridge1Temp}°C
+                        R. Pemorsian: {getFacilityTempValue(r.facilityTemps, 'portioningRoomTemp')}°C | G. Basah: {getFacilityTempValue(r.facilityTemps, 'wetWarehouseTemp')}°C | G. Kering: {getFacilityTempValue(r.facilityTemps, 'dryWarehouseTemp')}°C | F1: {r.facilityTemps.freezer1Temp}°C
                       </div>
                     </div>
                   </div>
@@ -827,7 +837,7 @@ export const ProductionModule: React.FC = () => {
                 Standar CCP Suhu Matang Masakan & Ruangan Pengolahan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu & foto masakan matang (Nasi, Hewani, Nabati, Sayur, Buah) serta pemantauan ruangan dan 6 pendingin.
+                Pencatatan suhu & foto masakan matang (Nasi, Hewani, Nabati, Sayur, Buah) serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 pendingin.
               </p>
             </div>
             <button
@@ -975,28 +985,19 @@ export const ProductionModule: React.FC = () => {
             </div>
           )}
 
-          {/* Facility Cold & Room Temps in Cooking */}
+          {/* Facility Cold & Room Temps in Cooking (Suhu Ruang & 6 Pendingin + Upload Foto) */}
           {cookingRecords[0] && (
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Inspeksi Suhu Ruangan & Cold Storage Divisi Pengolahan
-                </span>
-                <span className="text-xs font-mono text-slate-500">
-                  Waktu: {cookingRecords[0].time} • {cookingRecords[0].officerName}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-                {renderTempBadge('Ruang Persiapan', cookingRecords[0].facilityTemps.prepRoomTemp, '< 24°C', cookingRecords[0].facilityTemps.prepRoomTemp <= 24)}
-                {renderTempBadge('Ruang Pengolahan', cookingRecords[0].facilityTemps.cookingRoomTemp, '< 28°C', cookingRecords[0].facilityTemps.cookingRoomTemp <= 28)}
-                {renderTempBadge('Freezer 1', cookingRecords[0].facilityTemps.freezer1Temp, '≤ -18°C', cookingRecords[0].facilityTemps.freezer1Temp <= -18)}
-                {renderTempBadge('Freezer 2', cookingRecords[0].facilityTemps.freezer2Temp, '≤ -18°C', cookingRecords[0].facilityTemps.freezer2Temp <= -18)}
-                {renderTempBadge('Kulkas 1', cookingRecords[0].facilityTemps.fridge1Temp, '4 - 7°C', cookingRecords[0].facilityTemps.fridge1Temp <= 7)}
-                {renderTempBadge('Kulkas 2', cookingRecords[0].facilityTemps.fridge2Temp, '5 - 8°C', cookingRecords[0].facilityTemps.fridge2Temp <= 8)}
-                {renderTempBadge('Kulkas 3', cookingRecords[0].facilityTemps.fridge3Temp, '5 - 8°C', cookingRecords[0].facilityTemps.fridge3Temp <= 8)}
-                {renderTempBadge('Kulkas 4', cookingRecords[0].facilityTemps.fridge4Temp, '4 - 6°C', cookingRecords[0].facilityTemps.fridge4Temp <= 6)}
-              </div>
-            </div>
+            <FacilityTempReportPanel
+              divisionLabel="Divisi Pengolahan"
+              subtitleMeta={`Waktu: ${cookingRecords[0].date} ${cookingRecords[0].time} • Petugas: ${cookingRecords[0].officerName}`}
+              facilityTemps={cookingRecords[0].facilityTemps}
+              onUploadUnitPhoto={(photoKey, url, label) =>
+                handleDirectFacilityPhotoUpload('cooking', photoKey, url, label)
+              }
+              onViewPhoto={setViewPhotoUrl}
+              onOpenInputModal={() => setIsCookingModalOpen(true)}
+              onUploadError={handleUploadError}
+            />
           )}
         </div>
       )}
@@ -1013,7 +1014,7 @@ export const ProductionModule: React.FC = () => {
                 Standar Gramasi & Suhu Pemorsian Ompreng MBG
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, serta dokumentasi foto ompreng lengkap.
+                Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, dokumentasi foto ompreng lengkap, serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 pendingin.
               </p>
             </div>
             <button
@@ -1136,6 +1137,21 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Facility Cold & Room Temps in Portioning (Suhu Ruang & 6 Pendingin + Upload Foto) */}
+          {portioningRecords[0] && (
+            <FacilityTempReportPanel
+              divisionLabel="Divisi Pemorsian"
+              subtitleMeta={`Tanggal: ${portioningRecords[0].date} (${portioningRecords[0].time}) • Petugas: ${portioningRecords[0].officerName}`}
+              facilityTemps={portioningRecords[0].facilityTemps}
+              onUploadUnitPhoto={(photoKey, url, label) =>
+                handleDirectFacilityPhotoUpload('portioning', photoKey, url, label)
+              }
+              onViewPhoto={setViewPhotoUrl}
+              onOpenInputModal={() => setIsPortioningModalOpen(true)}
+              onUploadError={handleUploadError}
+            />
+          )}
         </div>
       )}
 
@@ -1182,6 +1198,21 @@ export const ProductionModule: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Facility Cold & Room Temps in Distribution (Suhu Ruang & 6 Pendingin + Upload Foto) */}
+          {distributionDeliveries[0] && (
+            <FacilityTempReportPanel
+              divisionLabel="Divisi Distribusi & Armada"
+              subtitleMeta={`Log Rute Terakhir: ${distributionDeliveries[0].date} • ${distributionDeliveries[0].institutionName} (${distributionDeliveries[0].driverName})`}
+              facilityTemps={distributionDeliveries[0].facilityTemps}
+              onUploadUnitPhoto={(photoKey, url, label) =>
+                handleDirectFacilityPhotoUpload('distribution', photoKey, url, label)
+              }
+              onViewPhoto={setViewPhotoUrl}
+              onOpenInputModal={() => setIsDeliveryModalOpen(true)}
+              onUploadError={handleUploadError}
+            />
+          )}
 
           {/* Section 1: Pengiriman ke Lembaga & BAST */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
@@ -1232,6 +1263,17 @@ export const ProductionModule: React.FC = () => {
                       <p className="text-xs text-slate-600 dark:text-slate-300 italic pt-1">
                         "{d.notes}"
                       </p>
+
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDeliveryForBast(d)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-900 dark:text-sky-300 text-[11px] font-bold border border-blue-200 dark:border-blue-800 transition"
+                        >
+                          <FileCheck className="w-3.5 h-3.5" />
+                          <span>Lihat / Cetak Format BAST</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Photos Preview */}
@@ -1536,27 +1578,64 @@ export const ProductionModule: React.FC = () => {
                     <th className="py-2.5 px-4 text-right">Buah (kg)</th>
                     <th className="py-2.5 px-4 text-right">Total Limbah</th>
                     <th className="py-2.5 px-4">Evaluasi / Alasan</th>
+                    <th className="py-2.5 px-4">Foto Sisa Makanan</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {washingWasteRecords.map(w => (
-                    <tr key={w.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                        {w.date} <span className="text-[11px] font-normal text-slate-500">({w.time})</span>
-                      </td>
-                      <td className="py-2.5 px-4 text-right font-mono">{w.wasteRice.weight}</td>
-                      <td className="py-2.5 px-4 text-right font-mono">{w.wasteAnimalProtein.weight}</td>
-                      <td className="py-2.5 px-4 text-right font-mono">{w.wastePlantProtein.weight}</td>
-                      <td className="py-2.5 px-4 text-right font-mono">{w.wasteVegetable.weight}</td>
-                      <td className="py-2.5 px-4 text-right font-mono">{w.wasteFruit.weight}</td>
-                      <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-900 dark:text-sky-400">
-                        {w.totalWasteWeight} kg
-                      </td>
-                      <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 max-w-xs truncate" title={w.notes}>
-                        {w.notes}
-                      </td>
-                    </tr>
-                  ))}
+                  {washingWasteRecords.map(w => {
+                    const rowPhotos = [
+                      { label: 'Nasi', url: w.wasteRice?.photoUrl },
+                      { label: 'Hewani', url: w.wasteAnimalProtein?.photoUrl },
+                      { label: 'Nabati', url: w.wastePlantProtein?.photoUrl },
+                      { label: 'Sayur', url: w.wasteVegetable?.photoUrl },
+                      { label: 'Buah', url: w.wasteFruit?.photoUrl },
+                    ].filter((item): item is { label: string; url: string } => Boolean(item.url && item.url.trim() !== ''));
+
+                    return (
+                      <tr key={w.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                          {w.date} <span className="text-[11px] font-normal text-slate-500">({w.time})</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono">{w.wasteRice.weight}</td>
+                        <td className="py-2.5 px-4 text-right font-mono">{w.wasteAnimalProtein.weight}</td>
+                        <td className="py-2.5 px-4 text-right font-mono">{w.wastePlantProtein.weight}</td>
+                        <td className="py-2.5 px-4 text-right font-mono">{w.wasteVegetable.weight}</td>
+                        <td className="py-2.5 px-4 text-right font-mono">{w.wasteFruit.weight}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-900 dark:text-sky-400">
+                          {w.totalWasteWeight} kg
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 max-w-xs truncate" title={w.notes}>
+                          {w.notes}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          {rowPhotos.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1 min-w-[160px]">
+                              {rowPhotos.map((p, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setViewPhotoUrl(p.url)}
+                                  title={`Lihat foto sisa ${p.label}`}
+                                  className="flex flex-col items-center gap-0.5 p-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-blue-600 transition"
+                                >
+                                  <img
+                                    src={p.url}
+                                    alt={`Foto ${p.label}`}
+                                    className="w-8 h-8 object-cover rounded-xs"
+                                  />
+                                  <span className="text-[9px] text-slate-600 dark:text-slate-300 leading-none">
+                                    {p.label}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] italic text-slate-400">Belum ada foto</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1817,95 +1896,14 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Suhu Ruangan & 6 Pendingin */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Thermometer className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                Suhu Ruangan & 6 Pendingin (°C)
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Ruang Persiapan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.prepRoomTemp}
-                    onChange={e => setPrepForm(f => ({ ...f, prepRoomTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Ruang Pengolahan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.cookingRoomTemp}
-                    onChange={e => setPrepForm(f => ({ ...f, cookingRoomTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Freezer 1 Daging</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.freezer1Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, freezer1Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Freezer 2 Ikan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.freezer2Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, freezer2Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 1 Telur</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.fridge1Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, fridge1Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 2 Sayur</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.fridge2Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, fridge2Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 3 Buah</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.fridge3Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, fridge3Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 4 Bumbu</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={prepForm.fridge4Temp}
-                    onChange={e => setPrepForm(f => ({ ...f, fridge4Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
+            {/* Suhu Ruangan & 6 Pendingin + Upload Foto */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Persiapan"
+              value={prepForm.facilityTemps}
+              onChange={ft => setPrepForm(f => ({ ...f, facilityTemps: ft }))}
+              onViewPhoto={setViewPhotoUrl}
+              onUploadError={handleUploadError}
+            />
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan</label>
@@ -2080,95 +2078,14 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Suhu Ruang & 6 Pendingin */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Thermometer className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                Suhu Ruangan & 6 Pendingin Divisi Pengolahan (°C)
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Ruang Persiapan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.prepRoomTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, prepRoomTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Ruang Pengolahan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.cookingRoomTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, cookingRoomTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Freezer 1 Daging</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.freezer1Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, freezer1Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Freezer 2 Ikan</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.freezer2Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, freezer2Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 1 Telur</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.fridge1Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, fridge1Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 2 Sayur</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.fridge2Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, fridge2Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 3 Buah</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.fridge3Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, fridge3Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Kulkas 4 Bumbu</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.fridge4Temp}
-                    onChange={e => setCookingForm(f => ({ ...f, fridge4Temp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 dark:border-slate-700 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
+            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Pengolahan"
+              value={cookingForm.facilityTemps}
+              onChange={ft => setCookingForm(f => ({ ...f, facilityTemps: ft }))}
+              onViewPhoto={setViewPhotoUrl}
+              onUploadError={handleUploadError}
+            />
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan Pengolahan</label>
@@ -2367,6 +2284,15 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
+            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Pemorsian"
+              value={portioningForm.facilityTemps}
+              onChange={ft => setPortioningForm(f => ({ ...f, facilityTemps: ft }))}
+              onViewPhoto={setViewPhotoUrl}
+              onUploadError={handleUploadError}
+            />
+
             <div>
               <label className="block font-bold mb-1">Catatan Keterangan Pemorsian</label>
               <textarea
@@ -2404,7 +2330,7 @@ export const ProductionModule: React.FC = () => {
           isOpen={isDeliveryModalOpen}
           onClose={() => setIsDeliveryModalOpen(false)}
           title="Input Distribusi Pengiriman Makanan MBG & BAST"
-          maxWidth="lg"
+          maxWidth="xl"
         >
           <form onSubmit={handleSaveDelivery} className="space-y-4 text-xs">
             <div>
@@ -2501,6 +2427,15 @@ export const ProductionModule: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Distribusi & Armada"
+              value={deliveryForm.facilityTemps}
+              onChange={ft => setDeliveryForm(f => ({ ...f, facilityTemps: ft }))}
+              onViewPhoto={setViewPhotoUrl}
+              onUploadError={handleUploadError}
+            />
 
             <div>
               <label className="block font-bold mb-1">Catatan Keterangan</label>
@@ -2798,7 +2733,7 @@ export const ProductionModule: React.FC = () => {
           isOpen={isWasteModalOpen}
           onClose={() => setIsWasteModalOpen(false)}
           title="Input Audit Sampah Makanan (Food Waste) Cuci Ompreng"
-          maxWidth="lg"
+          maxWidth="xl"
         >
           <form onSubmit={handleSaveWaste} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2857,6 +2792,9 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, ricePhoto: url })))}
                     className="w-full text-[10px] mt-1"
                   />
+                  {wasteForm.ricePhoto && (
+                    <img src={wasteForm.ricePhoto} alt="Preview Sisa Nasi" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
+                  )}
                 </div>
 
                 <div>
@@ -2874,6 +2812,9 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, animalPhoto: url })))}
                     className="w-full text-[10px] mt-1"
                   />
+                  {wasteForm.animalPhoto && (
+                    <img src={wasteForm.animalPhoto} alt="Preview Sisa Hewani" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
+                  )}
                 </div>
 
                 <div>
@@ -2891,6 +2832,9 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, plantPhoto: url })))}
                     className="w-full text-[10px] mt-1"
                   />
+                  {wasteForm.plantPhoto && (
+                    <img src={wasteForm.plantPhoto} alt="Preview Sisa Nabati" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
+                  )}
                 </div>
 
                 <div>
@@ -2908,6 +2852,9 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, vegPhoto: url })))}
                     className="w-full text-[10px] mt-1"
                   />
+                  {wasteForm.vegPhoto && (
+                    <img src={wasteForm.vegPhoto} alt="Preview Sisa Sayur" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
+                  )}
                 </div>
 
                 <div>
@@ -2925,6 +2872,9 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, fruitPhoto: url })))}
                     className="w-full text-[10px] mt-1"
                   />
+                  {wasteForm.fruitPhoto && (
+                    <img src={wasteForm.fruitPhoto} alt="Preview Sisa Buah" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
+                  )}
                 </div>
               </div>
             </div>
@@ -2955,6 +2905,76 @@ export const ProductionModule: React.FC = () => {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL: PREVIEW & CETAK FORMAT BAST RESMI                              */}
+      {/* ===================================================================== */}
+      {selectedDeliveryForBast && (
+        <Modal
+          isOpen={Boolean(selectedDeliveryForBast)}
+          onClose={() => setSelectedDeliveryForBast(null)}
+          title={`Berita Acara Serah Terima (BAST) & Alat Makan`}
+          subtitle={`Lembaga: ${selectedDeliveryForBast.institutionName} • No. ${selectedDeliveryForBast.bastNumber}`}
+          maxWidth="4xl"
+        >
+          {(() => {
+            const matchedReturn = omprengReturns.find(
+              r => r.institutionId === selectedDeliveryForBast.institutionId && r.date === selectedDeliveryForBast.date
+            );
+            const matchedAtt = beneficiaryAttendance.find(
+              a => a.institutionId === selectedDeliveryForBast.institutionId && a.date === selectedDeliveryForBast.date
+            );
+            const bastData = resolveBastAutoFields({
+              institutions,
+              beneficiaryAttendance,
+              masterVolunteers,
+              distributionLogs,
+              sppgConfig,
+              institutionId: selectedDeliveryForBast.institutionId,
+              institutionName: selectedDeliveryForBast.institutionName,
+              date: selectedDeliveryForBast.date,
+              bastNumber: selectedDeliveryForBast.bastNumber,
+              totalPortions: matchedAtt ? matchedAtt.actualPortions : selectedDeliveryForBast.totalPortions,
+              picName: selectedDeliveryForBast.picName,
+              distributorName: selectedDeliveryForBast.driverName,
+              receiveTime: selectedDeliveryForBast.arrivalTime || selectedDeliveryForBast.departureTime,
+              returnTime: matchedReturn?.departureTime || '',
+            });
+
+            return (
+              <div className="space-y-4">
+                <BASTDocumentSheet data={bastData} />
+
+                <div className="print:hidden flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDeliveryForBast(null)}
+                    className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                  >
+                    Tutup
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportBastDocumentPDF(bastData)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-700 text-white shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Unduh PDF BAST</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={triggerPrint}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Cetak Lembar BAST</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </Modal>
       )}
     </div>

@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useApp } from '../../lib/store';
-import { RoleType, ActionPermission } from '../../types';
+import { RoleType, ActionPermission, WebAccessUser } from '../../types';
+import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
+import { Modal } from '../common/Modal';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import {
   FIRESTORE_COLLECTIONS,
   FirestoreCollectionKey,
@@ -28,12 +31,19 @@ import {
   RefreshCw,
   AlertCircle,
   Eye,
+  EyeOff,
   KeyRound,
   FileCheck,
   Search,
   Sparkles,
   Layers,
   ArrowRight,
+  UserPlus,
+  UserCheck,
+  UserX,
+  Edit3,
+  ShieldCheck,
+  Mail,
 } from 'lucide-react';
 
 export const SettingsModule: React.FC = () => {
@@ -46,9 +56,70 @@ export const SettingsModule: React.FC = () => {
     currentUser,
     isFirebaseConnected,
     addToast,
+    webAccessUsers,
+    webAccessPolicy,
+    addWebAccessUser,
+    updateWebAccessUser,
+    toggleWebAccessStatus,
+    deleteWebAccessUser,
+    updateWebAccessPolicy,
+    masterSuppliers,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'profil' | 'rbac' | 'database' | 'audit'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'access' | 'rbac' | 'database' | 'audit'>('profil');
+
+  // Web Login Access Management States
+  const [accessSearch, setAccessSearch] = useState('');
+  const [accessStatusFilter, setAccessStatusFilter] = useState<'ALL' | 'ACTIVE' | 'BLOCKED'>('ALL');
+  const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [editingAccessUser, setEditingAccessUser] = useState<WebAccessUser | null>(null);
+  const [deletingAccessUser, setDeletingAccessUser] = useState<WebAccessUser | null>(null);
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
+
+  const [newUserForm, setNewUserForm] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    role: RoleType;
+    division: string;
+    supplierId: string;
+    isActive: boolean;
+    allowGoogleLogin: boolean;
+    notes: string;
+  }>({
+    name: '',
+    email: '',
+    password: '',
+    role: 'Kepala SPPG',
+    division: '',
+    supplierId: '',
+    isActive: true,
+    allowGoogleLogin: true,
+    notes: '',
+  });
+
+  const [editUserForm, setEditUserForm] = useState<{
+    name: string;
+    email: string;
+    newPassword: string;
+    role: RoleType;
+    division: string;
+    supplierId: string;
+    isActive: boolean;
+    allowGoogleLogin: boolean;
+    notes: string;
+  }>({
+    name: '',
+    email: '',
+    newPassword: '',
+    role: 'Kepala SPPG',
+    division: '',
+    supplierId: '',
+    isActive: true,
+    allowGoogleLogin: true,
+    notes: '',
+  });
 
   // Org Profile State
   const [profileForm, setProfileForm] = useState({ ...sppgConfig });
@@ -151,6 +222,126 @@ export const SettingsModule: React.FC = () => {
     setSoftDeletedRecords(prev => prev.filter(r => r.id !== id));
     addToast('success', 'Data Dipulihkan', `Dokumen ${id} berhasil dikembalikan dari soft-delete.`);
   };
+
+  // Manual Web Login Access Handlers (Admin Utama)
+  const isSuperAdminSession = currentUser.role === 'Admin Utama';
+
+  const allAssignableRoles: RoleType[] = [
+    'Admin Utama',
+    'Kepala SPPG',
+    'Pengawas Gizi',
+    'Pengawas Keuangan',
+    'Asisten Lapangan',
+    'Admin Gudang',
+    'Cheff',
+    'Relawan Div. Persiapan',
+    'Relawan Div. Pengolahan',
+    'Relawan Div. Pemorsian',
+    'Relawan Div. Distribusi',
+    'Relawan Div. Cuci Ompreng',
+    'Supplier / Mitra Pangan',
+  ];
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let out = '';
+    for (let i = 0; i < 8; i++) {
+      out += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return out;
+  };
+
+  const handleCreateWebAccessUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const selectedSupplier =
+      newUserForm.role === 'Supplier / Mitra Pangan'
+        ? masterSuppliers.find(s => s.id === newUserForm.supplierId)
+        : undefined;
+
+    const ok = await addWebAccessUser({
+      name: newUserForm.name,
+      email: newUserForm.email,
+      password: newUserForm.password,
+      role: newUserForm.role,
+      division: newUserForm.division || undefined,
+      supplierId: selectedSupplier?.id,
+      supplierName: selectedSupplier?.name,
+      isActive: newUserForm.isActive,
+      allowGoogleLogin: newUserForm.allowGoogleLogin,
+      notes: newUserForm.notes,
+    });
+
+    if (ok) {
+      setIsAddUserOpen(false);
+      setNewUserForm({
+        name: '',
+        email: '',
+        password: '',
+        role: 'Kepala SPPG',
+        division: '',
+        supplierId: '',
+        isActive: true,
+        allowGoogleLogin: true,
+        notes: '',
+      });
+    }
+  };
+
+  const openEditWebAccessModal = (user: WebAccessUser) => {
+    setEditingAccessUser(user);
+    setShowEditPassword(false);
+    setEditUserForm({
+      name: user.name,
+      email: user.email,
+      newPassword: '',
+      role: user.role,
+      division: user.division || '',
+      supplierId: user.supplierId || '',
+      isActive: user.isActive,
+      allowGoogleLogin: user.allowGoogleLogin,
+      notes: user.notes || '',
+    });
+  };
+
+  const handleSaveEditWebAccess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAccessUser) return;
+    const selectedSupplier =
+      editUserForm.role === 'Supplier / Mitra Pangan'
+        ? masterSuppliers.find(s => s.id === editUserForm.supplierId)
+        : undefined;
+
+    const ok = await updateWebAccessUser(editingAccessUser.id, {
+      name: editUserForm.name,
+      email: editUserForm.email,
+      newPassword: editUserForm.newPassword.trim() || undefined,
+      role: editUserForm.role,
+      division: editUserForm.division || undefined,
+      supplierId: selectedSupplier?.id,
+      supplierName: selectedSupplier?.name,
+      isActive: editUserForm.isActive,
+      allowGoogleLogin: editUserForm.allowGoogleLogin,
+      notes: editUserForm.notes,
+    });
+    if (ok) {
+      setEditingAccessUser(null);
+    }
+  };
+
+  const filteredAccessUsers = webAccessUsers.filter(u => {
+    const matchesSearch =
+      !accessSearch.trim() ||
+      u.name.toLowerCase().includes(accessSearch.toLowerCase()) ||
+      u.email.toLowerCase().includes(accessSearch.toLowerCase()) ||
+      u.role.toLowerCase().includes(accessSearch.toLowerCase());
+    const matchesStatus =
+      accessStatusFilter === 'ALL'
+        ? true
+        : accessStatusFilter === 'ACTIVE'
+        ? u.isActive
+        : !u.isActive;
+    return matchesSearch && matchesStatus;
+  });
 
   const roles: RoleType[] = [
     'Admin Utama',
@@ -298,6 +489,18 @@ export const SettingsModule: React.FC = () => {
         >
           <Building className="w-4 h-4" />
           <span>Identitas SPPG & Profil</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('access')}
+          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
+            activeTab === 'access'
+              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>Akses Login Web ({webAccessUsers.filter(u => u.isActive).length})</span>
         </button>
 
         <button
@@ -469,6 +672,649 @@ export const SettingsModule: React.FC = () => {
               </div>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Tab 1.5: Pengaturan Akses Login Web Manual (Admin Utama) */}
+      {activeTab === 'access' && (
+        <div className="space-y-6">
+          {/* Header Banner & Role Info */}
+          <div className="bg-gradient-to-r from-[#071D49] via-[#102D63] to-[#164E91] text-white p-6 rounded-2xl border border-[#164E91]/60 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#D8AD55]/25 text-[#F2D58B] border border-[#D8AD55]/40">
+                    Kontrol Penuh Admin Utama
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-[11px] font-mono font-bold bg-white/10 text-white border border-white/15">
+                    {webAccessUsers.filter(u => u.isActive).length} Aktif / {webAccessUsers.length} Terdaftar
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold tracking-tight flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-[#F2D58B]" />
+                  Pengaturan Akses Login Web Manual (Email & Password)
+                </h3>
+                <p className="text-xs text-slate-200 mt-1 max-w-2xl leading-relaxed">
+                  Admin Utama mendaftarkan akun Email & Kata Sandi yang diizinkan masuk ke web E-SPPG TMG2, menentukan peran RBAC masing-masing, serta dapat mengaktifkan atau memblokir akses login kapan saja.
+                </p>
+              </div>
+
+              {isSuperAdminSession && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddPassword(false);
+                    setIsAddUserOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#D8AD55] hover:bg-[#c59a43] active:scale-95 text-[#071D49] text-xs font-extrabold shadow-sm transition shrink-0 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Daftarkan Akun Login</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {!isSuperAdminSession && (
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Mode Baca Saja:</strong> Anda sedang masuk sebagai peran <strong>{currentUser.role}</strong>. Penambahan, perubahan kata sandi, dan pengaktifan/penonaktifan akses login hanya dapat dilakukan oleh <strong>Admin Utama</strong>.
+              </div>
+            </div>
+          )}
+
+          {/* Kebijakan Keamanan Halaman Login */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-[#164E91] dark:text-sky-400" />
+                  Kebijakan Kontrol Siapa yang Dapat Login
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Atur aturan pembatasan akun pada halaman Login Web E-SPPG TMG2.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <label className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 flex items-start justify-between gap-3 cursor-pointer">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">
+                    Mode Whitelist Ketat
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Hanya email aktif yang didaftarkan Admin Utama yang dapat login ke web.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!isSuperAdminSession}
+                  checked={webAccessPolicy.strictWhitelistOnly}
+                  onChange={e => updateWebAccessPolicy({ strictWhitelistOnly: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 accent-[#102D63] cursor-pointer disabled:cursor-not-allowed"
+                />
+              </label>
+
+              <label className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 flex items-start justify-between gap-3 cursor-pointer">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">
+                    Izinkan Daftar Mandiri
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Tampilkan opsi buat akun baru di halaman login bagi petugas umum.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!isSuperAdminSession}
+                  checked={webAccessPolicy.allowSelfRegistration}
+                  onChange={e => updateWebAccessPolicy({ allowSelfRegistration: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 accent-[#102D63] cursor-pointer disabled:cursor-not-allowed"
+                />
+              </label>
+
+              <label className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 flex items-start justify-between gap-3 cursor-pointer">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">
+                    Izinkan Simulasi Pratinjau Login
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Tampilkan tombol akses simulasi peran cepat pada layar login.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  disabled={!isSuperAdminSession}
+                  checked={webAccessPolicy.allowDemoPreview}
+                  onChange={e => updateWebAccessPolicy({ allowDemoPreview: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 accent-[#102D63] cursor-pointer disabled:cursor-not-allowed"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Tabel Daftar Pengguna Akses Login */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari nama, email, atau peran..."
+                  value={accessSearch}
+                  onChange={e => setAccessSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-[#164E91]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                {(['ALL', 'ACTIVE', 'BLOCKED'] as const).map(st => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setAccessStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      accessStatusFilter === st
+                        ? 'bg-[#071D49] text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                    }`}
+                  >
+                    {st === 'ALL' ? 'Semua' : st === 'ACTIVE' ? 'Diizinkan' : 'Dinonaktifkan'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
+                  <tr>
+                    <th className="p-3">Pengguna & Catatan</th>
+                    <th className="p-3">Email Login</th>
+                    <th className="p-3">Peran RBAC</th>
+                    <th className="p-3 text-center">Metode Login</th>
+                    <th className="p-3 text-center">Status Akses</th>
+                    <th className="p-3">Login Terakhir</th>
+                    <th className="p-3 text-right">Pengaturan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {filteredAccessUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-slate-400 italic">
+                        Tidak ada akun akses login yang sesuai filter pencarian.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAccessUsers.map(u => {
+                      const isProtected = Boolean(
+                        u.isProtectedAdmin || isProtectedSuperAdminEmail(u.email)
+                      );
+                      return (
+                        <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <span>{u.name}</span>
+                              {isProtected && (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 text-[10px] font-bold">
+                                  Admin Inti
+                                </span>
+                              )}
+                            </div>
+                            {u.notes && (
+                              <div className="text-[11px] text-slate-500 mt-0.5">{u.notes}</div>
+                            )}
+                            {u.supplierName && (
+                              <div className="text-[10px] text-sky-700 dark:text-sky-400 font-medium mt-0.5">
+                                Mitra: {u.supplierName}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300">
+                            {u.email}
+                          </td>
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-[#102D63] dark:text-sky-300 font-semibold border border-blue-200/70 dark:border-blue-800">
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                                Sandi
+                              </span>
+                              {u.allowGoogleLogin && (
+                                <span className="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-[10px] font-semibold text-sky-800 dark:text-sky-300">
+                                  Google
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                u.isActive
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              }`}
+                            >
+                              {u.isActive ? (
+                                <>
+                                  <UserCheck className="w-3 h-3" />
+                                  <span>Diizinkan</span>
+                                </>
+                              ) : (
+                                <>
+                                  <UserX className="w-3 h-3" />
+                                  <span>Diblokir</span>
+                                </>
+                              )}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-500 font-mono text-[11px]">
+                            {u.lastLoginAt || 'Belum pernah'}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {isSuperAdminSession && !isProtected && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleWebAccessStatus(u.id)}
+                                  title={u.isActive ? 'Nonaktifkan izin login' : 'Aktifkan izin login'}
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition ${
+                                    u.isActive
+                                      ? 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200'
+                                  }`}
+                                >
+                                  {u.isActive ? 'Blokir' : 'Izinkan'}
+                                </button>
+                              )}
+
+                              {isSuperAdminSession && (
+                                <button
+                                  type="button"
+                                  onClick={() => openEditWebAccessModal(u)}
+                                  className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold inline-flex items-center gap-1 transition"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  <span>Edit / Sandi</span>
+                                </button>
+                              )}
+
+                              {isSuperAdminSession && !isProtected && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingAccessUser(u)}
+                                  title="Hapus akun akses"
+                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Modal Daftarkan Akun Login Manual */}
+          <Modal
+            isOpen={isAddUserOpen}
+            onClose={() => setIsAddUserOpen(false)}
+            title="Daftarkan Akun Akses Login Web (Manual)"
+            maxWidth="lg"
+          >
+            <form onSubmit={handleCreateWebAccessUser} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Nama Lengkap Pengguna *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Siti Aminah, S.Gz."
+                    value={newUserForm.name}
+                    onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Email Login Web *
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="email"
+                      required
+                      placeholder="petugas@sppg-tmg2.id"
+                      value={newUserForm.email}
+                      onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                      className="w-full pl-8 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300">
+                      Kata Sandi Login *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNewUserForm({ ...newUserForm, password: generateRandomPassword() })
+                      }
+                      className="text-[11px] font-semibold text-[#164E91] hover:underline"
+                    >
+                      Buat Acak
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showAddPassword ? 'text' : 'password'}
+                      required
+                      minLength={4}
+                      placeholder="Minimal 4 karakter"
+                      value={newUserForm.password}
+                      onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                      className="w-full pl-3 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPassword(prev => !prev)}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-700"
+                    >
+                      {showAddPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Peran / Hak Akses RBAC *
+                  </label>
+                  <select
+                    value={newUserForm.role}
+                    onChange={e =>
+                      setNewUserForm({ ...newUserForm, role: e.target.value as RoleType })
+                    }
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                  >
+                    {allAssignableRoles.map(r => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {newUserForm.role === 'Supplier / Mitra Pangan' && (
+                  <div className="sm:col-span-2">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Hubungkan ke Mitra Supplier
+                    </label>
+                    <select
+                      value={newUserForm.supplierId}
+                      onChange={e =>
+                        setNewUserForm({ ...newUserForm, supplierId: e.target.value })
+                      }
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                    >
+                      <option value="">-- Pilih Supplier --</option>
+                      {masterSuppliers.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="sm:col-span-2">
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Catatan / Jabatan Tambahan
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Petugas Verifikasi Faktur & RAB"
+                    value={newUserForm.notes}
+                    onChange={e => setNewUserForm({ ...newUserForm, notes: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-4 pt-1">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newUserForm.isActive}
+                    onChange={e => setNewUserForm({ ...newUserForm, isActive: e.target.checked })}
+                    className="w-4 h-4 accent-[#102D63]"
+                  />
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Izinkan Login Sekarang (Aktif)
+                  </span>
+                </label>
+
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newUserForm.allowGoogleLogin}
+                    onChange={e =>
+                      setNewUserForm({ ...newUserForm, allowGoogleLogin: e.target.checked })
+                    }
+                    className="w-4 h-4 accent-[#102D63]"
+                  />
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                    Izinkan Login Google SSO untuk email ini
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddUserOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-[#F2D58B]" />
+                  <span>Simpan & Daftarkan Akun</span>
+                </button>
+              </div>
+            </form>
+          </Modal>
+
+          {/* Modal Edit Pengguna & Reset Kata Sandi */}
+          <Modal
+            isOpen={Boolean(editingAccessUser)}
+            onClose={() => setEditingAccessUser(null)}
+            title="Edit Akses Pengguna & Reset Kata Sandi"
+            maxWidth="lg"
+          >
+            {editingAccessUser && (
+              <form onSubmit={handleSaveEditWebAccess} className="space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Nama Lengkap
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editUserForm.name}
+                      onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Email Login
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      disabled={Boolean(
+                        editingAccessUser.isProtectedAdmin ||
+                          isProtectedSuperAdminEmail(editingAccessUser.email)
+                      )}
+                      value={editUserForm.email}
+                      onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl disabled:opacity-60"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Peran RBAC
+                    </label>
+                    <select
+                      disabled={Boolean(
+                        editingAccessUser.isProtectedAdmin ||
+                          isProtectedSuperAdminEmail(editingAccessUser.email)
+                      )}
+                      value={editUserForm.role}
+                      onChange={e =>
+                        setEditUserForm({ ...editUserForm, role: e.target.value as RoleType })
+                      }
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl disabled:opacity-60"
+                    >
+                      {allAssignableRoles.map(r => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Reset Kata Sandi Baru (Opsional)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showEditPassword ? 'text' : 'password'}
+                        placeholder="Kosongkan jika tidak diubah"
+                        value={editUserForm.newPassword}
+                        onChange={e =>
+                          setEditUserForm({ ...editUserForm, newPassword: e.target.value })
+                        }
+                        className="w-full pl-3 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowEditPassword(prev => !prev)}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-700"
+                      >
+                        {showEditPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Catatan
+                    </label>
+                    <input
+                      type="text"
+                      value={editUserForm.notes}
+                      onChange={e => setEditUserForm({ ...editUserForm, notes: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {!editingAccessUser.isProtectedAdmin &&
+                  !isProtectedSuperAdminEmail(editingAccessUser.email) && (
+                    <div className="flex flex-wrap gap-4 pt-1">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editUserForm.isActive}
+                          onChange={e =>
+                            setEditUserForm({ ...editUserForm, isActive: e.target.checked })
+                          }
+                          className="w-4 h-4 accent-[#102D63]"
+                        />
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          Akun Diizinkan Login (Aktif)
+                        </span>
+                      </label>
+
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editUserForm.allowGoogleLogin}
+                          onChange={e =>
+                            setEditUserForm({
+                              ...editUserForm,
+                              allowGoogleLogin: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-[#102D63]"
+                        />
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          Izinkan Login Google SSO
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setEditingAccessUser(null)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5 text-[#F2D58B]" />
+                    <span>Simpan Perubahan</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </Modal>
+
+          <ConfirmDialog
+            isOpen={Boolean(deletingAccessUser)}
+            onClose={() => setDeletingAccessUser(null)}
+            onConfirm={() => {
+              if (deletingAccessUser) {
+                deleteWebAccessUser(deletingAccessUser.id);
+              }
+            }}
+            title="Hapus Akses Login Web"
+            message={`Apakah Anda yakin ingin menghapus akun akses login "${deletingAccessUser?.email}"? Pengguna tersebut tidak akan dapat lagi masuk ke sistem E-SPPG TMG2.`}
+            confirmLabel="Ya, Hapus Akses"
+            isDestructive
+          />
         </div>
       )}
 
@@ -868,6 +1714,7 @@ export const SettingsModule: React.FC = () => {
                 {auditLogs.map(log => {
                   const badgeAction = {
                     LOGIN: 'bg-slate-100 text-slate-700',
+                    LOGOUT: 'bg-slate-200 text-slate-700',
                     CREATE: 'bg-emerald-100 text-emerald-800',
                     UPDATE: 'bg-blue-100 text-blue-800',
                     DELETE: 'bg-rose-100 text-rose-800',

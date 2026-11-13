@@ -78,6 +78,32 @@ export interface UserProfile {
   supplierName?: string;
 }
 
+export interface WebAccessUser {
+  id: string;
+  name: string;
+  email: string;
+  role: RoleType;
+  division?: string;
+  supplierId?: string;
+  supplierName?: string;
+  passwordHash: string;
+  isActive: boolean;
+  allowGoogleLogin: boolean;
+  isProtectedAdmin?: boolean;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  lastLoginAt?: string;
+  notes?: string;
+}
+
+export interface WebAccessPolicy {
+  strictWhitelistOnly: boolean;
+  allowSelfRegistration: boolean;
+  allowDemoPreview: boolean;
+}
+
 export interface SPPGConfig {
   sppgName: string;
   foundationName: string;
@@ -374,11 +400,15 @@ export interface StockMutation {
   expiryDate?: string;
   supplierName?: string;
   unit: string;
+  orderedQuantity?: number;
   quantityIn: number;
   quantityOut: number;
+  differenceQuantity?: number;
   balance: number; // Stok Akhir setelah mutasi
   unitPrice: number;
   totalPrice: number;
+  photoUrl?: string;
+  photoUrls?: string[];
   notes: string;
   operatorName: string;
   recipientOrDepartment?: string;
@@ -474,11 +504,13 @@ export interface QualityControlRecord {
   orderedQuantity: number;
   unit: string;
   receivedQuantity: number;
+  differenceQuantity?: number;
   condition: 'Baik' | 'Kemasan Cacat' | 'Rusak Ringan' | 'Busuk/Tercemar';
   qualityGrade: 'Grade A (Sangat Baik)' | 'Grade B (Standar)' | 'Afkir (Tidak Layak)';
   receivingTemp?: number;
   expiryDate: string;
   photoUrl?: string;
+  photoUrls?: string[];
   notes?: string;
   inspectorName: string;
   status: QCStatusPLOK;
@@ -653,7 +685,7 @@ export interface AuditLog {
   userId: string;
   userName: string;
   userRole: RoleType;
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'APPROVE' | 'PRINT' | 'EXPORT' | 'LOGIN';
+  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'APPROVE' | 'PRINT' | 'EXPORT' | 'LOGIN' | 'LOGOUT';
   module: ModuleKey | 'auth' | 'system';
   details: string;
 }
@@ -673,10 +705,16 @@ export interface KitchenProgress {
 // -------------------------------------------------------------
 
 export interface FacilityTemperatures {
-  prepRoomTemp: number; // Ruangan Persiapan (°C)
+  prepRoomTemp: number; // Legacy fallback key -> dipetakan ke Ruang Pemorsian (°C)
   prepRoomPhoto?: string;
+  portioningRoomTemp?: number; // Ruang Pemorsian (°C)
+  portioningRoomPhoto?: string;
   cookingRoomTemp: number; // Ruang Pengolahan (°C)
   cookingRoomPhoto?: string;
+  wetWarehouseTemp?: number; // Ruang Gudang Basah (°C)
+  wetWarehousePhoto?: string;
+  dryWarehouseTemp?: number; // Ruang Gudang Kering (°C)
+  dryWarehousePhoto?: string;
   freezer1Temp: number; // Freezer 1 Daging/Ayam (-18 s/d -22°C)
   freezer1Photo?: string;
   freezer2Temp: number; // Freezer 2 Ikan/Seafood (-18 s/d -22°C)
@@ -776,6 +814,7 @@ export interface DistributionDeliveryRecord {
   bastNumber: string;
   picName: string;
   status: 'Dalam Perjalanan' | 'Tiba di Lokasi' | 'Selesai Serah Terima';
+  facilityTemps?: FacilityTemperatures;
   notes: string;
 }
 
@@ -833,6 +872,7 @@ export interface WashingWasteRecord {
   wasteFruit: WasteItem;
   totalWasteWeight: number; // in kg
   unit: string;
+  facilityTemps?: FacilityTemperatures;
   notes: string;
   sterilizationChecked: boolean;
 }

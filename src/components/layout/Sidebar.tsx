@@ -229,22 +229,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:static top-0 bottom-0 left-0 z-40 bg-blue-950 text-slate-200 border-r border-blue-900/80 flex flex-col transition-all duration-300 ${
+        className={`fixed lg:static top-0 bottom-0 left-0 z-40 bg-[#142B4A] text-slate-200 border-r border-white/10 flex flex-col transition-all duration-300 ${
           isCollapsed ? 'w-20' : 'w-64'
         } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         {/* Brand Header */}
-        <div className="h-16 px-4 flex items-center justify-between border-b border-blue-900/80 bg-blue-950/70">
+        <div className="h-16 px-4 flex items-center justify-between border-b border-white/10 bg-[#142B4A]">
           {!isCollapsed ? (
             <div className="flex items-center gap-3">
               <div className="shrink-0 flex items-center justify-center">
                 <SPPGLogo size="sm" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-sm font-black tracking-wider text-white leading-tight">
+                <h1 className="text-sm font-extrabold tracking-wide text-white leading-tight">
                   E-SPPG TMG2
                 </h1>
-                <p className="text-[10px] text-sky-300 truncate">
+                <p className="text-[10px] text-teal-300/90 truncate">
                   Sistem Informasi Pemenuhan Gizi
                 </p>
               </div>
@@ -258,7 +258,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-blue-900 transition"
+            className="hidden lg:flex p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition"
             title={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar'}
           >
             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -270,7 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {sections.map((section, sIdx) => (
             <div key={sIdx}>
               {!isCollapsed && (
-                <div className="px-3 pb-1.5 text-[10px] font-extrabold tracking-wider text-sky-400/90 uppercase select-none">
+                <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase select-none">
                   {section.title}
                 </div>
               )}
@@ -286,8 +286,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-150 relative group ${
                         isActive
-                          ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/40 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:bg-white before:rounded-r-sm'
-                          : 'text-slate-300 hover:bg-blue-900/60 hover:text-white'
+                          ? 'bg-[#0F766E] text-white shadow-xs before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:bg-[#F2D58B] before:rounded-r-sm'
+                          : 'text-slate-300 hover:bg-white/8 hover:text-white'
                       } ${isCollapsed ? 'justify-center' : 'justify-between'}`}
                       title={item.label}
                     >
@@ -302,17 +302,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                       {item.badge !== undefined && !isCollapsed && (
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
-                            item.badgeColor || 'bg-sky-400 text-blue-950'
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md tabular-nums ${
+                            item.badgeColor || 'bg-[#2563EB] text-white'
                           }`}
                         >
                           {item.badge}
                         </span>
                       )}
 
-                      {/* Dot badge on collapsed */}
+                      {/* Compact badge on collapsed */}
                       {item.badge !== undefined && isCollapsed && (
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#DC2626]" />
                       )}
                     </button>
                   );
@@ -323,18 +323,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-3 border-t border-blue-900/80 bg-blue-950/40 text-[11px] text-slate-400">
+        <div className="p-3 border-t border-white/10 bg-[#10243E] text-[11px] text-slate-300">
           {!isCollapsed ? (
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-semibold text-slate-200">Krejengan Temenggungan</div>
-                <div className="text-[10px] text-sky-400 font-mono">MBG-2026-v2.4</div>
+                <div className="font-semibold text-white">Krejengan Temenggungan</div>
+                <div className="text-[10px] text-teal-300 font-mono">MBG-2026-v2.4</div>
               </div>
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Sistem Aktif" />
+              <div className="w-2 h-2 rounded-full bg-[#16A34A]" title="Sistem Aktif" />
             </div>
           ) : (
             <div className="flex justify-center">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="w-2 h-2 rounded-full bg-[#16A34A]" title="Sistem Aktif" />
             </div>
           )}
         </div>

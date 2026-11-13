@@ -577,70 +577,70 @@ export const FinanceModule: React.FC = () => {
         </div>
 
         {/* Total Kas Masuk */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs border-l-4 border-l-emerald-500">
-          <div className="flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400 mb-1">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+          <div className="flex items-center justify-between text-xs font-bold text-[#16A34A] dark:text-emerald-400 mb-1">
             <span>Total Pemasukan (Debet)</span>
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
+            <TrendingUp className="w-4 h-4 text-[#16A34A]" />
           </div>
-          <div className="text-2xl font-black font-mono text-emerald-600">
+          <div className="text-2xl font-extrabold font-mono text-[#16A34A] tabular-nums">
             {formatRupiah(totalIncomeApproved)}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Dana Termin BGN & alokasi disetujui</p>
+          <p className="text-[11px] text-[#64748B] mt-1">Dana Termin BGN & alokasi disetujui</p>
         </div>
 
         {/* Total Kas Keluar */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs border-l-4 border-l-rose-500">
-          <div className="flex items-center justify-between text-xs font-bold text-rose-700 dark:text-rose-400 mb-1">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+          <div className="flex items-center justify-between text-xs font-bold text-[#DC2626] dark:text-rose-400 mb-1">
             <span>Total Pengeluaran (Kredit)</span>
-            <TrendingDown className="w-4 h-4 text-rose-500" />
+            <TrendingDown className="w-4 h-4 text-[#DC2626]" />
           </div>
-          <div className="text-2xl font-black font-mono text-rose-600">
+          <div className="text-2xl font-extrabold font-mono text-[#DC2626] tabular-nums">
             {formatRupiah(totalExpenseApproved)}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Belanja bahan, operasional, & upah</p>
+          <p className="text-[11px] text-[#64748B] mt-1">Belanja bahan, operasional, & upah</p>
         </div>
 
         {/* Saldo Akhir */}
-        <div className="bg-gradient-to-br from-blue-900 to-indigo-950 text-white p-5 rounded-2xl shadow-md flex flex-col justify-between">
+        <div className="bg-linear-to-br from-[#142B4A] to-[#0F766E] text-white p-5 rounded-xl shadow-md flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between text-xs font-bold text-sky-200 mb-1">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-200 mb-1">
               <span>Saldo Akhir Kas</span>
-              <Wallet className="w-4 h-4 text-sky-300" />
+              <Wallet className="w-4 h-4 text-[#F2D58B]" />
             </div>
-            <div className="text-2xl font-black font-mono text-white">
+            <div className="text-2xl font-extrabold font-mono text-white tabular-nums">
               {formatRupiah(finalCashBalance)}
             </div>
           </div>
-          <p className="text-[10px] text-sky-200 mt-2 font-mono">
+          <p className="text-[10px] text-slate-200 mt-2 font-mono">
             Rumus: Saldo Awal + Masuk - Keluar
           </p>
         </div>
       </div>
 
       {/* Rincian Saldo per Rekening Bank & Kas Tunai */}
-      <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+      <div className="bg-white dark:bg-slate-900/60 p-4 rounded-xl border border-[#E2E8F0] dark:border-slate-800 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+          <span className="text-xs font-bold text-[#1F2937] dark:text-white uppercase tracking-wider flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-[#142B4A] dark:text-teal-400" />
             Rekap Saldo Riil per Rekening Bank & Kas Tunai
           </span>
-          <span className="text-[11px] text-slate-500 font-mono">
+          <span className="text-[11px] text-[#64748B] font-mono">
             Sinkronisasi Otomatis Buku Kas
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {Object.entries(balancePerAccount).map(([accName, val], idx) => (
-            <div key={idx} className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block truncate" title={accName}>
+            <div key={idx} className="bg-[#F4F7FA]/70 dark:bg-slate-900 p-3.5 rounded-xl border border-[#E2E8F0] dark:border-slate-800">
+              <span className="text-xs font-bold text-[#1F2937] dark:text-slate-300 block truncate" title={accName}>
                 {accName.split(' (')[0]}
               </span>
-              <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1">
+              <div className="text-lg font-extrabold font-mono text-[#1F2937] dark:text-white mt-1 tabular-nums">
                 {formatRupiah(val.balance)}
               </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
-                <span className="text-emerald-600">Masuk: {formatNumber(val.income)}</span>
-                <span className="text-rose-600">Keluar: {formatNumber(val.expense)}</span>
+              <div className="flex items-center justify-between text-[10px] text-[#64748B] mt-1.5 pt-1.5 border-t border-[#E2E8F0] dark:border-slate-800 tabular-nums">
+                <span className="text-[#16A34A] font-semibold">Masuk: {formatNumber(val.income)}</span>
+                <span className="text-[#DC2626] font-semibold">Keluar: {formatNumber(val.expense)}</span>
               </div>
             </div>
           ))}
@@ -648,19 +648,19 @@ export const FinanceModule: React.FC = () => {
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
+      <div className="flex border-b border-[#E2E8F0] dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
         <button
           type="button"
           onClick={() => setActiveTab('bku')}
           className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
             activeTab === 'bku'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              ? 'border-[#142B4A] text-[#142B4A] dark:border-teal-400 dark:text-teal-400 bg-[#142B4A]/5 dark:bg-teal-950/20'
+              : 'border-transparent text-[#64748B] hover:text-[#1F2937] dark:text-slate-400 dark:hover:text-white'
           }`}
         >
           <Receipt className="w-4 h-4" />
           <span>Buku Kas Umum (BKU)</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
+          <span className="px-1.5 py-0.5 rounded-md text-[10px] bg-[#F4F7FA] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700">
             {financialTransactions.length}
           </span>
         </button>
@@ -670,8 +670,8 @@ export const FinanceModule: React.FC = () => {
           onClick={() => setActiveTab('lra')}
           className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
             activeTab === 'lra'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              ? 'border-[#142B4A] text-[#142B4A] dark:border-teal-400 dark:text-teal-400 bg-[#142B4A]/5 dark:bg-teal-950/20'
+              : 'border-transparent text-[#64748B] hover:text-[#1F2937] dark:text-slate-400 dark:hover:text-white'
           }`}
         >
           <PieChart className="w-4 h-4" />
@@ -683,8 +683,8 @@ export const FinanceModule: React.FC = () => {
           onClick={() => setActiveTab('reports')}
           className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
             activeTab === 'reports'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              ? 'border-[#142B4A] text-[#142B4A] dark:border-teal-400 dark:text-teal-400 bg-[#142B4A]/5 dark:bg-teal-950/20'
+              : 'border-transparent text-[#64748B] hover:text-[#1F2937] dark:text-slate-400 dark:hover:text-white'
           }`}
         >
           <Calendar className="w-4 h-4" />
@@ -696,14 +696,14 @@ export const FinanceModule: React.FC = () => {
           onClick={() => setActiveTab('approval')}
           className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
             activeTab === 'approval'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+              ? 'border-[#142B4A] text-[#142B4A] dark:border-teal-400 dark:text-teal-400 bg-[#142B4A]/5 dark:bg-teal-950/20'
+              : 'border-transparent text-[#64748B] hover:text-[#1F2937] dark:text-slate-400 dark:hover:text-white'
           }`}
         >
           <FileCheck className="w-4 h-4" />
           <span>Otorisasi & Persetujuan Kas</span>
           {pendingTransactions.length > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500 text-white font-bold animate-pulse">
+            <span className="px-1.5 py-0.5 rounded-md text-[10px] bg-[#D97706] text-white font-bold">
               {pendingTransactions.length}
             </span>
           )}
