@@ -882,8 +882,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         id: 'inv_unit',
         key: 'unit',
         label: 'Satuan',
-        type: 'text',
-        placeholder: 'kg / liter / pcs',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi satuan ditarik otomatis dari Master Satuan (Master Data).',
         required: true,
         isSystem: true,
         width: 'half',
@@ -1047,8 +1048,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         id: 'rab_unit',
         key: 'unit',
         label: 'Satuan',
-        type: 'text',
-        placeholder: 'kg / liter / tabung',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi satuan ditarik otomatis dari Master Satuan (Master Data).',
         required: true,
         isSystem: true,
         width: 'half',
@@ -1143,10 +1145,26 @@ export function mergeDynamicFormSchemas(
   (Object.keys(defaultDynamicFormSchemas) as DynamicFormId[]).forEach(formId => {
     const savedSchema = saved[formId];
     if (savedSchema && Array.isArray(savedSchema.fields) && savedSchema.fields.length > 0) {
+      const upgradedFields = savedSchema.fields.map(f => {
+        if (
+          f.isSystem &&
+          f.key === 'unit' &&
+          (formId === 'inventory_item_form' || formId === 'procurement_rab_form') &&
+          f.type === 'text'
+        ) {
+          return {
+            ...f,
+            type: 'select' as const,
+            options: [],
+            helperText: f.helperText || 'Opsi satuan ditarik otomatis dari Master Satuan (Master Data).',
+          };
+        }
+        return f;
+      });
       result[formId] = {
         ...defaultDynamicFormSchemas[formId],
         ...savedSchema,
-        fields: savedSchema.fields,
+        fields: upgradedFields,
       };
     }
   });

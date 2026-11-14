@@ -95,12 +95,22 @@ export const InventoryModule: React.FC = () => {
     deleteInventoryItem,
     adjustStock,
     masterSuppliers,
+    masterUnits,
     currentUser,
     hasPermission,
     sppgConfig,
     addToast,
     dynamicFormSchemas,
   } = useApp();
+
+  const unitOptions = useMemo(
+    () =>
+      masterUnits.map(u => ({
+        value: u.code,
+        label: `${u.code} — ${u.name}`,
+      })),
+    [masterUnits]
+  );
 
   // Dynamic Form Builder States
   const [isEditingInvSchema, setIsEditingInvSchema] = useState(false);
@@ -265,7 +275,7 @@ export const InventoryModule: React.FC = () => {
       initialStock: 100,
       currentStock: 100,
       minimumStock: 40,
-      unit: 'kg',
+      unit: masterUnits[0]?.code || 'kg',
       pricePerUnit: 25000,
       storageLocation: 'Chiller Dapur',
       supplierName: masterSuppliers[0]?.name || 'Koperasi Pasar Krejengan',
@@ -2083,6 +2093,9 @@ export const InventoryModule: React.FC = () => {
             values={{
               ...itemFormData,
               ...(itemFormData.customFields || {}),
+            }}
+            dynamicOptions={{
+              unit: unitOptions,
             }}
             onChange={(key, value, field) => {
               if (field.isSystem) {

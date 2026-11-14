@@ -765,7 +765,15 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
             }
 
             const value = getFieldValue(field);
-            const options = resolveOptions(field);
+            const resolvedOptions = resolveOptions(field);
+            const options =
+              field.type === 'select' &&
+              value !== undefined &&
+              value !== null &&
+              String(value).trim() !== '' &&
+              !resolvedOptions.some(o => o.value === String(value))
+                ? [...resolvedOptions, { value: String(value), label: String(value) }]
+                : resolvedOptions;
             const colSpanClass = field.width === 'full' ? 'md:col-span-2' : 'md:col-span-1';
 
             return (

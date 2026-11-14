@@ -160,6 +160,7 @@ export const ProcurementModule: React.FC = () => {
     inventory,
     adjustStock,
     masterSuppliers,
+    masterUnits,
     currentUser,
     hasPermission,
     sppgConfig,
@@ -173,6 +174,15 @@ export const ProcurementModule: React.FC = () => {
     updateQualityControlRecord,
     dynamicFormSchemas,
   } = useApp();
+
+  const unitOptions = useMemo(
+    () =>
+      masterUnits.map(u => ({
+        value: u.code,
+        label: `${u.code} — ${u.name}`,
+      })),
+    [masterUnits]
+  );
 
   // Dynamic Form Builder States (RAB)
   const [isEditingRabSchema, setIsEditingRabSchema] = useState(false);
@@ -1917,6 +1927,9 @@ export const ProcurementModule: React.FC = () => {
               ...rabForm,
               ...(rabForm.customFields || {}),
             }}
+            dynamicOptions={{
+              unit: unitOptions,
+            }}
             onChange={(key, value, field) => {
               if (field.isSystem) {
                 setRabForm(prev => {
@@ -2358,16 +2371,23 @@ export const ProcurementModule: React.FC = () => {
 
                       <div className="sm:col-span-2">
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Satuan *
+                          Satuan (Master) *
                         </label>
-                        <input
-                          type="text"
+                        <select
                           required
-                          placeholder="kg / pcs"
                           value={draft.unit}
                           onChange={e => handleUpdateQCItemDraft(draft.key, { unit: e.target.value })}
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
+                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                        >
+                          {masterUnits.map(u => (
+                            <option key={u.id} value={u.code}>
+                              {u.code} — {u.name}
+                            </option>
+                          ))}
+                          {draft.unit && !masterUnits.some(u => u.code === draft.unit) && (
+                            <option value={draft.unit}>{draft.unit}</option>
+                          )}
+                        </select>
                       </div>
 
                       <div className="sm:col-span-2">

@@ -60,6 +60,7 @@ export const MasterDataModule: React.FC = () => {
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'penerima' | 'bahan' | 'supplier' | 'relawan' | 'satuan'>('penerima');
+  const [unitTypeFilter, setUnitTypeFilter] = useState<'ALL' | MasterUnit['type']>('ALL');
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -289,6 +290,15 @@ export const MasterDataModule: React.FC = () => {
       if (editItem) await updateMasterVolunteer(editItem.id, formVolunteer);
       else await addMasterVolunteer(formVolunteer);
     } else if (modalType === 'satuan') {
+      const cleanCode = formUnit.code.trim();
+      const duplicate = masterUnits.some(
+        u => u.code.trim().toLowerCase() === cleanCode.toLowerCase() && (!editItem || u.id !== editItem.id)
+      );
+      if (!cleanCode || duplicate) {
+        if (editItem) await updateMasterUnit(editItem.id, formUnit);
+        else await addMasterUnit(formUnit);
+        return;
+      }
       if (editItem) await updateMasterUnit(editItem.id, formUnit);
       else await addMasterUnit(formUnit);
     } else if (modalType === 'konversi') {
@@ -681,11 +691,11 @@ export const MasterDataModule: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => handleOpenAdd(activeTab === 'satuan' ? 'konversi' : (activeTab as any))}
+          onClick={() => handleOpenAdd(activeTab as any)}
           className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition"
         >
           <Plus className="w-4 h-4" />
-          <span>Tambah Data Master</span>
+          <span>{activeTab === 'satuan' ? 'Tambah Master Satuan' : 'Tambah Data Master'}</span>
         </button>
       </div>
 
@@ -748,7 +758,7 @@ export const MasterDataModule: React.FC = () => {
           }`}
         >
           <Scale className="w-4 h-4" />
-          <span>E. Master Satuan & Dimensi Bahan ({materialConversions.length})</span>
+          <span>E. Master Satuan & Dimensi Bahan ({masterUnits.length})</span>
         </button>
       </div>
 
@@ -866,80 +876,185 @@ export const MasterDataModule: React.FC = () => {
             </div>
           </div>
 
+          {/* Info Banner Basis Data Satuan */}
+          <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start gap-2.5 text-blue-900 dark:text-sky-200">
+              <Scale className="w-4 h-4 shrink-0 mt-0.5 text-blue-700 dark:text-sky-400" />
+              <div>
+                <div className="font-bold">Basis Data Satuan Terpusat E-SPPG</div>
+                <p className="text-[11px] text-blue-800/80 dark:text-sky-300/80 mt-0.5">
+                  Seluruh satuan di sini (gram, kg, pcs, liter, dll.) otomatis menjadi pilihan satuan resmi pada Master Bahan Pangan, Menu & Food Cost, RAB & QC Pengadaan, Inventaris Gudang, serta Produksi Dapur.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleOpenAdd('satuan')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-900 hover:bg-blue-800 text-white font-bold transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Tambah Satuan
+              </button>
+            </div>
+          </div>
+
           {/* Table: Master Satuan Konfigurasi */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 mb-3">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Daftar Master Satuan Dasar (10 Satuan)
-                </h4>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Daftar Master Satuan ({masterUnits.length} Satuan)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Referensi kode satuan & faktor konversi ke satuan dasar (gram / ml / satuan)
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleOpenAdd('satuan')}
-                  className="text-xs font-bold text-blue-900 dark:text-sky-400 hover:underline flex items-center gap-1"
+                  className="text-xs font-bold text-blue-900 dark:text-sky-400 hover:underline flex items-center gap-1 shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" /> Tambah Satuan
                 </button>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* Filter Tipe Dimensi */}
+              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                {(['ALL', 'Berat', 'Volume', 'Satuan Bahan (Pieces/Dimensi)', 'Kemasan'] as const).map(t => {
+                  const count =
+                    t === 'ALL'
+                      ? masterUnits.length
+                      : masterUnits.filter(u => u.type === t).length;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setUnitTypeFilter(t)}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                        unitTypeFilter === t
+                          ? 'bg-blue-900 text-white dark:bg-sky-600'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {t === 'ALL' ? 'Semua' : t === 'Satuan Bahan (Pieces/Dimensi)' ? 'Pieces / Dimensi' : t} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
                 <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-50 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500 sticky top-0">
                     <tr>
                       <th className="p-2">Kode</th>
                       <th className="p-2">Nama Satuan</th>
-                      <th className="p-2">Tipe Dimensi</th>
+                      <th className="p-2">Kategori</th>
                       <th className="p-2 text-right">Ekuivalen Dasar</th>
+                      <th className="p-2 text-right">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
-                    {masterUnits.map(u => (
-                      <tr key={u.id}>
-                        <td className="p-2 font-bold text-blue-900 dark:text-sky-400">{u.code}</td>
-                        <td className="p-2 font-sans">{u.name}</td>
-                        <td className="p-2 font-sans text-slate-500">{u.type}</td>
-                        <td className="p-2 text-right">
-                          {u.conversionToBase} {u.baseUnit}
-                        </td>
-                      </tr>
-                    ))}
+                    {masterUnits
+                      .filter(u => unitTypeFilter === 'ALL' || u.type === unitTypeFilter)
+                      .map(u => (
+                        <tr key={u.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                          <td className="p-2 font-bold text-blue-900 dark:text-sky-400">{u.code}</td>
+                          <td className="p-2 font-sans font-semibold text-slate-800 dark:text-slate-200">{u.name}</td>
+                          <td className="p-2 font-sans text-slate-500">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold">
+                              {u.type === 'Satuan Bahan (Pieces/Dimensi)' ? 'Pieces/Dimensi' : u.type}
+                            </span>
+                          </td>
+                          <td className="p-2 text-right text-slate-700 dark:text-slate-300">
+                            {formatNumber(u.conversionToBase)} {u.baseUnit}
+                          </td>
+                          <td className="p-2 text-right font-sans">
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit('satuan', u)}
+                                className="p-1 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                                title="Edit Satuan"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteData({ id: u.id, type: 'satuan' })}
+                                className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                title="Hapus Satuan"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
             </div>
 
             {/* Table: Konversi Dimensi Spesifik Bahan */}
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 mb-3">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Spesifikasi Berat per Dimensi Bahan Pangan
-                </h4>
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Spesifikasi Berat per Dimensi Bahan Pangan ({materialConversions.length})
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Konversi berat rata-rata (gram) per satuan non-berat (buah, butir, ikat, papan)
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleOpenAdd('konversi')}
-                  className="text-xs font-bold text-blue-900 dark:text-sky-400 hover:underline flex items-center gap-1"
+                  className="text-xs font-bold text-blue-900 dark:text-sky-400 hover:underline flex items-center gap-1 shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" /> Tambah Konversi
                 </button>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[465px] overflow-y-auto">
                 <table className="w-full text-xs text-left">
-                  <thead className="bg-slate-50 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500">
+                  <thead className="bg-slate-50 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500 sticky top-0">
                     <tr>
                       <th className="p-2">Komoditas Bahan</th>
                       <th className="p-2">Satuan Dimensi</th>
-                      <th className="p-2 text-right">Berat Rata-rata (gram)</th>
+                      <th className="p-2 text-right">Berat Rata-rata</th>
+                      <th className="p-2 text-right">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
                     {materialConversions.map((c, idx) => (
-                      <tr key={idx}>
+                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                         <td className="p-2 font-sans font-semibold text-slate-900 dark:text-white">
                           {c.materialName}
                           {c.notes && <span className="block text-[10px] text-slate-400 font-normal">{c.notes}</span>}
                         </td>
-                        <td className="p-2 font-sans">{c.unit}</td>
+                        <td className="p-2 font-sans font-semibold text-blue-900 dark:text-sky-400">{c.unit}</td>
                         <td className="p-2 text-right font-bold text-emerald-600">
                           {formatNumber(c.gramsPerUnit)} g
+                        </td>
+                        <td className="p-2 text-right font-sans">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit('konversi', c)}
+                              className="p-1 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                              title="Edit Konversi"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteData({ id: c.materialName, type: 'konversi' })}
+                              className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                              title="Hapus Konversi"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1155,14 +1270,24 @@ export const MasterDataModule: React.FC = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Satuan Dasar *</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Satuan Dasar (Master Satuan) *
+                  </label>
+                  <select
                     required
                     value={formBahan.unit}
                     onChange={e => setFormBahan({ ...formBahan, unit: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  />
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>
+                        {u.code} — {u.name} ({u.type === 'Satuan Bahan (Pieces/Dimensi)' ? 'Pieces/Dimensi' : u.type})
+                      </option>
+                    ))}
+                    {formBahan.unit && !masterUnits.some(u => u.code === formBahan.unit) && (
+                      <option value={formBahan.unit}>{formBahan.unit} (Kustom)</option>
+                    )}
+                  </select>
                 </div>
               </div>
 
@@ -1421,6 +1546,118 @@ export const MasterDataModule: React.FC = () => {
             </div>
           )}
 
+          {/* Form Content: Master Satuan */}
+          {modalType === 'satuan' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Kode Satuan *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: kg / gram / pcs / liter"
+                    value={formUnit.code}
+                    onChange={e => setFormUnit({ ...formUnit, code: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nama Lengkap Satuan *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Pieces / Satuan Unit, Kilogram, Liter"
+                    value={formUnit.name}
+                    onChange={e => setFormUnit({ ...formUnit, name: e.target.value })}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Tipe / Kategori Dimensi *
+                  </label>
+                  <select
+                    value={formUnit.type}
+                    onChange={e => {
+                      const nextType = e.target.value as MasterUnit['type'];
+                      const suggestedBase: MasterUnit['baseUnit'] =
+                        nextType === 'Berat' ? 'gram' : nextType === 'Volume' ? 'ml' : 'satuan';
+                      setFormUnit({
+                        ...formUnit,
+                        type: nextType,
+                        baseUnit: suggestedBase,
+                        conversionToBase: suggestedBase === 'satuan' ? 1 : formUnit.conversionToBase,
+                        isConfigurable: nextType === 'Satuan Bahan (Pieces/Dimensi)' || nextType === 'Kemasan',
+                      });
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    <option value="Berat">Berat (Massa)</option>
+                    <option value="Volume">Volume (Cair)</option>
+                    <option value="Satuan Bahan (Pieces/Dimensi)">Satuan Bahan (Pieces/Dimensi)</option>
+                    <option value="Kemasan">Kemasan / Packing</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Satuan Dasar Acuan *
+                  </label>
+                  <select
+                    value={formUnit.baseUnit}
+                    onChange={e =>
+                      setFormUnit({ ...formUnit, baseUnit: e.target.value as MasterUnit['baseUnit'] })
+                    }
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold"
+                  >
+                    <option value="gram">gram (Berat)</option>
+                    <option value="ml">ml (Volume)</option>
+                    <option value="satuan">satuan (Unit/Pieces)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Konversi ke {formUnit.baseUnit} *
+                  </label>
+                  <input
+                    type="number"
+                    min="0.0001"
+                    step="any"
+                    required
+                    value={formUnit.conversionToBase}
+                    onChange={e =>
+                      setFormUnit({ ...formUnit, conversionToBase: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold text-emerald-700 dark:text-emerald-400"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={formUnit.isConfigurable}
+                    onChange={e => setFormUnit({ ...formUnit, isConfigurable: e.target.checked })}
+                    className="w-4 h-4 rounded accent-blue-900"
+                  />
+                  <span>Satuan berdimensi / kemasan (bisa dipetakan berat per komoditas)</span>
+                </label>
+                <span className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-900 dark:text-sky-300 font-mono font-bold">
+                  1 {formUnit.code.trim() || '?'} = {formatNumber(formUnit.conversionToBase || 0)} {formUnit.baseUnit}
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Form Content: Konversi Dimensi */}
           {modalType === 'konversi' && (
             <div className="space-y-3">
@@ -1438,15 +1675,24 @@ export const MasterDataModule: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Satuan Dimensi Fisik *</label>
-                  <input
-                    type="text"
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Satuan Dimensi Fisik (Master Satuan) *
+                  </label>
+                  <select
                     required
-                    placeholder="buah / butir / ikat / papan"
                     value={formConv.unit}
                     onChange={e => setFormConv({ ...formConv, unit: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  />
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>
+                        {u.code} — {u.name}
+                      </option>
+                    ))}
+                    {formConv.unit && !masterUnits.some(u => u.code === formConv.unit) && (
+                      <option value={formConv.unit}>{formConv.unit} (Kustom)</option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Ekuivalen Berat (gram per unit) *</label>

@@ -1518,8 +1518,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [masterUnits, setMasterUnits] = useState<MasterUnit[]>(() => {
-    const saved = localStorage.getItem('esppg_master_units');
-    return saved ? JSON.parse(saved) : initialMasterUnitsData;
+    try {
+      const saved = localStorage.getItem('esppg_master_units');
+      const seededFlag = localStorage.getItem('esppg_master_units_v2_seeded');
+      if (saved) {
+        const parsed: MasterUnit[] = JSON.parse(saved);
+        if (!seededFlag && Array.isArray(parsed)) {
+          const existingCodes = new Set(parsed.map(u => (u.code || '').trim().toLowerCase()));
+          const missingDefaults = initialMasterUnitsData.filter(
+            d => !existingCodes.has(d.code.trim().toLowerCase())
+          );
+          localStorage.setItem('esppg_master_units_v2_seeded', '1');
+          return [...parsed, ...missingDefaults];
+        }
+        return parsed;
+      }
+      localStorage.setItem('esppg_master_units_v2_seeded', '1');
+      return initialMasterUnitsData;
+    } catch {
+      return initialMasterUnitsData;
+    }
   });
 
   const [materialConversions, setMaterialConversions] = useState<MaterialDimensionConversion[]>(() => {
@@ -2704,22 +2722,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Master Satuan & Konversi
   const addMasterUnit = async (unit: Omit<MasterUnit, 'id'>) => {
-    const newUnit: MasterUnit = { ...unit, id: 'u-' + Date.now() };
+    const normalizedCode = unit.code.trim();
+    if (!normalizedCode) {
+      addToast('error', 'Validasi Satuan', 'Kode satuan tidak boleh kosong.');
+      return;
+    }
+    const isDuplicate = masterUnits.some(
+      u => u.code.trim().toLowerCase() === normalizedCode.toLowerCase()
+    );
+    if (isDuplicate) {
+      addToast('error', 'Kode Satuan Duplikat', `Kode satuan "${normalizedCode}" sudah terdaftar di Master Satuan.`);
+      return;
+    }
+    const newUnit: MasterUnit = {
+      ...unit,
+      code: normalizedCode,
+      name: unit.name.trim(),
+      conversionToBase: Number(unit.conversionToBase) > 0 ? Number(unit.conversionToBase) : 1,
+      id: 'u-' + Date.now(),
+    };
     setMasterUnits(prev => [...prev, newUnit]);
-    await logAudit('CREATE', 'master_data', `Menambah master satuan: ${unit.name} (${unit.code})`);
-    addToast('success', 'Satuan Ditambahkan', `Satuan ${unit.name} berhasil didaftarkan.`);
+    await logAudit('CREATE', 'master_data', `Menambah master satuan: ${newUnit.name} (${newUnit.code})`);
+    addToast('success', 'Satuan Ditambahkan', `Satuan ${newUnit.name} (${newUnit.code}) berhasil didaftarkan.`);
   };
 
   const updateMasterUnit = async (id: string, unit: Partial<MasterUnit>) => {
-    setMasterUnits(prev => prev.map(u => (u.id === id ? { ...u, ...unit } : u)));
+    if (unit.code !== undefined) {
+      const normalizedCode = unit.code.trim();
+      if (!normalizedCode) {
+        addToast('error', 'Validasi Satuan', 'Kode satuan tidak boleh kosong.');
+        return;
+      }
+      const isDuplicate = masterUnits.some(
+        u => u.id !== id && u.code.trim().toLowerCase() === normalizedCode.toLowerCase()
+      );
+      if (isDuplicate) {
+        addToast('error', 'Kode Satuan Duplikat', `Kode satuan "${normalizedCode}" sudah digunakan satuan lain.`);
+        return;
+      }
+    }
+    setMasterUnits(prev =>
+      prev.map(u =>
+        u.id === id
+          ? {
+              ...u,
+              ...unit,
+              code: unit.code !== undefined ? unit.code.trim() : u.code,
+              name: unit.name !== undefined ? unit.name.trim() : u.name,
+              conversionToBase:
+                unit.conversionToBase !== undefined
+                  ? Number(unit.conversionToBase) > 0
+                    ? Number(unit.conversionToBase)
+                    : 1
+                  : u.conversionToBase,
+            }
+          : u
+      )
+    );
     await logAudit('UPDATE', 'master_data', `Memperbarui master satuan ID: ${id}`);
     addToast('success', 'Satuan Diperbarui', 'Konfigurasi satuan berhasil diubah.');
   };
 
   const deleteMasterUnit = async (id: string) => {
+    const target = masterUnits.find(u => u.id === id);
     setMasterUnits(prev => prev.filter(u => u.id !== id));
-    await logAudit('DELETE', 'master_data', `Menghapus satuan ID: ${id}`);
-    addToast('warning', 'Satuan Dihapus', 'Satuan telah dihapus.');
+    await logAudit('DELETE', 'master_data', `Menghapus satuan: ${target?.name || id} (${target?.code || ''})`);
+    addToast('warning', 'Satuan Dihapus', `Satuan ${target?.code || ''} telah dihapus dari Master Satuan.`);
   };
 
   const addMaterialConversion = async (conv: MaterialDimensionConversion) => {

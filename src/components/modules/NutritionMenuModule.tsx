@@ -90,6 +90,7 @@ export const NutritionMenuModule: React.FC = () => {
     deleteMenuItem,
     approveMenuItem,
     institutions,
+    masterUnits,
     currentUser,
     hasPermission,
     sppgConfig,
@@ -240,6 +241,7 @@ export const NutritionMenuModule: React.FC = () => {
   const [customGramLarge, setCustomGramLarge] = useState<number>(75);
   const [customBdd, setCustomBdd] = useState<number>(100);
   const [customUnitPrice, setCustomUnitPrice] = useState<number>(30000);
+  const [customPurchaseUnit, setCustomPurchaseUnit] = useState<string>(masterUnits[0]?.code || 'kg');
 
   // Modal State for Create Menu
   const [isCreateMenuModalOpen, setIsCreateMenuModalOpen] = useState(false);
@@ -317,17 +319,33 @@ export const NutritionMenuModule: React.FC = () => {
       const totalGrossGrams = totalNetGrams / bddRatio;
       const totalGrossKg = totalGrossGrams / 1000;
 
-      // Kebutuhan Pembelian terkonversi sesuai satuan pembelian
-      const purchaseQty = ing.purchaseUnit === 'pcs' || ing.purchaseUnit === 'ikat' || ing.purchaseUnit === 'butir'
-        ? Math.ceil(totalBeneficiaries) // e.g. Susu UHT 1 pcs/penerima
-        : totalGrossKg; // kg
+      // Kebutuhan Pembelian terkonversi sesuai Master Satuan
+      const unitMeta = masterUnits.find(
+        u => u.code.trim().toLowerCase() === (ing.purchaseUnit || 'kg').trim().toLowerCase()
+      );
+      let purchaseQty = totalGrossKg;
+      let costPortionSmall = (ing.netWeightSmall / 1000 / bddRatio) * ing.unitPrice;
+      let costPortionLarge = (ing.netWeightLarge / 1000 / bddRatio) * ing.unitPrice;
+
+      if (unitMeta?.baseUnit === 'gram' && unitMeta.conversionToBase > 0) {
+        purchaseQty = totalGrossGrams / unitMeta.conversionToBase;
+        costPortionSmall = (ing.netWeightSmall / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
+        costPortionLarge = (ing.netWeightLarge / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
+      } else if (unitMeta?.baseUnit === 'ml' && unitMeta.conversionToBase > 0) {
+        purchaseQty = totalGrossGrams / unitMeta.conversionToBase;
+        costPortionSmall = (ing.netWeightSmall / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
+        costPortionLarge = (ing.netWeightLarge / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
+      } else if (
+        unitMeta?.baseUnit === 'satuan' ||
+        ing.purchaseUnit === 'pcs' ||
+        ing.purchaseUnit === 'ikat' ||
+        ing.purchaseUnit === 'butir'
+      ) {
+        purchaseQty = Math.ceil(totalBeneficiaries);
+      }
 
       // Total Biaya Bahan (Food Cost Bahan)
       const totalCost = purchaseQty * ing.unitPrice;
-
-      // Cost per portion small vs large
-      const costPortionSmall = (ing.netWeightSmall / 1000 / bddRatio) * ing.unitPrice;
-      const costPortionLarge = (ing.netWeightLarge / 1000 / bddRatio) * ing.unitPrice;
 
       // Nutrition contribution of this ingredient for small vs large portion:
       // Nilai gizi = (berat bersih (g) / 100) * kandungan per 100g
@@ -369,7 +387,7 @@ export const NutritionMenuModule: React.FC = () => {
         },
       };
     });
-  }, [currentIngredients, quotaSmall, quotaLarge, totalBeneficiaries]);
+  }, [currentIngredients, quotaSmall, quotaLarge, totalBeneficiaries, masterUnits]);
 
   // Aggregate Total Net & Gross
   const totalNetWeightAllKg = useMemo(
@@ -476,6 +494,7 @@ export const NutritionMenuModule: React.FC = () => {
       setSelectedCompositionId(comp.id);
       setCustomBdd(comp.ediblePortion);
       setCustomUnitPrice(comp.defaultUnitPrice);
+      setCustomPurchaseUnit(comp.purchaseUnit || masterUnits[0]?.code || 'kg');
       setCustomGramSmall(comp.category === 'Makanan Pokok' ? 85 : 50);
       setCustomGramLarge(comp.category === 'Makanan Pokok' ? 125 : 75);
     }
@@ -488,6 +507,7 @@ export const NutritionMenuModule: React.FC = () => {
     if (comp) {
       setCustomBdd(comp.ediblePortion);
       setCustomUnitPrice(comp.defaultUnitPrice);
+      setCustomPurchaseUnit(comp.purchaseUnit || masterUnits[0]?.code || 'kg');
     }
   };
 
@@ -496,16 +516,27 @@ export const NutritionMenuModule: React.FC = () => {
     const comp = foodCompositions.find(c => c.id === selectedCompositionId);
     if (!comp) return;
 
+    const chosenUnitCode = customPurchaseUnit || comp.purchaseUnit || 'kg';
+    const unitMeta = masterUnits.find(
+      u => u.code.trim().toLowerCase() === chosenUnitCode.trim().toLowerCase()
+    );
+    const convFactor =
+      unitMeta && (unitMeta.baseUnit === 'gram' || unitMeta.baseUnit === 'ml') && unitMeta.conversionToBase > 0
+        ? Number((1 / unitMeta.conversionToBase).toFixed(6))
+        : chosenUnitCode === 'pcs'
+        ? 1
+        : 0.001;
+
     const newIng: RecipeIngredient = {
       id: `ing-${Date.now()}`,
       name: comp.name,
       category: comp.category,
       netWeightSmall: Number(customGramSmall),
       netWeightLarge: Number(customGramLarge),
-      unit: comp.purchaseUnit === 'pcs' || comp.purchaseUnit === 'ikat' ? comp.purchaseUnit : 'gram',
+      unit: unitMeta?.baseUnit === 'satuan' ? chosenUnitCode : 'gram',
       ediblePortionPercent: Number(customBdd),
-      conversionFactorToBase: comp.purchaseUnit === 'pcs' ? 1 : 0.001,
-      purchaseUnit: comp.purchaseUnit,
+      conversionFactorToBase: convFactor,
+      purchaseUnit: chosenUnitCode,
       unitPrice: Number(customUnitPrice),
       calories100g: comp.calories,
       protein100g: comp.protein,
@@ -1857,10 +1888,10 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Persentase BDD (% Bagian Dapat Dimakan) *
+                Persentase BDD (% Dapat Dimakan) *
               </label>
               <input
                 type="number"
@@ -1874,7 +1905,27 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Harga Satuan Bahan (Rp) *
+                Satuan Beli (Master Satuan) *
+              </label>
+              <select
+                required
+                value={customPurchaseUnit}
+                onChange={e => setCustomPurchaseUnit(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                {masterUnits.map(u => (
+                  <option key={u.id} value={u.code}>
+                    {u.code} — {u.name}
+                  </option>
+                ))}
+                {customPurchaseUnit && !masterUnits.some(u => u.code === customPurchaseUnit) && (
+                  <option value={customPurchaseUnit}>{customPurchaseUnit}</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Harga per {customPurchaseUnit} (Rp) *
               </label>
               <input
                 type="number"

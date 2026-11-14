@@ -36,13 +36,6 @@ const formatShortDate = (dateStr: string): string => {
   return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short' }).format(parsed);
 };
 
-const normalizeWeightToKg = (qty: number, unit?: string): number => {
-  const safeQty = Number.isFinite(qty) ? qty : 0;
-  const u = (unit || 'kg').trim().toLowerCase();
-  if (u === 'g' || u === 'gr' || u === 'gram') return safeQty / 1000;
-  return safeQty;
-};
-
 export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) => {
   const {
     institutions,
@@ -57,7 +50,35 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     washingWasteRecords,
     prepRecords,
     sppgConfig,
+    masterUnits,
+    materialConversions,
   } = useApp();
+
+  const convertToKg = (qty: number, unit?: string, materialName?: string): number => {
+    const safeQty = Number.isFinite(qty) ? qty : 0;
+    const u = (unit || 'kg').trim().toLowerCase();
+    if (u === 'g' || u === 'gr' || u === 'gram') return safeQty / 1000;
+    const unitMeta = masterUnits.find(m => m.code.trim().toLowerCase() === u);
+    if (unitMeta) {
+      if (unitMeta.baseUnit === 'gram') {
+        return (safeQty * unitMeta.conversionToBase) / 1000;
+      }
+      if (unitMeta.baseUnit === 'ml') {
+        return (safeQty * unitMeta.conversionToBase) / 1000;
+      }
+      if (materialName) {
+        const conv = materialConversions.find(
+          c =>
+            c.unit.trim().toLowerCase() === u &&
+            c.materialName.toLowerCase().includes(materialName.trim().toLowerCase())
+        );
+        if (conv && conv.gramsPerUnit > 0) {
+          return (safeQty * conv.gramsPerUnit) / 1000;
+        }
+      }
+    }
+    return safeQty;
+  };
 
   // Metrics Calculations
   const totalRecipients = institutions.reduce((acc, i) => acc + i.totalPortions, 0);
@@ -130,15 +151,15 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     >();
 
     for (const rec of washingWasteRecords) {
-      const rice = Number(rec.wasteRice?.weight) || 0;
-      const animal = Number(rec.wasteAnimalProtein?.weight) || 0;
-      const plant = Number(rec.wastePlantProtein?.weight) || 0;
-      const vegetable = Number(rec.wasteVegetable?.weight) || 0;
-      const fruit = Number(rec.wasteFruit?.weight) || 0;
+      const rice = convertToKg(Number(rec.wasteRice?.weight) || 0, rec.wasteRice?.unit || rec.unit);
+      const animal = convertToKg(Number(rec.wasteAnimalProtein?.weight) || 0, rec.wasteAnimalProtein?.unit || rec.unit);
+      const plant = convertToKg(Number(rec.wastePlantProtein?.weight) || 0, rec.wastePlantProtein?.unit || rec.unit);
+      const vegetable = convertToKg(Number(rec.wasteVegetable?.weight) || 0, rec.wasteVegetable?.unit || rec.unit);
+      const fruit = convertToKg(Number(rec.wasteFruit?.weight) || 0, rec.wasteFruit?.unit || rec.unit);
       const sumComponents = rice + animal + plant + vegetable + fruit;
       const recordTotal =
         typeof rec.totalWasteWeight === 'number' && rec.totalWasteWeight > 0
-          ? rec.totalWasteWeight
+          ? convertToKg(rec.totalWasteWeight, rec.unit)
           : sumComponents;
 
       const existing = byDate.get(rec.date);
@@ -192,7 +213,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     const latestDay = sortedDays[sortedDays.length - 1] || null;
 
     return { sortedDays, chartData, totalAllDays, avgDailyKg, latestDay };
-  }, [washingWasteRecords, totalRecipients]);
+  }, [washingWasteRecords, totalRecipients, masterUnits, materialConversions]);
 
   const [selectedWasteDate, setSelectedWasteDate] = useState<string>('');
   const activeWasteDay = useMemo(() => {
@@ -230,9 +251,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     >();
 
     for (const rec of prepRecords) {
-      const vegKg = normalizeWeightToKg(rec.damagedVegetable?.quantity || 0, rec.damagedVegetable?.unit);
-      const animKg = normalizeWeightToKg(rec.damagedAnimal?.quantity || 0, rec.damagedAnimal?.unit);
-      const fruitKg = normalizeWeightToKg(rec.damagedFruit?.quantity || 0, rec.damagedFruit?.unit);
+      const vegKg = convertToKg(rec.damagedVegetable?.quantity || 0, rec.damagedVegetable?.unit, rec.damagedVegetable?.name);
+      const animKg = convertToKg(rec.damagedAnimal?.quantity || 0, rec.damagedAnimal?.unit, rec.damagedAnimal?.name);
+      const fruitKg = convertToKg(rec.damagedFruit?.quantity || 0, rec.damagedFruit?.unit, rec.damagedFruit?.name);
 
       const recItems = [
         {
@@ -301,7 +322,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     const latestDay = sortedDays[sortedDays.length - 1] || null;
 
     return { sortedDays, chartData, totalAllDaysKg, avgDailyKg, latestDay };
-  }, [prepRecords]);
+  }, [prepRecords, masterUnits, materialConversions]);
 
   const [selectedPrepDate, setSelectedPrepDate] = useState<string>('');
   const activePrepDay = useMemo(() => {

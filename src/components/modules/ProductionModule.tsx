@@ -83,6 +83,7 @@ export const ProductionModule: React.FC = () => {
     addWashingWasteRecord,
     beneficiaryAttendance,
     masterVolunteers,
+    masterUnits,
     menuItems,
     distributionLogs,
     kitchenProgress,
@@ -2048,7 +2049,7 @@ export const ProductionModule: React.FC = () => {
               </span>
 
               {/* Sayur */}
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
                 <div className="sm:col-span-2">
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Sayur Rusak</label>
                   <input
@@ -2059,7 +2060,7 @@ export const ProductionModule: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak ({prepForm.vegUnit})</label>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
                   <input
                     type="number"
                     step="0.1"
@@ -2067,6 +2068,21 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => setPrepForm(f => ({ ...f, vegQty: Number(e.target.value) }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
+                </div>
+                <div>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Satuan</label>
+                  <select
+                    value={prepForm.vegUnit}
+                    onChange={e => setPrepForm(f => ({ ...f, vegUnit: e.target.value }))}
+                    className="w-full px-2 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>{u.code}</option>
+                    ))}
+                    {prepForm.vegUnit && !masterUnits.some(u => u.code === prepForm.vegUnit) && (
+                      <option value={prepForm.vegUnit}>{prepForm.vegUnit}</option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
@@ -2090,7 +2106,7 @@ export const ProductionModule: React.FC = () => {
               </div>
 
               {/* Hewani */}
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
                 <div className="sm:col-span-2">
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Hewani Rusak/Trimming</label>
                   <input
@@ -2101,7 +2117,7 @@ export const ProductionModule: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak ({prepForm.animalUnit})</label>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
                   <input
                     type="number"
                     step="0.1"
@@ -2109,6 +2125,21 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => setPrepForm(f => ({ ...f, animalQty: Number(e.target.value) }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
+                </div>
+                <div>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Satuan</label>
+                  <select
+                    value={prepForm.animalUnit}
+                    onChange={e => setPrepForm(f => ({ ...f, animalUnit: e.target.value }))}
+                    className="w-full px-2 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>{u.code}</option>
+                    ))}
+                    {prepForm.animalUnit && !masterUnits.some(u => u.code === prepForm.animalUnit) && (
+                      <option value={prepForm.animalUnit}>{prepForm.animalUnit}</option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
@@ -2132,7 +2163,7 @@ export const ProductionModule: React.FC = () => {
               </div>
 
               {/* Buah */}
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
                 <div className="sm:col-span-2">
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Buah Rusak/Memar</label>
                   <input
@@ -2143,7 +2174,7 @@ export const ProductionModule: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak ({prepForm.fruitUnit})</label>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
                   <input
                     type="number"
                     step="0.1"
@@ -2151,6 +2182,21 @@ export const ProductionModule: React.FC = () => {
                     onChange={e => setPrepForm(f => ({ ...f, fruitQty: Number(e.target.value) }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
+                </div>
+                <div>
+                  <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Satuan</label>
+                  <select
+                    value={prepForm.fruitUnit}
+                    onChange={e => setPrepForm(f => ({ ...f, fruitUnit: e.target.value }))}
+                    className="w-full px-2 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>{u.code}</option>
+                    ))}
+                    {prepForm.fruitUnit && !masterUnits.some(u => u.code === prepForm.fruitUnit) && (
+                      <option value={prepForm.fruitUnit}>{prepForm.fruitUnit}</option>
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
@@ -3495,10 +3541,31 @@ export const ProductionModule: React.FC = () => {
 
             {/* 5 Kategori Food Waste */}
             <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Trash2 className="w-4 h-4 text-rose-500" />
-                Berat Sampah Sisa Makanan ({wasteForm.unit}) & Upload Foto
-              </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                  <Trash2 className="w-4 h-4 text-rose-500" />
+                  Berat Sampah Sisa Makanan ({wasteForm.unit}) & Upload Foto
+                </span>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    Satuan (Master):
+                  </label>
+                  <select
+                    value={wasteForm.unit}
+                    onChange={e => setWasteForm(f => ({ ...f, unit: e.target.value }))}
+                    className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                  >
+                    {masterUnits.map(u => (
+                      <option key={u.id} value={u.code}>
+                        {u.code} — {u.name}
+                      </option>
+                    ))}
+                    {wasteForm.unit && !masterUnits.some(u => u.code === wasteForm.unit) && (
+                      <option value={wasteForm.unit}>{wasteForm.unit}</option>
+                    )}
+                  </select>
+                </div>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
                 <div>
