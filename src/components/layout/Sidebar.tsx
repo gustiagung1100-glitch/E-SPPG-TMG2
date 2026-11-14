@@ -22,6 +22,7 @@ import {
   Store,
   PackageCheck,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { SPPGLogo } from '../common/OfficialLogos';
 
@@ -30,6 +31,7 @@ interface SidebarProps {
   onSelectModule: (module: ModuleKey) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  isDesktopHidden?: boolean;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -39,10 +41,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectModule,
   isCollapsed,
   onToggleCollapse,
+  isDesktopHidden = false,
   isMobileOpen,
   onCloseMobile,
 }) => {
-  const { currentUser, inventory, purchaseOrders, volunteerAttendance, volunteerAbsences } = useApp();
+  const { currentUser, roleModuleAccess, inventory, purchaseOrders, volunteerAttendance, volunteerAbsences } = useApp();
 
   // Badges
   const isSupplier = currentUser.role === 'Supplier / Mitra Pangan';
@@ -216,39 +219,70 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  const rawSections = isSupplier ? supplierSections : standardSections;
+  const extraSupplierItems = isSupplier
+    ? standardSections
+        .flatMap(sec => sec.items)
+        .filter(
+          item =>
+            item.key !== 'supplier_portal' &&
+            item.key !== 'settings' &&
+            canRoleAccessModule(currentUser.role, item.key, roleModuleAccess)
+        )
+    : [];
+
+  const rawSections = isSupplier
+    ? extraSupplierItems.length > 0
+      ? [
+          ...supplierSections,
+          { title: 'MODUL TAMBAHAN', items: extraSupplierItems },
+        ]
+      : supplierSections
+    : standardSections;
+
   const sections = rawSections
     .map(section => ({
       ...section,
-      items: section.items.filter(item => canRoleAccessModule(currentUser.role, item.key)),
+      items: section.items.filter(item =>
+        canRoleAccessModule(currentUser.role, item.key, roleModuleAccess)
+      ),
     }))
     .filter(section => section.items.length > 0);
 
+  const isExpandedView = !isCollapsed || isMobileOpen;
+
   return (
     <>
-      {/* Mobile Backdrop */}
+      {/* Mobile & Tablet Backdrop */}
       {isMobileOpen && (
         <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 lg:hidden"
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 lg:hidden transition-opacity"
           onClick={onCloseMobile}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:static top-0 bottom-0 left-0 z-40 bg-[#142B4A] text-slate-200 border-r border-white/10 flex flex-col transition-all duration-300 ${
-          isCollapsed ? 'w-20' : 'w-64'
-        } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        aria-label="Navigasi Utama E-SPPG"
+        className={`fixed lg:static top-0 bottom-0 left-0 z-50 lg:z-40 bg-[#142B4A] text-slate-200 border-r border-white/10 flex flex-col transition-all duration-300 ease-in-out shrink-0 ${
+          isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
+        } ${
+          isDesktopHidden
+            ? 'w-72 sm:w-64 lg:w-0 lg:min-w-0 lg:overflow-hidden lg:border-r-0 lg:opacity-0 lg:pointer-events-none'
+            : isCollapsed
+            ? 'w-72 sm:w-64 lg:w-20'
+            : 'w-72 sm:w-64'
+        }`}
       >
         {/* Brand Header */}
-        <div className="h-16 px-4 flex items-center justify-between border-b border-white/10 bg-[#142B4A]">
-          {!isCollapsed ? (
-            <div className="flex items-center gap-3">
+        <div className="h-16 px-4 flex items-center justify-between border-b border-white/10 bg-[#142B4A] shrink-0">
+          {isExpandedView ? (
+            <div className="flex items-center gap-3 min-w-0">
               <div className="shrink-0 flex items-center justify-center">
                 <SPPGLogo size="sm" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-sm font-extrabold tracking-wide text-white leading-tight">
+                <h1 className="text-sm font-extrabold tracking-wide text-white leading-tight truncate">
                   E-SPPG TMG2
                 </h1>
                 <p className="text-[10px] text-teal-300/90 truncate">
@@ -262,21 +296,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="hidden lg:flex p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition"
-            title={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar'}
-          >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Desktop Collapse to Icon Strip */}
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="hidden lg:flex p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              title={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar ke Mode Ikon'}
+              aria-label={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar ke Mode Ikon'}
+            >
+              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+
+            {/* Mobile & Tablet Close Drawer Icon */}
+            <button
+              type="button"
+              onClick={onCloseMobile}
+              className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition cursor-pointer"
+              title="Tutup Sidebar Navigasi"
+              aria-label="Tutup Sidebar Navigasi"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Sections */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin">
           {sections.map((section, sIdx) => (
             <div key={sIdx}>
-              {!isCollapsed && (
+              {isExpandedView && (
                 <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-slate-400 uppercase select-none">
                   {section.title}
                 </div>
@@ -291,23 +340,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onSelectModule(item.key);
                         onCloseMobile();
                       }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-150 relative group ${
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 lg:py-2 rounded-lg text-xs font-semibold transition-all duration-150 relative group cursor-pointer ${
                         isActive
                           ? 'bg-[#0F766E] text-white shadow-xs before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:bg-[#F2D58B] before:rounded-r-sm'
                           : 'text-slate-300 hover:bg-white/8 hover:text-white'
-                      } ${isCollapsed ? 'justify-center' : 'justify-between'}`}
+                      } ${!isExpandedView ? 'justify-center' : 'justify-between'}`}
                       title={item.label}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className={`transition-transform duration-150 ${isActive ? 'scale-105' : 'group-hover:scale-105'}`}>
                           {item.icon}
                         </span>
-                        {!isCollapsed && (
+                        {isExpandedView && (
                           <span className="truncate tracking-tight">{item.label}</span>
                         )}
                       </div>
 
-                      {item.badge !== undefined && !isCollapsed && (
+                      {item.badge !== undefined && isExpandedView && (
                         <span
                           className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md tabular-nums ${
                             item.badgeColor || 'bg-[#2563EB] text-white'
@@ -318,7 +367,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       )}
 
                       {/* Compact badge on collapsed */}
-                      {item.badge !== undefined && isCollapsed && (
+                      {item.badge !== undefined && !isExpandedView && (
                         <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#DC2626]" />
                       )}
                     </button>
@@ -330,8 +379,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Sidebar Footer */}
-        <div className="p-3 border-t border-white/10 bg-[#10243E] text-[11px] text-slate-300">
-          {!isCollapsed ? (
+        <div className="p-3 border-t border-white/10 bg-[#10243E] text-[11px] text-slate-300 shrink-0">
+          {isExpandedView ? (
             <div className="flex items-center justify-between">
               <div>
                 <div className="font-semibold text-white">Krejengan Temenggungan</div>

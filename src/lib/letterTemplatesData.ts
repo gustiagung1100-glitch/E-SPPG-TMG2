@@ -297,57 +297,6 @@ Kepala SPPG Temenggungan 2,                 Pihak Pembuat Laporan,
 {{PENANDATANGAN}}                           ( Staf Pelapor )`,
   },
   {
-    id: 'tmpl-bap-suhu',
-    type: 'Berita Acara Lainnya',
-    codePrefix: 'BA-SUHU',
-    title: 'Berita Acara Pemantauan Suhu Ruang & Pendingin',
-    description: 'Surat pelaporan resmi pemantauan suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 unit pendingin pada Divisi Persiapan, Pengolahan, dan Pemorsian.',
-    defaultSubject: 'Berita Acara Pelaporan Suhu Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin',
-    fields: [
-      { key: 'RUANG_PEMORSIAN', label: 'Suhu Ruang Pemorsian (3 Divisi)', placeholder: 'Persiapan: 21.0°C | Pengolahan: 21.5°C | Pemorsian: 22.0°C', defaultValue: 'Div. Persiapan: 21.0°C | Div. Pengolahan: 21.5°C | Div. Pemorsian: 22.0°C (Standar ≤ 24°C)' },
-      { key: 'RUANG_PENGOLAHAN', label: 'Suhu Ruang Pengolahan (3 Divisi)', placeholder: 'Persiapan: 25.5°C | Pengolahan: 27.0°C | Pemorsian: 26.5°C', defaultValue: 'Div. Persiapan: 25.5°C | Div. Pengolahan: 27.0°C | Div. Pemorsian: 26.5°C (Standar ≤ 28°C)' },
-      { key: 'GUDANG_BASAH', label: 'Suhu Ruang Gudang Basah (3 Divisi)', placeholder: 'Persiapan: 14.0°C | Pengolahan: 14.5°C | Pemorsian: 14.2°C', defaultValue: 'Div. Persiapan: 14.0°C | Div. Pengolahan: 14.5°C | Div. Pemorsian: 14.2°C (Standar 10 - 16°C)' },
-      { key: 'GUDANG_KERING', label: 'Suhu Ruang Gudang Kering (3 Divisi)', placeholder: 'Persiapan: 22.8°C | Pengolahan: 23.0°C | Pemorsian: 23.2°C', defaultValue: 'Div. Persiapan: 22.8°C | Div. Pengolahan: 23.0°C | Div. Pemorsian: 23.2°C (Standar ≤ 25°C)' },
-      { key: 'UNIT_PENDINGIN', label: 'Ringkasan 6 Unit Pendingin (Freezer & Kulkas)', placeholder: 'F1: -19.0°C | F2: -20.5°C | K1: 5.0°C | K2: 6.0°C | K3: 5.2°C | K4: 4.0°C', defaultValue: 'Freezer 1 Daging (-19.0°C), Freezer 2 Ikan (-20.5°C), Kulkas 1 Telur (5.0°C), Kulkas 2 Sayur (6.0°C), Kulkas 3 Buah (5.2°C), Kulkas 4 Bumbu (4.0°C)', type: 'textarea' },
-      { key: 'KELENGKAPAN_FOTO', label: 'Status Upload Foto Dokumentasi', placeholder: '30/30 Foto bukti termometer terupload di sistem', defaultValue: 'Seluruh bukti foto digital Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 Pendingin telah terupload lengkap pada modul pelaporan Divisi Persiapan, Pengolahan, dan Pemorsian.' },
-      { key: 'PETUGAS_DIVISI', label: 'Petugas Pelapor (Persiapan, Pengolahan, Pemorsian)', placeholder: 'Siti Aminah, S.Gz., Chef Wahyu Ramadhan, Nurul Hidayah', defaultValue: 'Siti Aminah, S.Gz. (Persiapan), Chef Wahyu Ramadhan (Pengolahan), Nurul Hidayah (Pemorsian)' },
-      { key: 'KESIMPULAN_CCP', label: 'Kesimpulan Kepatuhan Higiene & Rantai Dingin', placeholder: 'Seluruh area produksi memenuhi batas standar BGN RI.', defaultValue: 'Seluruh titik kontrol suhu ruangan dan rantai dingin (cold chain) beroperasi optimal sesuai standar keamanan pangan Badan Gizi Nasional (BGN).' },
-    ],
-    templateBody: `BERITA ACARA PEMANTAUAN SUHU RUANG & 6 PENDINGIN (BA-SUHU)
-Nomor: {{NOMOR_SURAT}}
-
-Pada hari ini, {{TANGGAL_SURAT}}, bertempat di dapur operasional {{NAMA_SPPG}} (ID SPPG: {{ID_SPPG}}), telah dilaksanakan pemeriksaan, pencatatan suhu fasilitas, serta pengunggahan foto bukti digital pada tugas pelaporan Divisi Persiapan, Divisi Pengolahan, dan Divisi Pemorsian dengan hasil sebagai berikut:
-
-A. PEMANTAUAN SUHU RUANGAN PRODUKSI & GUDANG:
-1. Ruang Pemorsian     : {{RUANG_PEMORSIAN}}
-2. Ruang Pengolahan    : {{RUANG_PENGOLAHAN}}
-3. Ruang Gudang Basah  : {{GUDANG_BASAH}}
-4. Ruang Gudang Kering : {{GUDANG_KERING}}
-
-B. PEMANTAUAN 6 UNIT PENDINGIN (COLD CHAIN):
-{{UNIT_PENDINGIN}}
-
-C. KELENGKAPAN DOKUMENTASI FOTO UPLOAD:
-{{KELENGKAPAN_FOTO}}
-
-D. TIM PELAPOR 3 DIVISI:
-{{PETUGAS_DIVISI}}
-
-E. KESIMPULAN VERIFIKASI MUTU:
-{{KESIMPULAN_CCP}}
-
-Demikian Berita Acara Pemantauan Suhu Ruang & 6 Pendingin ini dibuat dengan sebenarnya sebagai dokumen pelaporan resmi operasional {{NAMA_SPPG}}.
-
-Temenggungan, {{TANGGAL_SURAT}}
-
-Mengetahui & Mengesahkan,                    Pengawas Higiene & Sanitasi,
-Kepala SPPG Temenggungan 2,
-
-
-{{PENANDATANGAN}}                           ( Siti Aminah, S.Gz. )
-{{JABATAN_PENANDATANGAN}}`,
-  },
-  {
     id: 'tmpl-su',
     type: 'Surat Undangan',
     codePrefix: '005/UND',

@@ -3,13 +3,152 @@
  * Mengatur pemetaan URL <-> Modul dan validasi hak akses peran di level rute.
  */
 
-import { ModuleKey, RoleType } from '../types';
+import { ModuleKey, RoleModuleAccessMap, RoleType } from '../types';
 
 export const AUTH_SESSION_STORAGE_KEY = 'esppg_auth_session';
 export const CURRENT_USER_STORAGE_KEY = 'esppg_current_user';
+export const ROLE_MODULE_ACCESS_STORAGE_KEY = 'esppg_role_module_access_v1';
 
 export const LOGIN_PATH = '/login';
 export const FORBIDDEN_PATH = '/403';
+
+export interface ModuleMetaInfo {
+  key: ModuleKey;
+  label: string;
+  shortLabel: string;
+  category:
+    | 'Utama'
+    | 'Data Master & Gizi'
+    | 'Rantai Pasok'
+    | 'Produksi & Logistik'
+    | 'Akuntansi & SDM'
+    | 'Administrasi & Sistem';
+  description: string;
+}
+
+export const ALL_MODULES_META: readonly ModuleMetaInfo[] = [
+  {
+    key: 'dashboard',
+    label: 'Dashboard Terpadu',
+    shortLabel: 'Dashboard',
+    category: 'Utama',
+    description: 'Ringkasan operasional, statistik porsi & indikator gizi.',
+  },
+  {
+    key: 'master_data',
+    label: 'Master Data Terpadu (A-E)',
+    shortLabel: 'Master Data',
+    category: 'Data Master & Gizi',
+    description: 'Katalog master bahan, supplier, relawan, satuan & konversi.',
+  },
+  {
+    key: 'institutions',
+    label: 'Modul Penerima Manfaat',
+    shortLabel: 'Penerima Manfaat',
+    category: 'Data Master & Gizi',
+    description: 'Data sekolah, lembaga, PIC, kuota porsi & presensi siswa.',
+  },
+  {
+    key: 'menu',
+    label: 'Perencanaan Menu & Gizi',
+    shortLabel: 'Menu & Gizi',
+    category: 'Data Master & Gizi',
+    description: 'Siklus menu harian, perhitungan AKG, TKPI & verifikasi gizi.',
+  },
+  {
+    key: 'menu_flyer',
+    label: 'Flyer Menu Otomatis',
+    shortLabel: 'Flyer Menu',
+    category: 'Data Master & Gizi',
+    description: 'Generator infografis & poster menu gizi harian.',
+  },
+  {
+    key: 'procurement',
+    label: 'Modul PLOK (RAB, PO, QC)',
+    shortLabel: 'Modul PLOK',
+    category: 'Rantai Pasok',
+    description: 'Rencana anggaran belanja, Purchase Order & inspeksi QC.',
+  },
+  {
+    key: 'supplier_portal',
+    label: 'Portal Mitra Supplier',
+    shortLabel: 'Portal Supplier',
+    category: 'Rantai Pasok',
+    description: 'Pesanan PO bahan masuk, konfirmasi kirim & faktur mitra.',
+  },
+  {
+    key: 'inventory',
+    label: 'Gudang & Stok Bahan',
+    shortLabel: 'Gudang & Stok',
+    category: 'Rantai Pasok',
+    description: 'Manajemen stok gudang, batch FIFO & mutasi keluar-masuk.',
+  },
+  {
+    key: 'production',
+    label: 'Dapur & Produksi MBG',
+    shortLabel: 'Produksi Dapur',
+    category: 'Produksi & Logistik',
+    description: 'Divisi Persiapan, Pengolahan, Pemorsian, suhu & Cuci Ompreng.',
+  },
+  {
+    key: 'distribution',
+    label: 'Distribusi & Armada',
+    shortLabel: 'Distribusi',
+    category: 'Produksi & Logistik',
+    description: 'Jadwal pengiriman armada, BAST sekolah, ompreng kembali & BBM.',
+  },
+  {
+    key: 'finance',
+    label: 'Keuangan, RAB & Kas',
+    shortLabel: 'Keuangan & Kas',
+    category: 'Akuntansi & SDM',
+    description: 'Arus kas masuk/keluar, realisasi anggaran & bukti transaksi.',
+  },
+  {
+    key: 'volunteers',
+    label: 'Relawan & Ketidakhadiran',
+    shortLabel: 'Relawan & SDM',
+    category: 'Akuntansi & SDM',
+    description: 'Presensi harian relawan, pengajuan izin & penggantian shift.',
+  },
+  {
+    key: 'letters',
+    label: 'Tata Persuratan & SPK',
+    shortLabel: 'Persuratan',
+    category: 'Administrasi & Sistem',
+    description: 'Surat masuk, surat keluar resmi, disposisi & template SPK.',
+  },
+  {
+    key: 'reports',
+    label: 'Dokumentasi & Laporan BGN',
+    shortLabel: 'Laporan BGN',
+    category: 'Administrasi & Sistem',
+    description: '20 laporan resmi standar BGN, ekspor PDF, Excel & CSV.',
+  },
+  {
+    key: 'settings',
+    label: 'Pengaturan & Hak Akses',
+    shortLabel: 'Pengaturan',
+    category: 'Administrasi & Sistem',
+    description: 'Profil SPPG, login web, matriks RBAC, backup database & audit.',
+  },
+];
+
+export const ALL_ROLES_LIST: readonly RoleType[] = [
+  'Admin Utama',
+  'Kepala SPPG',
+  'Pengawas Gizi',
+  'Pengawas Keuangan',
+  'Asisten Lapangan',
+  'Admin Gudang',
+  'Cheff',
+  'Relawan Div. Persiapan',
+  'Relawan Div. Pengolahan',
+  'Relawan Div. Pemorsian',
+  'Relawan Div. Distribusi',
+  'Relawan Div. Cuci Ompreng',
+  'Supplier / Mitra Pangan',
+];
 
 export const MODULE_PATHS: Record<ModuleKey, string> = {
   dashboard: '/dashboard',
@@ -182,6 +321,52 @@ export const ROLE_ALLOWED_MODULES: Record<RoleType, readonly ModuleKey[]> = {
   ],
 };
 
+const VALID_MODULE_KEYS = new Set<ModuleKey>(ALL_MODULES_META.map(m => m.key));
+
+export function buildDefaultRoleModuleAccess(): RoleModuleAccessMap {
+  const result = {} as RoleModuleAccessMap;
+  for (const role of ALL_ROLES_LIST) {
+    result[role] = [...ROLE_ALLOWED_MODULES[role]];
+  }
+  return result;
+}
+
+export function sanitizeRoleModuleAccess(raw: unknown): RoleModuleAccessMap {
+  const defaults = buildDefaultRoleModuleAccess();
+  if (!raw || typeof raw !== 'object') return defaults;
+
+  const incoming = raw as Record<string, unknown>;
+  const sanitized = {} as RoleModuleAccessMap;
+
+  for (const role of ALL_ROLES_LIST) {
+    if (role === 'Admin Utama') {
+      // Admin Utama selalu memiliki akses penuh ke seluruh modul agar tidak terkunci
+      sanitized[role] = ALL_MODULES_META.map(m => m.key);
+      continue;
+    }
+
+    const candidate = incoming[role];
+    if (Array.isArray(candidate)) {
+      const seen = new Set<ModuleKey>();
+      const cleaned: ModuleKey[] = [];
+      for (const item of candidate) {
+        if (typeof item === 'string' && VALID_MODULE_KEYS.has(item as ModuleKey)) {
+          const mod = item as ModuleKey;
+          if (!seen.has(mod)) {
+            seen.add(mod);
+            cleaned.push(mod);
+          }
+        }
+      }
+      sanitized[role] = cleaned;
+    } else {
+      sanitized[role] = [...defaults[role]];
+    }
+  }
+
+  return sanitized;
+}
+
 export function normalizePathname(pathname: string): string {
   const clean = pathname.split('?')[0].split('#')[0].trim().toLowerCase();
   if (clean.length > 1 && clean.endsWith('/')) {
@@ -211,15 +396,26 @@ export function getPathForModule(module: ModuleKey): string {
   return MODULE_PATHS[module] || '/dashboard';
 }
 
-export function getDefaultModuleForRole(role: RoleType): ModuleKey {
+export function getDefaultModuleForRole(
+  role: RoleType,
+  customMap?: RoleModuleAccessMap
+): ModuleKey {
+  const allowed = customMap?.[role] ?? ROLE_ALLOWED_MODULES[role] ?? [];
   if (role === 'Supplier / Mitra Pangan') {
-    return 'supplier_portal';
+    if (allowed.includes('supplier_portal')) return 'supplier_portal';
+    return allowed[0] || 'supplier_portal';
   }
-  return 'dashboard';
+  if (allowed.includes('dashboard')) return 'dashboard';
+  return allowed[0] || 'dashboard';
 }
 
-export function canRoleAccessModule(role: RoleType, module: ModuleKey): boolean {
-  const allowed = ROLE_ALLOWED_MODULES[role];
+export function canRoleAccessModule(
+  role: RoleType,
+  module: ModuleKey,
+  customMap?: RoleModuleAccessMap
+): boolean {
+  if (role === 'Admin Utama') return true;
+  const allowed = customMap?.[role] ?? ROLE_ALLOWED_MODULES[role];
   if (!allowed) return false;
   return allowed.includes(module);
 }

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../lib/store';
-import { RoleType, ActionPermission, WebAccessUser } from '../../types';
+import { RoleType, ActionPermission, WebAccessUser, ModuleKey, RoleModuleAccessMap } from '../../types';
+import { ALL_MODULES_META, ALL_ROLES_LIST } from '../../lib/routeGuard';
 import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -44,6 +45,8 @@ import {
   Edit3,
   ShieldCheck,
   Mail,
+  LayoutGrid,
+  RotateCcw,
 } from 'lucide-react';
 
 export const SettingsModule: React.FC = () => {
@@ -52,6 +55,9 @@ export const SettingsModule: React.FC = () => {
     updateSPPGConfig,
     rolePermissions,
     updateRolePermissions,
+    roleModuleAccess,
+    updateRoleModuleAccess,
+    resetRoleModuleAccess,
     auditLogs,
     currentUser,
     isFirebaseConnected,
@@ -127,6 +133,34 @@ export const SettingsModule: React.FC = () => {
   // Permissions state clone for editing
   const [permsState, setPermsState] = useState({ ...rolePermissions });
 
+  // Dynamic Module/Menu Access Matrix state for Admin Utama
+  const [moduleAccessDraft, setModuleAccessDraft] = useState<RoleModuleAccessMap>(() => ({
+    ...roleModuleAccess,
+  }));
+  const [moduleMatrixCategory, setModuleMatrixCategory] = useState<string>('ALL');
+  const [moduleMatrixRoleSearch, setModuleMatrixRoleSearch] = useState('');
+  const [isConfirmResetModulesOpen, setIsConfirmResetModulesOpen] = useState(false);
+
+  useEffect(() => {
+    setPermsState({ ...rolePermissions });
+  }, [rolePermissions]);
+
+  useEffect(() => {
+    setModuleAccessDraft({ ...roleModuleAccess });
+  }, [roleModuleAccess]);
+
+  const hasUnsavedModuleChanges = useMemo(() => {
+    return ALL_ROLES_LIST.some(role => {
+      const draftSet = new Set(moduleAccessDraft[role] || []);
+      const savedSet = new Set(roleModuleAccess[role] || []);
+      if (draftSet.size !== savedSet.size) return true;
+      for (const mod of draftSet) {
+        if (!savedSet.has(mod)) return true;
+      }
+      return false;
+    });
+  }, [moduleAccessDraft, roleModuleAccess]);
+
   // Database Tab States
   const [collectionSearch, setCollectionSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -161,7 +195,7 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleTogglePerm = (role: string, action: ActionPermission) => {
-    if (role === 'Admin Utama') return; // Admin Utama is permanently true
+    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
     const current = permsState[role]?.[action] ?? false;
     const updated = {
       ...permsState,
@@ -175,6 +209,56 @@ export const SettingsModule: React.FC = () => {
 
   const handleSavePerms = () => {
     updateRolePermissions(permsState);
+  };
+
+  const handleToggleModuleAccess = (role: RoleType, moduleKey: ModuleKey) => {
+    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
+    setModuleAccessDraft(prev => {
+      const currentList = prev[role] || [];
+      const exists = currentList.includes(moduleKey);
+      const nextList = exists
+        ? currentList.filter(k => k !== moduleKey)
+        : [...currentList, moduleKey];
+      return {
+        ...prev,
+        [role]: nextList,
+      };
+    });
+  };
+
+  const handleToggleAllModulesForRole = (role: RoleType, enableAll: boolean) => {
+    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
+    setModuleAccessDraft(prev => ({
+      ...prev,
+      [role]: enableAll ? ALL_MODULES_META.map(m => m.key) : [],
+    }));
+  };
+
+  const handleToggleModuleForAllRoles = (moduleKey: ModuleKey, enableAll: boolean) => {
+    if (currentUser.role !== 'Admin Utama') return;
+    setModuleAccessDraft(prev => {
+      const next = { ...prev };
+      for (const role of ALL_ROLES_LIST) {
+        if (role === 'Admin Utama') continue;
+        const currentList = next[role] || [];
+        if (enableAll) {
+          if (!currentList.includes(moduleKey)) {
+            next[role] = [...currentList, moduleKey];
+          }
+        } else {
+          next[role] = currentList.filter(k => k !== moduleKey);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSaveModuleAccess = async () => {
+    await updateRoleModuleAccess(moduleAccessDraft);
+  };
+
+  const handleConfirmResetModuleAccess = async () => {
+    await resetRoleModuleAccess();
   };
 
   // Export Database Snapshot
@@ -343,20 +427,28 @@ export const SettingsModule: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const roles: RoleType[] = [
-    'Admin Utama',
-    'Kepala SPPG',
-    'Pengawas Gizi',
-    'Pengawas Keuangan',
-    'Asisten Lapangan',
-    'Admin Gudang',
-    'Cheff',
-    'Relawan Div. Persiapan',
-    'Relawan Div. Pengolahan',
-    'Relawan Div. Pemorsian',
-    'Relawan Div. Distribusi',
-    'Relawan Div. Cuci Ompreng',
-  ];
+  const roles: RoleType[] = [...ALL_ROLES_LIST];
+
+  const moduleCategories = [
+    'ALL',
+    'Utama',
+    'Data Master & Gizi',
+    'Rantai Pasok',
+    'Produksi & Logistik',
+    'Akuntansi & SDM',
+    'Administrasi & Sistem',
+  ] as const;
+
+  const filteredMatrixModules = useMemo(() => {
+    if (moduleMatrixCategory === 'ALL') return ALL_MODULES_META;
+    return ALL_MODULES_META.filter(m => m.category === moduleMatrixCategory);
+  }, [moduleMatrixCategory]);
+
+  const filteredMatrixRoles = useMemo(() => {
+    const q = moduleMatrixRoleSearch.trim().toLowerCase();
+    if (!q) return ALL_ROLES_LIST;
+    return ALL_ROLES_LIST.filter(r => r.toLowerCase().includes(q));
+  }, [moduleMatrixRoleSearch]);
 
   const actions: { key: ActionPermission; label: string }[] = [
     { key: 'view', label: 'View (Lihat)' },
@@ -512,7 +604,7 @@ export const SettingsModule: React.FC = () => {
           }`}
         >
           <Shield className="w-4 h-4" />
-          <span>Matriks Hak Akses (12 Peran)</span>
+          <span>Matriks Hak Akses & Modul (13 Peran)</span>
         </button>
 
         <button
@@ -1318,78 +1410,339 @@ export const SettingsModule: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: RBAC Matrix */}
+      {/* Tab 2: RBAC Matrix (Module Access + Action Permissions) */}
       {activeTab === 'rbac' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Lock className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                Matriks Hak Akses Peran (Role-Based Access Control)
-              </h3>
-              <p className="text-xs text-slate-500">
-                Hak akses diverifikasi di level backend (Firestore Security Rules) dan frontend controller.
-              </p>
+        <div className="space-y-6">
+          {/* Section A: Matriks Hak Akses Modul / Menu per Peran */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#071D49]/10 text-[#071D49] dark:bg-sky-500/20 dark:text-sky-300 border border-[#071D49]/20 dark:border-sky-500/30">
+                    Kontrol Manual Admin Utama
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-md text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    {ALL_ROLES_LIST.length} Peran × {ALL_MODULES_META.length} Modul
+                  </span>
+                  {hasUnsavedModuleChanges && isSuperAdminSession && (
+                    <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                      Perubahan Belum Disimpan
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 text-[#164E91] dark:text-sky-400" />
+                  Matriks Hak Akses Modul & Menu per Peran
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Centang modul atau menu yang diizinkan tampil dan diakses untuk masing-masing peran. Perubahan berlaku otomatis pada Sidebar navigasi, pencarian Header, dan Route Guard.
+                </p>
+              </div>
+
+              {isSuperAdminSession && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmResetModulesOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset ke Default</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveModuleAccess}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5 text-[#F2D58B]" />
+                    <span>Simpan Akses Modul</span>
+                  </button>
+                </div>
+              )}
             </div>
-            {currentUser.role === 'Admin Utama' && (
-              <button
-                onClick={handleSavePerms}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold shadow-xs transition"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Simpan Matriks Peran</span>
-              </button>
+
+            {!isSuperAdminSession && (
+              <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Mode Baca Saja:</strong> Anda sedang masuk sebagai peran <strong>{currentUser.role}</strong>. Pengaturan akses modul/menu per peran hanya dapat diubah secara manual oleh <strong>Admin Utama</strong>.
+                </div>
+              </div>
             )}
+
+            {/* Filter Bar: Role Search & Module Category */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="relative w-full lg:max-w-xs">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={moduleMatrixRoleSearch}
+                  onChange={e => setModuleMatrixRoleSearch(e.target.value)}
+                  placeholder="Cari nama peran / jabatan..."
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:border-[#164E91] text-slate-800 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {moduleCategories.map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setModuleMatrixCategory(cat)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
+                      moduleMatrixCategory === cat
+                        ? 'bg-[#071D49] text-white dark:bg-sky-600'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {cat === 'ALL' ? `Semua Modul (${ALL_MODULES_META.length})` : cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Matrix Table */}
+            <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-slate-50 dark:bg-slate-800/90 text-[11px] text-slate-600 dark:text-slate-300">
+                  <tr>
+                    <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 p-3 min-w-[230px] border-b border-r border-slate-200 dark:border-slate-700 font-bold uppercase tracking-wider">
+                      Peran / Jabatan
+                    </th>
+                    {filteredMatrixModules.map(mod => {
+                      const nonAdminRoles = ALL_ROLES_LIST.filter(r => r !== 'Admin Utama');
+                      const allNonAdminEnabled = nonAdminRoles.every(r =>
+                        (moduleAccessDraft[r] || []).includes(mod.key)
+                      );
+                      return (
+                        <th
+                          key={mod.key}
+                          title={`${mod.label} — ${mod.description}`}
+                          className="p-2.5 min-w-[116px] text-center border-b border-r last:border-r-0 border-slate-200 dark:border-slate-700 align-top"
+                        >
+                          <div className="text-[9px] font-semibold text-slate-400 dark:text-slate-400 uppercase tracking-wider mb-0.5">
+                            {mod.category}
+                          </div>
+                          <div className="font-bold text-slate-800 dark:text-slate-100 leading-tight">
+                            {mod.shortLabel}
+                          </div>
+                          {isSuperAdminSession && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleToggleModuleForAllRoles(mod.key, !allNonAdminEnabled)
+                              }
+                              className="mt-1.5 px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px] font-semibold text-[#164E91] dark:text-sky-400 hover:bg-blue-50 dark:hover:bg-slate-700 transition cursor-pointer"
+                              title={
+                                allNonAdminEnabled
+                                  ? `Nonaktifkan ${mod.shortLabel} untuk semua peran non-admin`
+                                  : `Aktifkan ${mod.shortLabel} untuk semua peran non-admin`
+                              }
+                            >
+                              {allNonAdminEnabled ? 'Cabut Semua' : 'Beri Semua'}
+                            </button>
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {filteredMatrixRoles.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={filteredMatrixModules.length + 1}
+                        className="p-6 text-center text-slate-400 italic"
+                      >
+                        Tidak ada peran yang sesuai kata kunci pencarian.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMatrixRoles.map(role => {
+                      const isAdmin = role === 'Admin Utama';
+                      const allowedList = isAdmin
+                        ? ALL_MODULES_META.map(m => m.key)
+                        : moduleAccessDraft[role] || [];
+                      const activeCount = allowedList.length;
+
+                      return (
+                        <tr
+                          key={role}
+                          className={
+                            isAdmin
+                              ? 'bg-indigo-50/40 dark:bg-indigo-950/25 font-bold'
+                              : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                          }
+                        >
+                          <td
+                            className={`sticky left-0 z-10 p-3 border-r border-slate-200 dark:border-slate-700 ${
+                              isAdmin
+                                ? 'bg-indigo-50/95 dark:bg-slate-900'
+                                : 'bg-white dark:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold text-slate-900 dark:text-white leading-snug">
+                                {role}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                                  isAdmin
+                                    ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200'
+                                    : activeCount === 0
+                                    ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                    : 'bg-blue-50 text-[#102D63] dark:bg-sky-950/60 dark:text-sky-300'
+                                }`}
+                              >
+                                {activeCount}/{ALL_MODULES_META.length}
+                              </span>
+                            </div>
+
+                            {isAdmin ? (
+                              <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium mt-1 flex items-center gap-1">
+                                <Lock className="w-3 h-3" />
+                                <span>Super Admin — Akses Penuh Terkunci</span>
+                              </div>
+                            ) : (
+                              isSuperAdminSession && (
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleAllModulesForRole(role, true)}
+                                    className="px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[10px] font-semibold transition cursor-pointer"
+                                  >
+                                    Pilih Semua
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleAllModulesForRole(role, false)}
+                                    className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 text-slate-600 hover:text-rose-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[10px] font-semibold transition cursor-pointer"
+                                  >
+                                    Kosongkan
+                                  </button>
+                                </div>
+                              )
+                            )}
+                          </td>
+
+                          {filteredMatrixModules.map(mod => {
+                            const isChecked = isAdmin || allowedList.includes(mod.key);
+                            return (
+                              <td
+                                key={mod.key}
+                                className={`p-2.5 text-center border-r last:border-r-0 border-slate-100 dark:border-slate-800 transition-colors ${
+                                  isChecked && !isAdmin
+                                    ? 'bg-emerald-50/40 dark:bg-emerald-950/15'
+                                    : ''
+                                }`}
+                              >
+                                <label className="inline-flex items-center justify-center w-full h-full cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    disabled={isAdmin || !isSuperAdminSession}
+                                    checked={isChecked}
+                                    onChange={() => handleToggleModuleAccess(role, mod.key)}
+                                    aria-label={`Izinkan ${role} mengakses modul ${mod.label}`}
+                                    className="w-4 h-4 rounded-sm accent-[#071D49] dark:accent-sky-500 cursor-pointer disabled:cursor-not-allowed"
+                                  />
+                                </label>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
-                <tr>
-                  <th className="p-3">Peran / Jabatan</th>
-                  {actions.map(a => (
-                    <th key={a.key} className="p-3 text-center">
-                      {a.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {roles.map(r => {
-                  const isAdmin = r === 'Admin Utama';
-                  return (
-                    <tr
-                      key={r}
-                      className={isAdmin ? 'bg-indigo-50/30 dark:bg-indigo-950/20 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}
-                    >
-                      <td className="p-3 text-slate-900 dark:text-white">
-                        <span>{r}</span>
-                        {isAdmin && (
-                          <span className="block text-[10px] text-indigo-600 font-normal">
-                            (Super Admin - Semua Hak)
-                          </span>
-                        )}
-                      </td>
-                      {actions.map(a => {
-                        const isChecked = isAdmin || (permsState[r]?.[a.key] ?? false);
-                        return (
-                          <td key={a.key} className="p-3 text-center">
-                            <input
-                              type="checkbox"
-                              disabled={isAdmin || currentUser.role !== 'Admin Utama'}
-                              checked={isChecked}
-                              onChange={() => handleTogglePerm(r, a.key)}
-                              className="w-4 h-4 rounded-sm accent-blue-900 dark:accent-sky-500 cursor-pointer disabled:cursor-not-allowed"
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Section B: Matriks Hak Akses Tindakan (CRUD & Otorisasi) */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                  Matriks Hak Akses Tindakan (CRUD & Otorisasi)
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Mengatur izin aksi tombol tambah, ubah, hapus, setujui, cetak, dan ekspor untuk setiap peran.
+                </p>
+              </div>
+              {isSuperAdminSession && (
+                <button
+                  type="button"
+                  onClick={handleSavePerms}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-semibold shadow-xs transition cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Simpan Matriks Tindakan</span>
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
+                  <tr>
+                    <th className="p-3">Peran / Jabatan</th>
+                    {actions.map(a => (
+                      <th key={a.key} className="p-3 text-center">
+                        {a.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {roles.map(r => {
+                    const isAdmin = r === 'Admin Utama';
+                    return (
+                      <tr
+                        key={r}
+                        className={isAdmin ? 'bg-indigo-50/30 dark:bg-indigo-950/20 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}
+                      >
+                        <td className="p-3 text-slate-900 dark:text-white">
+                          <span>{r}</span>
+                          {isAdmin && (
+                            <span className="block text-[10px] text-indigo-600 font-normal">
+                              (Super Admin - Semua Hak)
+                            </span>
+                          )}
+                        </td>
+                        {actions.map(a => {
+                          const isChecked = isAdmin || (permsState[r]?.[a.key] ?? false);
+                          return (
+                            <td key={a.key} className="p-3 text-center">
+                              <input
+                                type="checkbox"
+                                disabled={isAdmin || !isSuperAdminSession}
+                                checked={isChecked}
+                                onChange={() => handleTogglePerm(r, a.key)}
+                                className="w-4 h-4 rounded-sm accent-blue-900 dark:accent-sky-500 cursor-pointer disabled:cursor-not-allowed"
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          <ConfirmDialog
+            isOpen={isConfirmResetModulesOpen}
+            onClose={() => setIsConfirmResetModulesOpen(false)}
+            onConfirm={() => {
+              void handleConfirmResetModuleAccess();
+            }}
+            title="Reset Matriks Akses Modul ke Default"
+            message="Apakah Anda yakin ingin mengembalikan seluruh hak akses modul/menu untuk semua peran ke pengaturan bawaan standar SPPG?"
+            confirmLabel="Ya, Reset ke Default"
+            isDestructive
+          />
         </div>
       )}
 

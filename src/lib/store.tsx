@@ -40,6 +40,7 @@ import {
   WebAccessPolicy,
   DynamicFormId,
   DynamicFormSchema,
+  RoleModuleAccessMap,
 } from '../types';
 import {
   defaultDynamicFormSchemas,
@@ -56,8 +57,11 @@ import {
 import {
   AUTH_SESSION_STORAGE_KEY,
   CURRENT_USER_STORAGE_KEY,
+  ROLE_MODULE_ACCESS_STORAGE_KEY,
   LOGIN_PATH,
   canRoleAccessModule,
+  buildDefaultRoleModuleAccess,
+  sanitizeRoleModuleAccess,
 } from './routeGuard';
 import {
   initialInstitutionsData,
@@ -109,6 +113,9 @@ interface AppContextType {
   hasPermission: (module: ModuleKey, action: ActionPermission) => boolean;
   rolePermissions: RolePermissions;
   updateRolePermissions: (permissions: RolePermissions) => void;
+  roleModuleAccess: RoleModuleAccessMap;
+  updateRoleModuleAccess: (accessMap: RoleModuleAccessMap) => Promise<void>;
+  resetRoleModuleAccess: () => Promise<void>;
 
   // Pengaturan Akses Login Web Manual (Admin Utama)
   webAccessUsers: WebAccessUser[];
@@ -282,6 +289,7 @@ interface AppContextType {
 
   omprengReturns: OmprengReturnRecord[];
   addOmprengReturn: (rec: Omit<OmprengReturnRecord, 'id'>) => Promise<void>;
+  updateOmprengReturn: (id: string, rec: Partial<OmprengReturnRecord>) => Promise<void>;
 
   fuelLogs: FuelLogRecord[];
   addFuelLog: (rec: Omit<FuelLogRecord, 'id'>) => Promise<void>;
@@ -1474,6 +1482,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : defaultPermissions;
   });
 
+  const [roleModuleAccess, setRoleModuleAccess] = useState<RoleModuleAccessMap>(() => {
+    try {
+      const saved = localStorage.getItem(ROLE_MODULE_ACCESS_STORAGE_KEY);
+      return saved ? sanitizeRoleModuleAccess(JSON.parse(saved)) : buildDefaultRoleModuleAccess();
+    } catch {
+      return buildDefaultRoleModuleAccess();
+    }
+  });
+
   const [sppgConfig, setSppgConfig] = useState<SPPGConfig>(() => {
     const saved = localStorage.getItem('esppg_config');
     return saved ? JSON.parse(saved) : defaultSPPGConfig;
@@ -1652,6 +1669,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem('esppg_role_permissions', JSON.stringify(rolePermissions));
   }, [rolePermissions]);
+
+  useEffect(() => {
+    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(roleModuleAccess));
+  }, [roleModuleAccess]);
 
   useEffect(() => {
     localStorage.setItem('esppg_config', JSON.stringify(sppgConfig));
@@ -1906,6 +1927,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           })
           .catch(() => {
             // Keep localStorage schema fallback if offline
+          });
+
+        // Load persisted module access matrix from Firestore if available
+        getDoc(doc(db, 'app_settings', 'role_module_access'))
+          .then(snap => {
+            if (snap.exists()) {
+              const cloudAccess = snap.data()?.accessMap;
+              if (cloudAccess && typeof cloudAccess === 'object') {
+                setRoleModuleAccess(sanitizeRoleModuleAccess(cloudAccess));
+              }
+            }
+          })
+          .catch(() => {
+            // Keep localStorage module access fallback if offline
           });
       } else {
         // Not signed into Firebase Auth: verify signed local/session storage token
@@ -2379,17 +2414,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Struktur Form Direset', `"${defaultSchema.title}" dikembalikan ke pengaturan default.`);
   };
 
-  // Permission Check (Aligned strictly with Route-Level RBAC)
+  // Permission Check (Aligned strictly with Route-Level & Custom Module-Level RBAC)
   const hasPermission = (module: ModuleKey, action: ActionPermission): boolean => {
     if (!isAuthenticated || !currentUser.isActive) return false;
-    if (!canRoleAccessModule(currentUser.role, module)) return false;
-    // Supplier role strict data isolation
+    if (!canRoleAccessModule(currentUser.role, module, roleModuleAccess)) return false;
+    if (currentUser.role === 'Admin Utama') return true;
+    // Supplier role strict isolation on internal modules unless explicitly granted by Admin Utama
     if (currentUser.role === 'Supplier / Mitra Pangan') {
       if (module === 'supplier_portal') return true;
       if (module === 'settings' && action === 'view') return true;
-      return false;
+      return action === 'view';
     }
-    if (currentUser.role === 'Admin Utama') return true;
     const roleMap = rolePermissions[currentUser.role];
     if (!roleMap) return false;
     return roleMap[action] ?? false;
@@ -2429,6 +2464,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setRolePermissions(newPermissions);
     logAudit('UPDATE', 'settings', 'Menyesuaikan matriks hak akses peran pengguna');
     addToast('success', 'Hak Akses Disimpan', 'Matriks otorisasi peran berhasil dimutakhirkan.');
+  };
+
+  const updateRoleModuleAccess = async (nextMap: RoleModuleAccessMap) => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah pengaturan akses modul/menu.');
+      return;
+    }
+    const sanitized = sanitizeRoleModuleAccess(nextMap);
+    setRoleModuleAccess(sanitized);
+    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(sanitized));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'role_module_access'),
+          {
+            id: 'role_module_access',
+            sppgId: 'GFBQSYXD',
+            settingKey: 'role_module_access',
+            settingCategory: 'rbac',
+            status: 'Aktif',
+            accessMap: sanitized,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback to LocalStorage
+      }
+    }
+
+    await logAudit(
+      'UPDATE',
+      'settings',
+      'Memperbarui matriks hak akses modul/menu per peran secara manual oleh Admin Utama'
+    );
+    addToast(
+      'success',
+      'Akses Modul Disimpan',
+      'Matriks hak akses modul/menu per peran berhasil diperbarui dan diterapkan langsung.'
+    );
+  };
+
+  const resetRoleModuleAccess = async () => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mereset pengaturan akses modul.');
+      return;
+    }
+    const defaults = buildDefaultRoleModuleAccess();
+    setRoleModuleAccess(defaults);
+    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(defaults));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'role_module_access'),
+          {
+            id: 'role_module_access',
+            sppgId: 'GFBQSYXD',
+            settingKey: 'role_module_access',
+            settingCategory: 'rbac',
+            status: 'Aktif',
+            accessMap: defaults,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback to LocalStorage
+      }
+    }
+
+    await logAudit('UPDATE', 'settings', 'Mereset matriks hak akses modul/menu ke pengaturan default sistem');
+    addToast('info', 'Akses Modul Direset', 'Hak akses modul/menu seluruh peran dikembalikan ke konfigurasi default.');
   };
 
   // Institutions CRUD & Quota History
@@ -3250,6 +3361,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit('CREATE', 'distribution', `Mencatat pengembalian ${rec.totalPortions} ompreng dari ${rec.institutionName}`);
   };
 
+  const updateOmprengReturn = async (id: string, update: Partial<OmprengReturnRecord>) => {
+    setOmprengReturns(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
+    addToast('info', 'Pengembalian Ompreng Diperbarui', 'Pembaruan data & dokumentasi foto pengembalian berhasil disimpan.');
+    await logAudit('UPDATE', 'distribution', `Memperbarui log pengembalian ompreng ${id}`);
+  };
+
   const addFuelLog = async (rec: Omit<FuelLogRecord, 'id'>) => {
     const newRec: FuelLogRecord = {
       ...rec,
@@ -3490,6 +3607,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         hasPermission,
         rolePermissions,
         updateRolePermissions,
+        roleModuleAccess,
+        updateRoleModuleAccess,
+        resetRoleModuleAccess,
         webAccessUsers,
         webAccessPolicy,
         addWebAccessUser,
@@ -3607,6 +3727,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateDistributionDelivery,
         omprengReturns,
         addOmprengReturn,
+        updateOmprengReturn,
         fuelLogs,
         addFuelLog,
         washingWasteRecords,

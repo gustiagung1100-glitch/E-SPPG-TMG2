@@ -9,25 +9,12 @@ import {
   generateBastNumber,
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
-import {
-  FacilityTempReportPanel,
-  FacilityTempModalGrid,
-  FacilityPhotoKey,
-  processFacilityImageUpload,
-  getFacilityTempValue,
-  applyFacilityPhotoPatch,
-} from '../common/FacilityTempUploadSection';
+import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
 import { formatNumber, formatRupiah, formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
-import { monthlyWasteSummary, defaultFacilityTemperatures } from '../../lib/productionData';
+import { monthlyWasteSummary } from '../../lib/productionData';
 import {
-  PreparationInspectionRecord,
-  CookingInspectionRecord,
-  PortioningInspectionRecord,
   DistributionDeliveryRecord,
   OmprengReturnRecord,
-  FuelLogRecord,
-  WashingWasteRecord,
-  FacilityTemperatures,
 } from '../../types';
 import {
   DynamicFormEditToggleBar,
@@ -68,6 +55,9 @@ import {
   Check,
   Eye,
   Download,
+  MapPin,
+  X,
+  ClipboardCheck,
 } from 'lucide-react';
 
 type ProductionTab = 'prep' | 'cooking' | 'portioning' | 'distribution' | 'washing';
@@ -78,13 +68,10 @@ export const ProductionModule: React.FC = () => {
     institutions,
     prepRecords,
     addPrepRecord,
-    updatePrepRecord,
     cookingRecords,
     addCookingRecord,
-    updateCookingRecord,
     portioningRecords,
     addPortioningRecord,
-    updatePortioningRecord,
     distributionDeliveries,
     addDistributionDelivery,
     updateDistributionDelivery,
@@ -129,55 +116,6 @@ export const ProductionModule: React.FC = () => {
     processFacilityImageUpload(e, callback, handleUploadError);
   };
 
-  // Direct Upload Foto from Suhu Ruang & 6 Pendingin report cards across all 5 divisions
-  const handleDirectFacilityPhotoUpload = async (
-    division: ProductionTab,
-    photoKey: FacilityPhotoKey,
-    dataUrl: string,
-    unitLabel: string
-  ) => {
-    if (division === 'prep' && prepRecords[0]) {
-      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
-        prepRecords[0].facilityTemps,
-        photoKey,
-        dataUrl
-      );
-      await updatePrepRecord(prepRecords[0].id, { facilityTemps: nextTemps });
-      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Persiapan) berhasil disimpan.`);
-      return;
-    }
-    if (division === 'cooking' && cookingRecords[0]) {
-      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
-        cookingRecords[0].facilityTemps,
-        photoKey,
-        dataUrl
-      );
-      await updateCookingRecord(cookingRecords[0].id, { facilityTemps: nextTemps });
-      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Pengolahan) berhasil disimpan.`);
-      return;
-    }
-    if (division === 'portioning' && portioningRecords[0]) {
-      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
-        portioningRecords[0].facilityTemps,
-        photoKey,
-        dataUrl
-      );
-      await updatePortioningRecord(portioningRecords[0].id, { facilityTemps: nextTemps });
-      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Pemorsian) berhasil disimpan.`);
-      return;
-    }
-    if (division === 'distribution' && distributionDeliveries[0]) {
-      const currentTemps = distributionDeliveries[0].facilityTemps || defaultFacilityTemperatures;
-      const nextTemps: FacilityTemperatures = applyFacilityPhotoPatch(
-        currentTemps,
-        photoKey,
-        dataUrl
-      );
-      await updateDistributionDelivery(distributionDeliveries[0].id, { facilityTemps: nextTemps });
-      addToast('success', 'Foto Terupload', `Foto ${unitLabel} (Divisi Distribusi & Armada) berhasil disimpan.`);
-    }
-  };
-
   // -------------------------------------------------------------
   // TAB A: Form State Divisi Persiapan
   // -------------------------------------------------------------
@@ -203,16 +141,7 @@ export const ProductionModule: React.FC = () => {
     fruitUnit: 'kg',
     fruitTemp: 19.5,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
-    // Suhu Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin
-    facilityTemps: {
-      ...defaultFacilityTemperatures,
-      prepRoomTemp: 21.0,
-      portioningRoomTemp: 21.0,
-      cookingRoomTemp: 25.5,
-      wetWarehouseTemp: 14.0,
-      dryWarehouseTemp: 22.8,
-    } as FacilityTemperatures,
-    notes: 'Pembersihan dan sortir bahan segar batch subuh. Suhu seluruh chiller dan freezer dalam batas standar CCP.',
+    notes: 'Pembersihan dan sortir bahan segar batch subuh.',
   });
 
   const handleSavePrep = async (e: React.FormEvent) => {
@@ -241,9 +170,6 @@ export const ProductionModule: React.FC = () => {
         unit: prepForm.fruitUnit,
         temp: Number(prepForm.fruitTemp),
         photoUrl: prepForm.fruitPhoto,
-      },
-      facilityTemps: {
-        ...prepForm.facilityTemps,
       },
       notes: prepForm.notes,
     });
@@ -293,17 +219,6 @@ export const ProductionModule: React.FC = () => {
     fruitS2Photo: '',
     fruitS3Temp: '' as string | number,
     fruitS3Photo: '',
-    // Suhu Ruang & 6 Pendingin
-    facilityTemps: {
-      ...defaultFacilityTemperatures,
-      cookingRoomTemp: 27.0,
-      freezer1Temp: -19.2,
-      freezer2Temp: -20.0,
-      fridge1Temp: 5.0,
-      fridge2Temp: 6.0,
-      fridge3Temp: 5.2,
-      fridge4Temp: 4.1,
-    },
     notes: 'Pemasakan inti daging ayam di atas 75°C. Minyak goreng jernih. Organoleptik aroma harum alami tanpa MSG berlebih.',
   });
 
@@ -368,9 +283,6 @@ export const ProductionModule: React.FC = () => {
           session3PhotoUrl: cookingForm.fruitS3Photo || undefined,
         },
       },
-      facilityTemps: {
-        ...cookingForm.facilityTemps,
-      },
       notes: cookingForm.notes,
     });
     setIsCookingModalOpen(false);
@@ -384,19 +296,66 @@ export const ProductionModule: React.FC = () => {
     time: '07:00 WIB',
     portioningTime: '06:45 - 07:30 WIB',
     officerName: 'Nurul Hidayah & Tim Pemorsian',
+    menuId: '',
+    // 1. Makanan Pokok (Nasi) — Porsi Besar & Porsi Kecil
+    riceRawLarge: 85,
+    riceFactorLarge: 0.4,
+    riceCookedLarge: 200,
     riceTemp: 72.0,
+    ricePhoto: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+    riceS2Temp: '' as string | number,
+    riceS2Photo: '',
+    riceS3Temp: '' as string | number,
+    riceS3Photo: '',
+    riceRawSmall: 50,
+    riceFactorSmall: 1,
+    riceCookedSmall: 100,
+    riceSmallS1Temp: '' as string | number,
+    riceSmallS1Photo: '',
+    riceSmallS2Temp: '' as string | number,
+    riceSmallS2Photo: '',
+    riceSmallS3Temp: '' as string | number,
+    riceSmallS3Photo: '',
+    // 2. Lauk Hewani
+    animalRaw: 50,
+    animalFactor: 1,
+    animalCooked: 50,
     animalTemp: 71.5,
+    animalPhoto: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+    animalS2Temp: '' as string | number,
+    animalS2Photo: '',
+    animalS3Temp: '' as string | number,
+    animalS3Photo: '',
+    // 3. Lauk Nabati
+    plantRaw: 50,
+    plantFactor: 1,
+    plantCooked: 50,
     plantTemp: 68.0,
+    plantPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    plantS2Temp: '' as string | number,
+    plantS2Photo: '',
+    plantS3Temp: '' as string | number,
+    plantS3Photo: '',
+    // 4. Sayur
+    vegRaw: 25,
+    vegFactor: 1,
+    vegCooked: 25,
     vegTemp: 67.5,
+    vegPhoto: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+    vegS2Temp: '' as string | number,
+    vegS2Photo: '',
+    vegS3Temp: '' as string | number,
+    vegS3Photo: '',
+    // 5. Buah
+    fruitRaw: 100,
+    fruitFactor: 1,
+    fruitCooked: 100,
     fruitTemp: 18.0,
-    facilityTemps: {
-      ...defaultFacilityTemperatures,
-      prepRoomTemp: 22.0,
-      portioningRoomTemp: 22.0,
-      cookingRoomTemp: 26.5,
-      wetWarehouseTemp: 14.2,
-      dryWarehouseTemp: 23.2,
-    } as FacilityTemperatures,
+    fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    fruitS2Temp: '' as string | number,
+    fruitS2Photo: '',
+    fruitS3Temp: '' as string | number,
+    fruitS3Photo: '',
     smallPortionGrams: 395,
     largePortionGrams: 585,
     smallPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
@@ -406,20 +365,89 @@ export const ProductionModule: React.FC = () => {
 
   const handleSavePortioning = async (e: React.FormEvent) => {
     e.preventDefault();
+    const toOptNum = (val: string | number) =>
+      val === '' || val === null || val === undefined ? undefined : Number(val);
+    const matchedMenu =
+      (portioningForm.menuId ? menuItems.find(m => m.id === portioningForm.menuId) : undefined) ||
+      menuItems.find(m => m.date === portioningForm.date) ||
+      menuItems[0];
+
     await addPortioningRecord({
       date: portioningForm.date,
       time: portioningForm.time,
       portioningTime: portioningForm.portioningTime,
       officerName: portioningForm.officerName,
+      menuId: matchedMenu?.id,
       foodTemps: {
-        rice: { temp: Number(portioningForm.riceTemp) },
-        animalProtein: { temp: Number(portioningForm.animalTemp) },
-        plantProtein: { temp: Number(portioningForm.plantTemp) },
-        vegetable: { temp: Number(portioningForm.vegTemp) },
-        fruit: { temp: Number(portioningForm.fruitTemp) },
-      },
-      facilityTemps: {
-        ...portioningForm.facilityTemps,
+        rice: {
+          temp: Number(portioningForm.riceTemp),
+          photoUrl: portioningForm.ricePhoto || undefined,
+          session2Temp: toOptNum(portioningForm.riceS2Temp),
+          session2PhotoUrl: portioningForm.riceS2Photo || undefined,
+          session3Temp: toOptNum(portioningForm.riceS3Temp),
+          session3PhotoUrl: portioningForm.riceS3Photo || undefined,
+          dangerZone: '60-5°C',
+          rawWeightGrams: Number(portioningForm.riceRawLarge),
+          conversionFactor: Number(portioningForm.riceFactorLarge),
+          cookedWeightGrams: Number(portioningForm.riceCookedLarge),
+          rawWeightSmallGrams: Number(portioningForm.riceRawSmall),
+          conversionFactorSmall: Number(portioningForm.riceFactorSmall),
+          cookedWeightSmallGrams: Number(portioningForm.riceCookedSmall),
+          smallPortionSession1Temp: toOptNum(portioningForm.riceSmallS1Temp),
+          smallPortionSession1PhotoUrl: portioningForm.riceSmallS1Photo || portioningForm.smallPhoto || undefined,
+          smallPortionSession2Temp: toOptNum(portioningForm.riceSmallS2Temp),
+          smallPortionSession2PhotoUrl: portioningForm.riceSmallS2Photo || undefined,
+          smallPortionSession3Temp: toOptNum(portioningForm.riceSmallS3Temp),
+          smallPortionSession3PhotoUrl: portioningForm.riceSmallS3Photo || undefined,
+        },
+        animalProtein: {
+          temp: Number(portioningForm.animalTemp),
+          photoUrl: portioningForm.animalPhoto || undefined,
+          session2Temp: toOptNum(portioningForm.animalS2Temp),
+          session2PhotoUrl: portioningForm.animalS2Photo || undefined,
+          session3Temp: toOptNum(portioningForm.animalS3Temp),
+          session3PhotoUrl: portioningForm.animalS3Photo || undefined,
+          dangerZone: '60-5°C',
+          rawWeightGrams: Number(portioningForm.animalRaw),
+          conversionFactor: Number(portioningForm.animalFactor),
+          cookedWeightGrams: Number(portioningForm.animalCooked),
+        },
+        plantProtein: {
+          temp: Number(portioningForm.plantTemp),
+          photoUrl: portioningForm.plantPhoto || undefined,
+          session2Temp: toOptNum(portioningForm.plantS2Temp),
+          session2PhotoUrl: portioningForm.plantS2Photo || undefined,
+          session3Temp: toOptNum(portioningForm.plantS3Temp),
+          session3PhotoUrl: portioningForm.plantS3Photo || undefined,
+          dangerZone: '60-5°C',
+          rawWeightGrams: Number(portioningForm.plantRaw),
+          conversionFactor: Number(portioningForm.plantFactor),
+          cookedWeightGrams: Number(portioningForm.plantCooked),
+        },
+        vegetable: {
+          temp: Number(portioningForm.vegTemp),
+          photoUrl: portioningForm.vegPhoto || undefined,
+          session2Temp: toOptNum(portioningForm.vegS2Temp),
+          session2PhotoUrl: portioningForm.vegS2Photo || undefined,
+          session3Temp: toOptNum(portioningForm.vegS3Temp),
+          session3PhotoUrl: portioningForm.vegS3Photo || undefined,
+          dangerZone: '60-5°C',
+          rawWeightGrams: Number(portioningForm.vegRaw),
+          conversionFactor: Number(portioningForm.vegFactor),
+          cookedWeightGrams: Number(portioningForm.vegCooked),
+        },
+        fruit: {
+          temp: Number(portioningForm.fruitTemp),
+          photoUrl: portioningForm.fruitPhoto || undefined,
+          session2Temp: toOptNum(portioningForm.fruitS2Temp),
+          session2PhotoUrl: portioningForm.fruitS2Photo || undefined,
+          session3Temp: toOptNum(portioningForm.fruitS3Temp),
+          session3PhotoUrl: portioningForm.fruitS3Photo || undefined,
+          dangerZone: '60-5°C',
+          rawWeightGrams: Number(portioningForm.fruitRaw),
+          conversionFactor: Number(portioningForm.fruitFactor),
+          cookedWeightGrams: Number(portioningForm.fruitCooked),
+        },
       },
       smallPortionWeightGrams: Number(portioningForm.smallPortionGrams),
       largePortionWeightGrams: Number(portioningForm.largePortionGrams),
@@ -433,78 +461,174 @@ export const ProductionModule: React.FC = () => {
   // -------------------------------------------------------------
   // TAB D: Form State Divisi Distribusi & Armada
   // -------------------------------------------------------------
+  const [editingDeliveryId, setEditingDeliveryId] = useState<string | null>(null);
   const [deliveryForm, setDeliveryForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
     institutionId: institutions[0]?.id || '',
     departureTime: '08:15 WIB',
     arrivalTime: '08:35 WIB',
     driverName: 'Agus Santoso',
     vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
-    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
-    handoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
-    picOrganolepticPhoto: 'https://images.unsplash.com/photo-1577495508326-19a1b3cf65b7?auto=format&fit=crop&w=500&q=80',
-    facilityTemps: {
-      ...defaultFacilityTemperatures,
-    },
-    notes: 'Boks termal tersegel rapi, suhu tiba 64.5°C, uji organoleptik PIC disetujui.',
+    picName: institutions[0]?.picName || 'Kepala Sekolah',
+    status: 'Selesai Serah Terima' as DistributionDeliveryRecord['status'],
+    activityPhoto: '',
+    handoverPhoto: '',
+    picOrganolepticPhoto: '',
+    locationPhoto: '',
+    notes: 'Boks termal tersegel rapi, uji organoleptik PIC disetujui, dan serah terima selesai di lokasi.',
   });
+
+  const openNewDeliveryModal = () => {
+    const defaultInst = institutions[0];
+    setEditingDeliveryId(null);
+    setDeliveryForm({
+      date: new Date().toISOString().slice(0, 10),
+      institutionId: defaultInst?.id || '',
+      departureTime: '08:15 WIB',
+      arrivalTime: '08:35 WIB',
+      driverName: 'Agus Santoso',
+      vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
+      picName: defaultInst?.picName || defaultInst?.contactPerson || 'Kepala Sekolah',
+      status: 'Selesai Serah Terima',
+      activityPhoto: '',
+      handoverPhoto: '',
+      picOrganolepticPhoto: '',
+      locationPhoto: '',
+      notes: 'Boks termal tersegel rapi, uji organoleptik PIC disetujui, dan serah terima selesai di lokasi.',
+    });
+    setIsDeliveryModalOpen(true);
+  };
+
+  const openEditDeliveryModal = (rec: DistributionDeliveryRecord) => {
+    setEditingDeliveryId(rec.id);
+    setDeliveryForm({
+      date: rec.date,
+      institutionId: rec.institutionId,
+      departureTime: rec.departureTime,
+      arrivalTime: rec.arrivalTime,
+      driverName: rec.driverName,
+      vehicleNumber: rec.vehicleNumber,
+      picName: rec.picName,
+      status: rec.status,
+      activityPhoto: rec.activityPhoto || '',
+      handoverPhoto: rec.handoverPhoto || '',
+      picOrganolepticPhoto: rec.picOrganolepticPhoto || '',
+      locationPhoto: rec.locationPhoto || '',
+      notes: rec.notes || '',
+    });
+    setIsDeliveryModalOpen(true);
+  };
 
   const handleSaveDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === deliveryForm.institutionId) || institutions[0];
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const bastNumber = generateBastNumber(191 + distributionDeliveries.length + 1, todayStr);
-    await addDistributionDelivery({
-      date: todayStr,
-      institutionId: inst.id,
-      institutionName: inst.name,
-      smallPortions: inst.smallPortions,
-      largePortions: inst.largePortions,
-      totalPortions: inst.totalPortions,
-      departureTime: deliveryForm.departureTime,
-      arrivalTime: deliveryForm.arrivalTime,
-      driverName: deliveryForm.driverName,
-      vehicleNumber: deliveryForm.vehicleNumber,
-      activityPhoto: deliveryForm.activityPhoto,
-      handoverPhoto: deliveryForm.handoverPhoto,
-      picOrganolepticPhoto: deliveryForm.picOrganolepticPhoto,
-      bastNumber,
-      picName: inst.picName || 'Kepala Sekolah',
-      status: 'Selesai Serah Terima',
-      facilityTemps: { ...deliveryForm.facilityTemps },
-      notes: deliveryForm.notes,
-    });
+    if (!inst) return;
+    if (editingDeliveryId) {
+      await updateDistributionDelivery(editingDeliveryId, {
+        date: deliveryForm.date,
+        institutionId: inst.id,
+        institutionName: inst.name,
+        smallPortions: inst.smallPortions,
+        largePortions: inst.largePortions,
+        totalPortions: inst.totalPortions,
+        departureTime: deliveryForm.departureTime,
+        arrivalTime: deliveryForm.arrivalTime,
+        driverName: deliveryForm.driverName,
+        vehicleNumber: deliveryForm.vehicleNumber,
+        picName: deliveryForm.picName || inst.picName || 'Kepala Sekolah',
+        status: deliveryForm.status,
+        activityPhoto: deliveryForm.activityPhoto || undefined,
+        handoverPhoto: deliveryForm.handoverPhoto || undefined,
+        picOrganolepticPhoto: deliveryForm.picOrganolepticPhoto || undefined,
+        locationPhoto: deliveryForm.locationPhoto || undefined,
+        notes: deliveryForm.notes,
+      });
+    } else {
+      const bastNumber = generateBastNumber(191 + distributionDeliveries.length + 1, deliveryForm.date);
+      await addDistributionDelivery({
+        date: deliveryForm.date,
+        institutionId: inst.id,
+        institutionName: inst.name,
+        smallPortions: inst.smallPortions,
+        largePortions: inst.largePortions,
+        totalPortions: inst.totalPortions,
+        departureTime: deliveryForm.departureTime,
+        arrivalTime: deliveryForm.arrivalTime,
+        driverName: deliveryForm.driverName,
+        vehicleNumber: deliveryForm.vehicleNumber,
+        activityPhoto: deliveryForm.activityPhoto || undefined,
+        handoverPhoto: deliveryForm.handoverPhoto || undefined,
+        picOrganolepticPhoto: deliveryForm.picOrganolepticPhoto || undefined,
+        locationPhoto: deliveryForm.locationPhoto || undefined,
+        bastNumber,
+        picName: deliveryForm.picName || inst.picName || 'Kepala Sekolah',
+        status: deliveryForm.status,
+        notes: deliveryForm.notes,
+      });
+    }
     setIsDeliveryModalOpen(false);
+    setEditingDeliveryId(null);
   };
 
   const [returnForm, setReturnForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
     institutionId: institutions[0]?.id || '',
+    smallPortions: institutions[0]?.smallPortions || 0,
+    largePortions: institutions[0]?.largePortions || 0,
     departureTime: '12:30 WIB',
     arrivalTime: '13:05 WIB',
     driverName: 'Agus Santoso',
     vehicleNumber: 'N 8921 RA',
-    activityPhoto: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=500&q=80',
-    returnHandoverPhoto: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=500&q=80',
-    conditionStatus: 'Lengkap & Utuh' as 'Lengkap & Utuh' | 'Ada Selisih' | 'Perlu Perbaikan',
+    receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+    activityPhoto: '',
+    returnHandoverPhoto: '',
+    locationPhoto: '',
+    conditionStatus: 'Lengkap & Utuh' as OmprengReturnRecord['conditionStatus'],
     notes: 'Seluruh ompreng stainless kembali utuh dan siap disterilisasi.',
   });
+
+  const openNewReturnModal = () => {
+    const defaultInst = institutions[0];
+    setReturnForm({
+      date: new Date().toISOString().slice(0, 10),
+      institutionId: defaultInst?.id || '',
+      smallPortions: defaultInst?.smallPortions || 0,
+      largePortions: defaultInst?.largePortions || 0,
+      departureTime: '12:30 WIB',
+      arrivalTime: '13:05 WIB',
+      driverName: 'Agus Santoso',
+      vehicleNumber: 'N 8921 RA',
+      receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      activityPhoto: '',
+      returnHandoverPhoto: '',
+      locationPhoto: '',
+      conditionStatus: 'Lengkap & Utuh',
+      notes: 'Seluruh ompreng stainless kembali utuh dan siap disterilisasi.',
+    });
+    setIsReturnModalOpen(true);
+  };
 
   const handleSaveReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === returnForm.institutionId) || institutions[0];
+    if (!inst) return;
+    const smallQty = Number(returnForm.smallPortions) || 0;
+    const largeQty = Number(returnForm.largePortions) || 0;
     await addOmprengReturn({
-      date: new Date().toISOString().slice(0, 10),
+      date: returnForm.date,
       institutionId: inst.id,
       institutionName: inst.name,
-      smallPortions: inst.smallPortions,
-      largePortions: inst.largePortions,
-      totalPortions: inst.totalPortions,
+      smallPortions: smallQty,
+      largePortions: largeQty,
+      totalPortions: smallQty + largeQty,
       departureTime: returnForm.departureTime,
       arrivalTime: returnForm.arrivalTime,
       driverName: returnForm.driverName,
       vehicleNumber: returnForm.vehicleNumber,
-      activityPhoto: returnForm.activityPhoto,
-      returnHandoverPhoto: returnForm.returnHandoverPhoto,
-      receivedByOfficer: 'Fahrur Rozi (Div. Cuci Ompreng)',
+      activityPhoto: returnForm.activityPhoto || undefined,
+      returnHandoverPhoto: returnForm.returnHandoverPhoto || undefined,
+      locationPhoto: returnForm.locationPhoto || undefined,
+      receivedByOfficer: returnForm.receivedByOfficer || 'Fahrur Rozi (Div. Cuci Ompreng)',
       conditionStatus: returnForm.conditionStatus,
       notes: returnForm.notes,
     });
@@ -768,7 +892,7 @@ export const ProductionModule: React.FC = () => {
                 Standar CCP & Inspeksi Bahan Rusak Divisi Persiapan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu & foto bahan rusak (sayur, lauk hewani, buah) serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 unit pendingin.
+                Pencatatan suhu &amp; foto bahan rusak (sayur, lauk hewani, buah) pada batch persiapan harian.
               </p>
             </div>
             <button
@@ -780,21 +904,6 @@ export const ProductionModule: React.FC = () => {
               <span>Input Data & Foto Persiapan</span>
             </button>
           </div>
-
-          {/* Latest Facility Temps Card (Suhu Ruang & 6 Pendingin + Upload Foto) */}
-          {prepRecords[0] && (
-            <FacilityTempReportPanel
-              divisionLabel="Divisi Persiapan"
-              subtitleMeta={`Pemeriksaan Terakhir: ${prepRecords[0].date} ${prepRecords[0].time} • Petugas: ${prepRecords[0].officerName}`}
-              facilityTemps={prepRecords[0].facilityTemps}
-              onUploadUnitPhoto={(photoKey, url, label) =>
-                handleDirectFacilityPhotoUpload('prep', photoKey, url, label)
-              }
-              onViewPhoto={setViewPhotoUrl}
-              onOpenInputModal={() => setIsPrepModalOpen(true)}
-              onUploadError={handleUploadError}
-            />
-          )}
 
           {/* Damaged Materials Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -921,8 +1030,8 @@ export const ProductionModule: React.FC = () => {
 
                     <div className="text-xs text-slate-500 space-y-0.5 sm:text-right">
                       <div>Rusak: Sayur {r.damagedVegetable.quantity}kg • Hewani {r.damagedAnimal.quantity}kg • Buah {r.damagedFruit.quantity}kg</div>
-                      <div className="font-mono text-[11px] text-blue-900 dark:text-sky-400">
-                        R. Pemorsian: {getFacilityTempValue(r.facilityTemps, 'portioningRoomTemp')}°C | G. Basah: {getFacilityTempValue(r.facilityTemps, 'wetWarehouseTemp')}°C | G. Kering: {getFacilityTempValue(r.facilityTemps, 'dryWarehouseTemp')}°C | F1: {r.facilityTemps.freezer1Temp}°C
+                      <div className="font-mono text-[11px] text-amber-700 dark:text-amber-400">
+                        Total Rijek: {(r.damagedVegetable.quantity + r.damagedAnimal.quantity + r.damagedFruit.quantity).toFixed(1)} kg
                       </div>
                     </div>
                   </div>
@@ -942,10 +1051,10 @@ export const ProductionModule: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <CookingPot className="w-4 h-4 text-amber-600" />
-                Standar CCP Suhu Matang Masakan & Ruangan Pengolahan
+                Standar CCP Suhu Matang Masakan Divisi Pengolahan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu & foto masakan matang (Nasi, Hewani, Nabati, Sayur, Buah) serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 pendingin.
+                Pencatatan suhu &amp; foto masakan matang Sesi 1–3 (Nasi, Hewani, Nabati, Sayur, Buah) serta peralatan masak standar CCP.
               </p>
             </div>
             <button
@@ -1093,20 +1202,6 @@ export const ProductionModule: React.FC = () => {
             </div>
           )}
 
-          {/* Facility Cold & Room Temps in Cooking (Suhu Ruang & 6 Pendingin + Upload Foto) */}
-          {cookingRecords[0] && (
-            <FacilityTempReportPanel
-              divisionLabel="Divisi Pengolahan"
-              subtitleMeta={`Waktu: ${cookingRecords[0].date} ${cookingRecords[0].time} • Petugas: ${cookingRecords[0].officerName}`}
-              facilityTemps={cookingRecords[0].facilityTemps}
-              onUploadUnitPhoto={(photoKey, url, label) =>
-                handleDirectFacilityPhotoUpload('cooking', photoKey, url, label)
-              }
-              onViewPhoto={setViewPhotoUrl}
-              onOpenInputModal={() => setIsCookingModalOpen(true)}
-              onUploadError={handleUploadError}
-            />
-          )}
         </div>
       )}
 
@@ -1122,7 +1217,7 @@ export const ProductionModule: React.FC = () => {
                 Standar Gramasi & Suhu Pemorsian Ompreng MBG
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, dokumentasi foto ompreng lengkap, serta suhu Ruang Pemorsian, Pengolahan, Gudang Basah, Gudang Kering & 6 pendingin.
+                Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, dan dokumentasi foto ompreng lengkap.
               </p>
             </div>
             <button
@@ -1245,21 +1340,6 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
           )}
-
-          {/* Facility Cold & Room Temps in Portioning (Suhu Ruang & 6 Pendingin + Upload Foto) */}
-          {portioningRecords[0] && (
-            <FacilityTempReportPanel
-              divisionLabel="Divisi Pemorsian"
-              subtitleMeta={`Tanggal: ${portioningRecords[0].date} (${portioningRecords[0].time}) • Petugas: ${portioningRecords[0].officerName}`}
-              facilityTemps={portioningRecords[0].facilityTemps}
-              onUploadUnitPhoto={(photoKey, url, label) =>
-                handleDirectFacilityPhotoUpload('portioning', photoKey, url, label)
-              }
-              onViewPhoto={setViewPhotoUrl}
-              onOpenInputModal={() => setIsPortioningModalOpen(true)}
-              onUploadError={handleUploadError}
-            />
-          )}
         </div>
       )}
 
@@ -1276,25 +1356,25 @@ export const ProductionModule: React.FC = () => {
                 Operasional Logistik Distribusi, Pengembalian Ompreng & BBM
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pengiriman makanan hangat ber-BAST, penjemputan ompreng kotor kembali ke SPPG, dan pembukuan BBM armada.
+                Input data pengiriman (foto uji organoleptik, serah terima &amp; lokasi), pengembalian ompreng (foto pengembalian &amp; lokasi), dan log BBM armada.
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => setIsDeliveryModalOpen(true)}
+                onClick={openNewDeliveryModal}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>+ Kirim Porsi & BAST</span>
+                <span>+ Input Data Pengiriman</span>
               </button>
               <button
                 type="button"
-                onClick={() => setIsReturnModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition"
+                onClick={openNewReturnModal}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>+ Kembalian Ompreng</span>
+                <span>+ Pengembalian Ompreng</span>
               </button>
               <button
                 type="button"
@@ -1306,21 +1386,6 @@ export const ProductionModule: React.FC = () => {
               </button>
             </div>
           </div>
-
-          {/* Facility Cold & Room Temps in Distribution (Suhu Ruang & 6 Pendingin + Upload Foto) */}
-          {distributionDeliveries[0] && (
-            <FacilityTempReportPanel
-              divisionLabel="Divisi Distribusi & Armada"
-              subtitleMeta={`Log Rute Terakhir: ${distributionDeliveries[0].date} • ${distributionDeliveries[0].institutionName} (${distributionDeliveries[0].driverName})`}
-              facilityTemps={distributionDeliveries[0].facilityTemps}
-              onUploadUnitPhoto={(photoKey, url, label) =>
-                handleDirectFacilityPhotoUpload('distribution', photoKey, url, label)
-              }
-              onViewPhoto={setViewPhotoUrl}
-              onOpenInputModal={() => setIsDeliveryModalOpen(true)}
-              onUploadError={handleUploadError}
-            />
-          )}
 
           {/* Section 1: Pengiriman ke Lembaga & BAST */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
@@ -1347,6 +1412,7 @@ export const ProductionModule: React.FC = () => {
                         <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                           {d.bastNumber}
                         </span>
+                        <span className="text-[11px] text-slate-400 font-mono">{d.date}</span>
                       </div>
 
                       <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 flex-wrap">
@@ -1359,7 +1425,7 @@ export const ProductionModule: React.FC = () => {
                         <span>Armada: <strong>{d.vehicleNumber}</strong> ({d.driverName})</span>
                       </div>
 
-                      <div className="text-xs text-slate-500 flex items-center gap-3">
+                      <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           Berangkat: {d.departureTime} → Tiba: {d.arrivalTime}
@@ -1372,7 +1438,7 @@ export const ProductionModule: React.FC = () => {
                         "{d.notes}"
                       </p>
 
-                      <div className="pt-2">
+                      <div className="pt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setSelectedDeliveryForBast(d)}
@@ -1381,20 +1447,28 @@ export const ProductionModule: React.FC = () => {
                           <FileCheck className="w-3.5 h-3.5" />
                           <span>Lihat / Cetak Format BAST</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditDeliveryModal(d)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Edit / Lengkapi Foto</span>
+                        </button>
                       </div>
                     </div>
 
                     {/* Photos Preview */}
-                    <div className="flex items-center gap-2">
-                      {d.activityPhoto && (
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      {d.picOrganolepticPhoto && (
                         <div className="text-center">
                           <img
-                            src={d.activityPhoto}
-                            alt="Distribusi"
-                            onClick={() => setViewPhotoUrl(d.activityPhoto || null)}
+                            src={d.picOrganolepticPhoto}
+                            alt="Uji Organoleptik"
+                            onClick={() => setViewPhotoUrl(d.picOrganolepticPhoto || null)}
                             className="w-16 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
                           />
-                          <span className="text-[10px] text-slate-400 block mt-0.5">Kegiatan</span>
+                          <span className="text-[10px] text-slate-500 font-medium block mt-0.5">Uji Organoleptik</span>
                         </div>
                       )}
                       {d.handoverPhoto && (
@@ -1405,18 +1479,29 @@ export const ProductionModule: React.FC = () => {
                             onClick={() => setViewPhotoUrl(d.handoverPhoto || null)}
                             className="w-16 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
                           />
-                          <span className="text-[10px] text-slate-400 block mt-0.5">BAST Fisik</span>
+                          <span className="text-[10px] text-slate-500 font-medium block mt-0.5">Serah Terima</span>
                         </div>
                       )}
-                      {d.picOrganolepticPhoto && (
+                      {d.locationPhoto && (
                         <div className="text-center">
                           <img
-                            src={d.picOrganolepticPhoto}
-                            alt="Organoleptik PIC"
-                            onClick={() => setViewPhotoUrl(d.picOrganolepticPhoto || null)}
+                            src={d.locationPhoto}
+                            alt="Foto Lokasi"
+                            onClick={() => setViewPhotoUrl(d.locationPhoto || null)}
                             className="w-16 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
                           />
-                          <span className="text-[10px] text-slate-400 block mt-0.5">Uji PIC</span>
+                          <span className="text-[10px] text-slate-500 font-medium block mt-0.5">Foto Lokasi</span>
+                        </div>
+                      )}
+                      {d.activityPhoto && (
+                        <div className="text-center">
+                          <img
+                            src={d.activityPhoto}
+                            alt="Kegiatan Distribusi"
+                            onClick={() => setViewPhotoUrl(d.activityPhoto || null)}
+                            className="w-16 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
+                          />
+                          <span className="text-[10px] text-slate-400 block mt-0.5">Kegiatan</span>
                         </div>
                       )}
                     </div>
@@ -1441,7 +1526,7 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-96 overflow-y-auto">
                 {omprengReturns.map(ret => (
-                  <div key={ret.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                  <div key={ret.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition space-y-2.5">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-bold text-xs text-slate-900 dark:text-white">{ret.institutionName}</div>
@@ -1449,24 +1534,50 @@ export const ProductionModule: React.FC = () => {
                           Kembali: <strong>{ret.totalPortions} Ompreng</strong> (Kecil: {ret.smallPortions}, Besar: {ret.largePortions})
                         </div>
                         <div className="text-[11px] text-slate-400 mt-1">
-                          Driver: {ret.driverName} • Tiba SPPG: {ret.arrivalTime}
+                          {ret.date} • Driver: {ret.driverName} • Tiba SPPG: {ret.arrivalTime}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                          {ret.conditionStatus}
-                        </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 shrink-0">
+                        {ret.conditionStatus}
+                      </span>
+                    </div>
+
+                    {(ret.returnHandoverPhoto || ret.locationPhoto) && (
+                      <div className="flex items-center gap-3 pt-1">
                         {ret.returnHandoverPhoto && (
                           <button
                             type="button"
                             onClick={() => setViewPhotoUrl(ret.returnHandoverPhoto || null)}
-                            className="block text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2"
+                            className="flex items-center gap-1.5 group text-left"
                           >
-                            Lihat Foto Serah Terima
+                            <img
+                              src={ret.returnHandoverPhoto}
+                              alt="Foto Pengembalian"
+                              className="w-11 h-11 object-cover rounded-lg border border-slate-200 dark:border-slate-700 group-hover:opacity-80"
+                            />
+                            <span className="text-[10px] font-semibold text-blue-900 dark:text-sky-400 group-hover:underline">
+                              Foto Pengembalian
+                            </span>
+                          </button>
+                        )}
+                        {ret.locationPhoto && (
+                          <button
+                            type="button"
+                            onClick={() => setViewPhotoUrl(ret.locationPhoto || null)}
+                            className="flex items-center gap-1.5 group text-left"
+                          >
+                            <img
+                              src={ret.locationPhoto}
+                              alt="Foto Lokasi"
+                              className="w-11 h-11 object-cover rounded-lg border border-slate-200 dark:border-slate-700 group-hover:opacity-80"
+                            />
+                            <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 group-hover:underline">
+                              Foto Lokasi
+                            </span>
                           </button>
                         )}
                       </div>
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2063,15 +2174,6 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Suhu Ruangan & 6 Pendingin + Upload Foto */}
-            <FacilityTempModalGrid
-              divisionLabel="Divisi Persiapan"
-              value={prepForm.facilityTemps}
-              onChange={ft => setPrepForm(f => ({ ...f, facilityTemps: ft }))}
-              onViewPhoto={setViewPhotoUrl}
-              onUploadError={handleUploadError}
-            />
-
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan</label>
               <textarea
@@ -2108,7 +2210,7 @@ export const ProductionModule: React.FC = () => {
         <Modal
           isOpen={isCookingModalOpen}
           onClose={() => setIsCookingModalOpen(false)}
-          title="Input Data Suhu Makanan Matang & Fasilitas Divisi Pengolahan"
+          title="Input Data Suhu Makanan Matang Divisi Pengolahan"
           maxWidth="xl"
         >
           <form onSubmit={handleSaveCooking} className="space-y-4 text-xs">
@@ -2331,15 +2433,6 @@ export const ProductionModule: React.FC = () => {
               );
             })()}
 
-            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
-            <FacilityTempModalGrid
-              divisionLabel="Divisi Pengolahan"
-              value={cookingForm.facilityTemps}
-              onChange={ft => setCookingForm(f => ({ ...f, facilityTemps: ft }))}
-              onViewPhoto={setViewPhotoUrl}
-              onUploadError={handleUploadError}
-            />
-
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan Pengolahan</label>
               <textarea
@@ -2380,7 +2473,7 @@ export const ProductionModule: React.FC = () => {
           maxWidth="xl"
         >
           <form onSubmit={handleSavePortioning} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div>
                 <label className="block font-bold mb-1">Tanggal</label>
                 <input
@@ -2412,14 +2505,49 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">Nama Petugas</label>
+                <label className="block font-bold mb-1">Petugas Pemorsian</label>
+                <select
+                  value=""
+                  onChange={e => {
+                    if (e.target.value) setPortioningForm(f => ({ ...f, officerName: e.target.value }));
+                  }}
+                  className="w-full px-2.5 py-1.5 mb-1 border rounded-lg bg-slate-50 dark:bg-slate-800 text-[11px]"
+                >
+                  <option value="">-- Pilih Relawan Pemorsian --</option>
+                  {masterVolunteers
+                    .filter(v => v.isActive)
+                    .map(v => (
+                      <option key={v.id} value={`${v.name} (${v.position})`}>
+                        {v.name} — {v.division}
+                      </option>
+                    ))}
+                </select>
                 <input
                   type="text"
                   required
                   value={portioningForm.officerName}
                   onChange={e => setPortioningForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-1.5 border rounded-lg dark:bg-slate-800"
                 />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Menu Harian (Master Menu)</label>
+                <select
+                  value={
+                    portioningForm.menuId ||
+                    menuItems.find(m => m.date === portioningForm.date)?.id ||
+                    menuItems[0]?.id ||
+                    ''
+                  }
+                  onChange={e => setPortioningForm(f => ({ ...f, menuId: e.target.value }))}
+                  className="w-full px-2.5 py-2 border rounded-lg bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold"
+                >
+                  {menuItems.map(m => (
+                    <option key={m.id} value={m.id}>
+                      [{m.menuCode}] {m.dayName} ({m.date})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -2427,7 +2555,7 @@ export const ProductionModule: React.FC = () => {
             <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 space-y-3">
               <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                 <Scale className="w-4 h-4 text-purple-600" />
-                Penimbangan Sampling Gramasi & Upload Foto Ompreng
+                Penimbangan Sampling Gramasi Total &amp; Upload Foto Ompreng
               </span>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2477,74 +2605,208 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Suhu Makanan Saat Pemorsian */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Thermometer className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                Suhu Makanan Saat Di-seal Masuk Ompreng (°C)
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Suhu Nasi</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={portioningForm.riceTemp}
-                    onChange={e => setPortioningForm(f => ({ ...f, riceTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Lauk Hewani</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={portioningForm.animalTemp}
-                    onChange={e => setPortioningForm(f => ({ ...f, animalTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Lauk Nabati</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={portioningForm.plantTemp}
-                    onChange={e => setPortioningForm(f => ({ ...f, plantTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Sayur Sop</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={portioningForm.vegTemp}
-                    onChange={e => setPortioningForm(f => ({ ...f, vegTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 text-[11px]">Suhu Buah</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={portioningForm.fruitTemp}
-                    onChange={e => setPortioningForm(f => ({ ...f, fruitTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1 border rounded dark:bg-slate-800 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
+            {/* Standar Porsi (Berat Mentah, Faktor Konversi, Berat Matang) & Suhu/Dokumentasi Sesi 1-3 */}
+            {(() => {
+              const selectedMenu =
+                (portioningForm.menuId ? menuItems.find(m => m.id === portioningForm.menuId) : undefined) ||
+                menuItems.find(m => m.date === portioningForm.date) ||
+                menuItems[0];
 
-            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
-            <FacilityTempModalGrid
-              divisionLabel="Divisi Pemorsian"
-              value={portioningForm.facilityTemps}
-              onChange={ft => setPortioningForm(f => ({ ...f, facilityTemps: ft }))}
-              onViewPhoto={setViewPhotoUrl}
-              onUploadError={handleUploadError}
-            />
+              const portionCategories = [
+                {
+                  label: '1. Makanan Pokok (p besar)',
+                  menuTitle: selectedMenu?.stapleFood || '-',
+                  rawKey: 'riceRawLarge' as const,
+                  factorKey: 'riceFactorLarge' as const,
+                  cookedKey: 'riceCookedLarge' as const,
+                  s1TempKey: 'riceTemp' as const,
+                  s1PhotoKey: 'ricePhoto' as const,
+                  s2TempKey: 'riceS2Temp' as const,
+                  s2PhotoKey: 'riceS2Photo' as const,
+                  s3TempKey: 'riceS3Temp' as const,
+                  s3PhotoKey: 'riceS3Photo' as const,
+                },
+                {
+                  label: '1b. Makanan Pokok (p kecil)',
+                  menuTitle: selectedMenu?.stapleFood || '-',
+                  rawKey: 'riceRawSmall' as const,
+                  factorKey: 'riceFactorSmall' as const,
+                  cookedKey: 'riceCookedSmall' as const,
+                  s1TempKey: 'riceSmallS1Temp' as const,
+                  s1PhotoKey: 'riceSmallS1Photo' as const,
+                  s2TempKey: 'riceSmallS2Temp' as const,
+                  s2PhotoKey: 'riceSmallS2Photo' as const,
+                  s3TempKey: 'riceSmallS3Temp' as const,
+                  s3PhotoKey: 'riceSmallS3Photo' as const,
+                },
+                {
+                  label: '2. Lauk Hewani',
+                  menuTitle: selectedMenu?.animalProtein || '-',
+                  rawKey: 'animalRaw' as const,
+                  factorKey: 'animalFactor' as const,
+                  cookedKey: 'animalCooked' as const,
+                  s1TempKey: 'animalTemp' as const,
+                  s1PhotoKey: 'animalPhoto' as const,
+                  s2TempKey: 'animalS2Temp' as const,
+                  s2PhotoKey: 'animalS2Photo' as const,
+                  s3TempKey: 'animalS3Temp' as const,
+                  s3PhotoKey: 'animalS3Photo' as const,
+                },
+                {
+                  label: '3. Lauk Nabati',
+                  menuTitle: selectedMenu?.plantProtein || '-',
+                  rawKey: 'plantRaw' as const,
+                  factorKey: 'plantFactor' as const,
+                  cookedKey: 'plantCooked' as const,
+                  s1TempKey: 'plantTemp' as const,
+                  s1PhotoKey: 'plantPhoto' as const,
+                  s2TempKey: 'plantS2Temp' as const,
+                  s2PhotoKey: 'plantS2Photo' as const,
+                  s3TempKey: 'plantS3Temp' as const,
+                  s3PhotoKey: 'plantS3Photo' as const,
+                },
+                {
+                  label: '4. Sayur',
+                  menuTitle: selectedMenu?.vegetable || '-',
+                  rawKey: 'vegRaw' as const,
+                  factorKey: 'vegFactor' as const,
+                  cookedKey: 'vegCooked' as const,
+                  s1TempKey: 'vegTemp' as const,
+                  s1PhotoKey: 'vegPhoto' as const,
+                  s2TempKey: 'vegS2Temp' as const,
+                  s2PhotoKey: 'vegS2Photo' as const,
+                  s3TempKey: 'vegS3Temp' as const,
+                  s3PhotoKey: 'vegS3Photo' as const,
+                },
+                {
+                  label: '5. Buah',
+                  menuTitle: selectedMenu?.fruit || selectedMenu?.milkOrExtra || '-',
+                  rawKey: 'fruitRaw' as const,
+                  factorKey: 'fruitFactor' as const,
+                  cookedKey: 'fruitCooked' as const,
+                  s1TempKey: 'fruitTemp' as const,
+                  s1PhotoKey: 'fruitPhoto' as const,
+                  s2TempKey: 'fruitS2Temp' as const,
+                  s2PhotoKey: 'fruitS2Photo' as const,
+                  s3TempKey: 'fruitS3Temp' as const,
+                  s3PhotoKey: 'fruitS3Photo' as const,
+                },
+              ];
+
+              return (
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50/70 dark:bg-slate-800/30">
+                  <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                    <Thermometer className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                    Standar Porsi (Berat Mentah, Faktor Konversi, Berat Matang) &amp; Suhu Pemorsian Sesi 1–3
+                  </span>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {portionCategories.map(pc => (
+                      <div key={pc.label} className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+                        <div>
+                          <label className="block font-bold text-slate-800 dark:text-slate-100">{pc.label}</label>
+                          <p className="text-[10px] text-blue-700 dark:text-sky-400 font-medium line-clamp-1" title={pc.menuTitle}>
+                            Menu: {pc.menuTitle} • Danger Zone: 60-5°C
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <div>
+                            <label className="block text-[10px] text-slate-500">Mentah (g)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={portioningForm[pc.rawKey]}
+                              onChange={e => setPortioningForm(f => ({ ...f, [pc.rawKey]: Number(e.target.value) }))}
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-500">F. Konversi</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={portioningForm[pc.factorKey]}
+                              onChange={e => setPortioningForm(f => ({ ...f, [pc.factorKey]: Number(e.target.value) }))}
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-slate-500">Matang (g)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={portioningForm[pc.cookedKey]}
+                              onChange={e => setPortioningForm(f => ({ ...f, [pc.cookedKey]: Number(e.target.value) }))}
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">Sesi 1 (°C)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              placeholder="°C"
+                              value={portioningForm[pc.s1TempKey]}
+                              onChange={e =>
+                                setPortioningForm(f => ({
+                                  ...f,
+                                  [pc.s1TempKey]: pc.s1TempKey === 'riceSmallS1Temp' ? e.target.value : Number(e.target.value),
+                                }))
+                              }
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s1PhotoKey]: url })))}
+                              className="w-full text-[9px] mt-1"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 2 (°C)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              placeholder="Opsional"
+                              value={portioningForm[pc.s2TempKey]}
+                              onChange={e => setPortioningForm(f => ({ ...f, [pc.s2TempKey]: e.target.value }))}
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s2PhotoKey]: url })))}
+                              className="w-full text-[9px] mt-1"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 3 (°C)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              placeholder="Opsional"
+                              value={portioningForm[pc.s3TempKey]}
+                              onChange={e => setPortioningForm(f => ({ ...f, [pc.s3TempKey]: e.target.value }))}
+                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
+                            />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s3PhotoKey]: url })))}
+                              className="w-full text-[9px] mt-1"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block font-bold mb-1">Catatan Keterangan Pemorsian</label>
@@ -2581,28 +2843,50 @@ export const ProductionModule: React.FC = () => {
       {isDeliveryModalOpen && (
         <Modal
           isOpen={isDeliveryModalOpen}
-          onClose={() => setIsDeliveryModalOpen(false)}
-          title="Input Distribusi Pengiriman Makanan MBG & BAST"
+          onClose={() => {
+            setIsDeliveryModalOpen(false);
+            setEditingDeliveryId(null);
+          }}
+          title={editingDeliveryId ? 'Edit Data Pengiriman & Dokumentasi Foto' : 'Input Data Pengiriman Makanan MBG & BAST'}
           maxWidth="xl"
         >
           <form onSubmit={handleSaveDelivery} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-bold mb-1">Pilih Lembaga Penerima Manfaat</label>
-              <select
-                required
-                value={deliveryForm.institutionId}
-                onChange={e => setDeliveryForm(f => ({ ...f, institutionId: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-              >
-                {institutions.map(inst => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.name} ({inst.totalPortions} Porsi • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block font-bold mb-1">Tanggal Pengiriman</label>
+                <input
+                  type="date"
+                  required
+                  value={deliveryForm.date}
+                  onChange={e => setDeliveryForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Pilih Lembaga Penerima Manfaat</label>
+                <select
+                  required
+                  value={deliveryForm.institutionId}
+                  onChange={e => {
+                    const inst = institutions.find(i => i.id === e.target.value);
+                    setDeliveryForm(f => ({
+                      ...f,
+                      institutionId: e.target.value,
+                      picName: inst?.picName || inst?.contactPerson || f.picName,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {institutions.map(inst => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name} ({inst.totalPortions} Porsi • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold mb-1">Waktu Keberangkatan</label>
                 <input
@@ -2610,18 +2894,30 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={deliveryForm.departureTime}
                   onChange={e => setDeliveryForm(f => ({ ...f, departureTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">Waktu Penerimaan di Sekolah</label>
+                <label className="block font-bold mb-1">Waktu Tiba / Serah Terima</label>
                 <input
                   type="text"
                   required
                   value={deliveryForm.arrivalTime}
                   onChange={e => setDeliveryForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Status Pengiriman</label>
+                <select
+                  value={deliveryForm.status}
+                  onChange={e => setDeliveryForm(f => ({ ...f, status: e.target.value as DistributionDeliveryRecord['status'] }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                >
+                  <option value="Dalam Perjalanan">Dalam Perjalanan</option>
+                  <option value="Tiba di Lokasi">Tiba di Lokasi</option>
+                  <option value="Selesai Serah Terima">Selesai Serah Terima</option>
+                </select>
               </div>
               <div>
                 <label className="block font-bold mb-1">Petugas Distribusi (Driver/Kru)</label>
@@ -2630,7 +2926,7 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={deliveryForm.driverName}
                   onChange={e => setDeliveryForm(f => ({ ...f, driverName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
@@ -2640,55 +2936,100 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={deliveryForm.vehicleNumber}
                   onChange={e => setDeliveryForm(f => ({ ...f, vehicleNumber: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">PIC Penerima di Lokasi</label>
+                <input
+                  type="text"
+                  required
+                  value={deliveryForm.picName}
+                  onChange={e => setDeliveryForm(f => ({ ...f, picName: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
             </div>
 
-            {/* Upload 3 Foto: Kegiatan, Serah Terima BAST, Uji Organoleptik PIC */}
-            <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800/40 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white block">
-                Dokumentasi Wajib Foto Lapangan:
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-slate-600 text-[11px] mb-0.5">1. Foto Kegiatan Distribusi</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setDeliveryForm(f => ({ ...f, activityPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 text-[11px] mb-0.5">2. Foto Serah Terima BAST</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setDeliveryForm(f => ({ ...f, handoverPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 text-[11px] mb-0.5">3. Foto Uji Organoleptik PIC</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setDeliveryForm(f => ({ ...f, picOrganolepticPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
-                </div>
+            {/* Upload Foto Pengiriman: Uji Organoleptik, Serah Terima, Lokasi (+ Kegiatan Opsional) */}
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                  <Camera className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                  Dokumentasi Bukti Foto Pengiriman
+                </span>
+                <span className="text-[11px] text-slate-500">Format JPG/PNG/WebP</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  {
+                    key: 'picOrganolepticPhoto' as const,
+                    title: '1. Upload Foto Uji Organoleptik',
+                    icon: ClipboardCheck,
+                    val: deliveryForm.picOrganolepticPhoto,
+                  },
+                  {
+                    key: 'handoverPhoto' as const,
+                    title: '2. Upload Foto Serah Terima',
+                    icon: FileCheck,
+                    val: deliveryForm.handoverPhoto,
+                  },
+                  {
+                    key: 'locationPhoto' as const,
+                    title: '3. Upload Foto Lokasi',
+                    icon: MapPin,
+                    val: deliveryForm.locationPhoto,
+                  },
+                  {
+                    key: 'activityPhoto' as const,
+                    title: '4. Foto Kegiatan (Opsional)',
+                    icon: Truck,
+                    val: deliveryForm.activityPhoto,
+                  },
+                ].map(slot => {
+                  const SlotIcon = slot.icon;
+                  return (
+                    <div key={slot.key} className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 flex flex-col justify-between">
+                      <div>
+                        <label className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-100 text-[11px] mb-1.5">
+                          <SlotIcon className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400 shrink-0" />
+                          <span>{slot.title}</span>
+                        </label>
+                        {slot.val ? (
+                          <div className="relative group">
+                            <img
+                              src={slot.val}
+                              alt={slot.title}
+                              onClick={() => setViewPhotoUrl(slot.val)}
+                              className="w-full h-24 object-cover rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setDeliveryForm(f => ({ ...f, [slot.key]: '' }))}
+                              title="Hapus Foto"
+                              className="absolute top-1 right-1 p-1 rounded-full bg-rose-600 text-white hover:bg-rose-700 shadow-xs"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="w-full h-24 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 text-[10px]">
+                            <Upload className="w-4 h-4 mb-1" />
+                            <span>Belum ada foto</span>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => handleFileUpload(e, url => setDeliveryForm(f => ({ ...f, [slot.key]: url })))}
+                        className="w-full text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-semibold file:bg-blue-50 file:text-blue-900 hover:file:bg-blue-100 dark:file:bg-slate-800 dark:file:text-sky-300"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
-
-            {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
-            <FacilityTempModalGrid
-              divisionLabel="Divisi Distribusi & Armada"
-              value={deliveryForm.facilityTemps}
-              onChange={ft => setDeliveryForm(f => ({ ...f, facilityTemps: ft }))}
-              onViewPhoto={setViewPhotoUrl}
-              onUploadError={handleUploadError}
-            />
 
             <div>
               <label className="block font-bold mb-1">Catatan Keterangan</label>
@@ -2696,15 +3037,18 @@ export const ProductionModule: React.FC = () => {
                 rows={2}
                 value={deliveryForm.notes}
                 onChange={e => setDeliveryForm(f => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t">
+            <div className="flex justify-end gap-2 pt-2 border-t dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => setIsDeliveryModalOpen(false)}
-                className="px-4 py-2 border rounded-xl"
+                onClick={() => {
+                  setIsDeliveryModalOpen(false);
+                  setEditingDeliveryId(null);
+                }}
+                className="px-4 py-2 border rounded-xl dark:border-slate-700"
               >
                 Batal
               </button>
@@ -2712,7 +3056,7 @@ export const ProductionModule: React.FC = () => {
                 type="submit"
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold"
               >
-                Simpan & Terbitkan BAST
+                {editingDeliveryId ? 'Simpan Pembaruan Pengiriman' : 'Simpan Pengiriman & Terbitkan BAST'}
               </button>
             </div>
           </form>
@@ -2726,27 +3070,78 @@ export const ProductionModule: React.FC = () => {
         <Modal
           isOpen={isReturnModalOpen}
           onClose={() => setIsReturnModalOpen(false)}
-          title="Input Pengembalian Ompreng Kosong dari Sekolah"
-          maxWidth="lg"
+          title="Input Data Pengembalian Ompreng Kosong"
+          maxWidth="xl"
         >
           <form onSubmit={handleSaveReturn} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-bold mb-1">Pilih Lembaga Asal Ompreng</label>
-              <select
-                required
-                value={returnForm.institutionId}
-                onChange={e => setReturnForm(f => ({ ...f, institutionId: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-              >
-                {institutions.map(inst => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.name} ({inst.totalPortions} Ompreng • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block font-bold mb-1">Tanggal Pengembalian</label>
+                <input
+                  type="date"
+                  required
+                  value={returnForm.date}
+                  onChange={e => setReturnForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Pilih Lembaga Asal Ompreng</label>
+                <select
+                  required
+                  value={returnForm.institutionId}
+                  onChange={e => {
+                    const inst = institutions.find(i => i.id === e.target.value);
+                    setReturnForm(f => ({
+                      ...f,
+                      institutionId: e.target.value,
+                      smallPortions: inst?.smallPortions || 0,
+                      largePortions: inst?.largePortions || 0,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {institutions.map(inst => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name} ({inst.totalPortions} Ompreng • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block font-bold mb-1">Ompreng Porsi Kecil Kembali</label>
+                <input
+                  type="number"
+                  min={0}
+                  required
+                  value={returnForm.smallPortions}
+                  onChange={e => setReturnForm(f => ({ ...f, smallPortions: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Ompreng Porsi Besar Kembali</label>
+                <input
+                  type="number"
+                  min={0}
+                  required
+                  value={returnForm.largePortions}
+                  onChange={e => setReturnForm(f => ({ ...f, largePortions: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Total Ompreng Kembali</label>
+                <div className="w-full px-3 py-2 border rounded-lg bg-slate-100 dark:bg-slate-800/70 dark:border-slate-700 font-mono font-bold text-blue-900 dark:text-sky-400">
+                  {Number(returnForm.smallPortions || 0) + Number(returnForm.largePortions || 0)} Ompreng
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block font-bold mb-1">Waktu Keberangkatan Jemput</label>
                 <input
@@ -2754,7 +3149,7 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={returnForm.departureTime}
                   onChange={e => setReturnForm(f => ({ ...f, departureTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
@@ -2764,17 +3159,17 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={returnForm.arrivalTime}
                   onChange={e => setReturnForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">Petugas Distribusi</label>
+                <label className="block font-bold mb-1">Petugas Penjemput</label>
                 <input
                   type="text"
                   required
                   value={returnForm.driverName}
                   onChange={e => setReturnForm(f => ({ ...f, driverName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
@@ -2784,61 +3179,130 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={returnForm.vehicleNumber}
                   onChange={e => setReturnForm(f => ({ ...f, vehicleNumber: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
             </div>
 
-            <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800/40 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white block">Dokumentasi Serah Terima Kembali:</span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 text-[11px] mb-0.5">Upload Foto Kegiatan Pengambilan</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setReturnForm(f => ({ ...f, activityPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 text-[11px] mb-0.5">Upload Foto Serah Terima Kembali</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setReturnForm(f => ({ ...f, returnHandoverPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-bold mb-1">Petugas Penerima di SPPG</label>
+                <input
+                  type="text"
+                  required
+                  value={returnForm.receivedByOfficer}
+                  onChange={e => setReturnForm(f => ({ ...f, receivedByOfficer: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Status Fisik Ompreng</label>
+                <select
+                  value={returnForm.conditionStatus}
+                  onChange={e => setReturnForm(f => ({ ...f, conditionStatus: e.target.value as OmprengReturnRecord['conditionStatus'] }))}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                >
+                  <option value="Lengkap & Utuh">Lengkap &amp; Utuh (Sesuai Jumlah Terkirim)</option>
+                  <option value="Ada Selisih">Ada Selisih (Tertinggal di Kelas/Perlu Konfirmasi)</option>
+                  <option value="Perlu Perbaikan">Perlu Perbaikan (Karet Silikon Rusak/Penyok)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Upload Foto Pengembalian & Foto Lokasi */}
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 space-y-3">
+              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                <Camera className="w-4 h-4 text-emerald-600" />
+                Dokumentasi Bukti Foto Pengembalian Ompreng &amp; Lokasi
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  {
+                    key: 'returnHandoverPhoto' as const,
+                    title: '1. Upload Foto Pengembalian',
+                    icon: RotateCcw,
+                    val: returnForm.returnHandoverPhoto,
+                  },
+                  {
+                    key: 'locationPhoto' as const,
+                    title: '2. Upload Foto Lokasi',
+                    icon: MapPin,
+                    val: returnForm.locationPhoto,
+                  },
+                  {
+                    key: 'activityPhoto' as const,
+                    title: '3. Foto Pengambilan (Opsional)',
+                    icon: Camera,
+                    val: returnForm.activityPhoto,
+                  },
+                ].map(slot => {
+                  const SlotIcon = slot.icon;
+                  return (
+                    <div key={slot.key} className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2 flex flex-col justify-between">
+                      <div>
+                        <label className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-100 text-[11px] mb-1.5">
+                          <SlotIcon className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{slot.title}</span>
+                        </label>
+                        {slot.val ? (
+                          <div className="relative">
+                            <img
+                              src={slot.val}
+                              alt={slot.title}
+                              onClick={() => setViewPhotoUrl(slot.val)}
+                              className="w-full h-24 object-cover rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setReturnForm(f => ({ ...f, [slot.key]: '' }))}
+                              title="Hapus Foto"
+                              className="absolute top-1 right-1 p-1 rounded-full bg-rose-600 text-white hover:bg-rose-700 shadow-xs"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="w-full h-24 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 text-[10px]">
+                            <Upload className="w-4 h-4 mb-1" />
+                            <span>Belum ada foto</span>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => handleFileUpload(e, url => setReturnForm(f => ({ ...f, [slot.key]: url })))}
+                        className="w-full text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-semibold file:bg-emerald-50 file:text-emerald-800 hover:file:bg-emerald-100 dark:file:bg-slate-800 dark:file:text-emerald-300"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             <div>
-              <label className="block font-bold mb-1">Status Fisik Ompreng</label>
-              <select
-                value={returnForm.conditionStatus}
-                onChange={e => setReturnForm(f => ({ ...f, conditionStatus: e.target.value as any }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-              >
-                <option value="Lengkap & Utuh">Lengkap & Utuh (Sesuai Jumlah Terkirim)</option>
-                <option value="Ada Selisih">Ada Selisih (Tertinggal di Kelas/Perlu Konfirmasi)</option>
-                <option value="Perlu Perbaikan">Perlu Perbaikan (Karet Silikon Rusak/Penyok)</option>
-              </select>
+              <label className="block font-bold mb-1">Catatan Kondisi Pengembalian</label>
+              <textarea
+                rows={2}
+                value={returnForm.notes}
+                onChange={e => setReturnForm(f => ({ ...f, notes: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+              />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t">
+            <div className="flex justify-end gap-2 pt-2 border-t dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setIsReturnModalOpen(false)}
-                className="px-4 py-2 border rounded-xl"
+                className="px-4 py-2 border rounded-xl dark:border-slate-700"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold"
               >
-                Simpan Log Pengembalian
+                Simpan Pengembalian Ompreng
               </button>
             </div>
           </form>

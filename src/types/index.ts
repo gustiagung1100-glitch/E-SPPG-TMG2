@@ -65,6 +65,8 @@ export interface RolePermissions {
   };
 }
 
+export type RoleModuleAccessMap = Record<RoleType, ModuleKey[]>;
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -757,7 +759,7 @@ export interface PreparationInspectionRecord {
   damagedVegetable: DamagedMaterialItem;
   damagedAnimal: DamagedMaterialItem;
   damagedFruit: DamagedMaterialItem;
-  facilityTemps: FacilityTemperatures;
+  facilityTemps?: FacilityTemperatures;
   notes: string;
 }
 
@@ -771,6 +773,19 @@ export interface CookedFoodItem {
   session2PhotoUrl?: string;
   session3Temp?: number;
   session3PhotoUrl?: string;
+  dangerZone?: string;
+  rawWeightGrams?: number;
+  rawWeightSmallGrams?: number;
+  conversionFactor?: number;
+  conversionFactorSmall?: number;
+  cookedWeightGrams?: number;
+  cookedWeightSmallGrams?: number;
+  smallPortionSession1Temp?: number;
+  smallPortionSession1PhotoUrl?: string;
+  smallPortionSession2Temp?: number;
+  smallPortionSession2PhotoUrl?: string;
+  smallPortionSession3Temp?: number;
+  smallPortionSession3PhotoUrl?: string;
 }
 
 export interface CookingInspectionRecord {
@@ -786,7 +801,7 @@ export interface CookingInspectionRecord {
     vegetable: CookedFoodItem;
     fruit: CookedFoodItem;
   };
-  facilityTemps: FacilityTemperatures;
+  facilityTemps?: FacilityTemperatures;
   notes: string;
 }
 
@@ -797,6 +812,7 @@ export interface PortioningInspectionRecord {
   time: string;
   portioningTime: string;
   officerName: string;
+  menuId?: string;
   foodTemps: {
     rice: CookedFoodItem;
     animalProtein: CookedFoodItem;
@@ -804,7 +820,7 @@ export interface PortioningInspectionRecord {
     vegetable: CookedFoodItem;
     fruit: CookedFoodItem;
   };
-  facilityTemps: FacilityTemperatures;
+  facilityTemps?: FacilityTemperatures;
   smallPortionWeightGrams: number;
   largePortionWeightGrams: number;
   smallPortionPhoto?: string;
@@ -828,6 +844,7 @@ export interface DistributionDeliveryRecord {
   activityPhoto?: string;
   handoverPhoto?: string;
   picOrganolepticPhoto?: string;
+  locationPhoto?: string;
   bastNumber: string;
   picName: string;
   status: 'Dalam Perjalanan' | 'Tiba di Lokasi' | 'Selesai Serah Terima';
@@ -850,6 +867,7 @@ export interface OmprengReturnRecord {
   vehicleNumber: string;
   activityPhoto?: string;
   returnHandoverPhoto?: string;
+  locationPhoto?: string;
   receivedByOfficer: string;
   conditionStatus: 'Lengkap & Utuh' | 'Ada Selisih' | 'Perlu Perbaikan';
   notes: string;
@@ -966,7 +984,7 @@ export interface IncomingLetter {
   recordedBy: string;
 }
 
-// 20 Laporan Resmi Pusat Laporan & Cetak SPPG
+// 19 Laporan Resmi Pusat Laporan & Cetak SPPG
 export type OfficialReportKey =
   | 'bast_distribusi'
   | 'surat_tugas'
@@ -981,7 +999,6 @@ export type OfficialReportKey =
   | 'rab'
   | 'purchase_order'
   | 'quality_control'
-  | 'suhu_ruang'
   | 'suhu_makanan_pengolahan'
   | 'suhu_makanan_pemorsian'
   | 'food_waste'

@@ -13,8 +13,6 @@ import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
-import { RoleSwitcher } from './components/auth/RoleSwitcher';
-import { FirebaseAuthModal } from './components/auth/FirebaseAuthModal';
 import { AuthGuard } from './components/auth/AuthGuard';
 import { Forbidden403Page } from './components/auth/Forbidden403Page';
 
@@ -59,18 +57,67 @@ interface MainContentProps {
 }
 
 const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModule }) => {
-  const { currentUser, canSwitchRole } = useApp();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const { currentUser, roleModuleAccess } = useApp();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('esppg_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isDesktopSidebarHidden, setIsDesktopSidebarHidden] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('esppg_sidebar_hidden') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  const handleToggleSidebar = React.useCallback(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsMobileSidebarOpen(prev => !prev);
+    } else {
+      setIsDesktopSidebarHidden(prev => {
+        const next = !prev;
+        try {
+          localStorage.setItem('esppg_sidebar_hidden', String(next));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  const handleToggleCollapse = React.useCallback(() => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('esppg_sidebar_collapsed', String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMobileSidebarOpen) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileSidebarOpen]);
 
   const renderModule = () => {
     // Defense-in-depth RBAC boundary check
-    if (!canRoleAccessModule(currentUser.role, activeModule)) {
+    if (!canRoleAccessModule(currentUser.role, activeModule, roleModuleAccess)) {
       return (
         <Forbidden403Page
-          onBackToHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role))}
+          onBackToHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role, roleModuleAccess))}
         />
       );
     }
@@ -119,7 +166,8 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
           activeModule={activeModule}
           onSelectModule={mod => navigateToModule(mod)}
           isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
+          onToggleCollapse={handleToggleCollapse}
+          isDesktopHidden={isDesktopSidebarHidden}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
@@ -128,9 +176,11 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           {/* Top Header */}
           <Header
-            onOpenRoleSwitcher={() => setIsRoleSwitcherOpen(true)}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onToggleSidebar={handleToggleSidebar}
+            isMobileSidebarOpen={isMobileSidebarOpen}
+            isDesktopSidebarHidden={isDesktopSidebarHidden}
             activeModuleTitle={moduleTitles[activeModule]}
+            onNavigateModule={navigateToModule}
           />
 
           {/* Main Body */}
@@ -139,7 +189,7 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
             <Breadcrumb
               activeModule={activeModule}
               activeModuleTitle={moduleTitles[activeModule]}
-              onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role))}
+              onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role, roleModuleAccess))}
             />
 
             {/* Dynamic Module Component */}
@@ -161,18 +211,6 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
           </footer>
         </div>
       </div>
-
-      {/* Global Modals & Notifications */}
-      {canSwitchRole && (
-        <RoleSwitcher
-          isOpen={isRoleSwitcherOpen}
-          onClose={() => setIsRoleSwitcherOpen(false)}
-        />
-      )}
-      <FirebaseAuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-      />
     </div>
   );
 };

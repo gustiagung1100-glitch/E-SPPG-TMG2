@@ -12,12 +12,6 @@ import {
 } from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
 import { officialDocumentTemplates } from '../../lib/letterTemplatesData';
-import { defaultFacilityTemperatures } from '../../lib/productionData';
-import {
-  FACILITY_TEMP_UNITS,
-  getFacilityTempValue,
-  getFacilityPhotoUrl,
-} from '../common/FacilityTempUploadSection';
 import {
   OutgoingDocument,
   IncomingLetter,
@@ -67,9 +61,6 @@ export const LettersModule: React.FC = () => {
     addIncomingLetter,
     updateIncomingLetter,
     deleteIncomingLetter,
-    prepRecords,
-    cookingRecords,
-    portioningRecords,
     institutions,
     beneficiaryAttendance,
     masterVolunteers,
@@ -174,44 +165,6 @@ export const LettersModule: React.FC = () => {
       initialFieldValues['NO_HP_DISTRIBUSI'] = resolved.distributorPhone;
     }
 
-    if (tmpl.id === 'tmpl-bap-suhu') {
-      const pTemps = prepRecords[0]?.facilityTemps || defaultFacilityTemperatures;
-      const cTemps = cookingRecords[0]?.facilityTemps || defaultFacilityTemperatures;
-      const rTemps = portioningRecords[0]?.facilityTemps || defaultFacilityTemperatures;
-
-      const fmt3 = (tempKey: Parameters<typeof getFacilityTempValue>[1]) =>
-        `Div. Persiapan: ${getFacilityTempValue(pTemps, tempKey)}°C | Div. Pengolahan: ${getFacilityTempValue(cTemps, tempKey)}°C | Div. Pemorsian: ${getFacilityTempValue(rTemps, tempKey)}°C`;
-
-      const coolerSummary = FACILITY_TEMP_UNITS.slice(4)
-        .map(u => `${u.shortLabel}: ${getFacilityTempValue(pTemps, u.tempKey)}°C`)
-        .join(' | ');
-
-      const uploadedCount = FACILITY_TEMP_UNITS.reduce((sum, u) => {
-        return (
-          sum +
-          [
-            getFacilityPhotoUrl(pTemps, u.photoKey),
-            getFacilityPhotoUrl(cTemps, u.photoKey),
-            getFacilityPhotoUrl(rTemps, u.photoKey),
-          ].filter(Boolean).length
-        );
-      }, 0);
-      const totalSlots = FACILITY_TEMP_UNITS.length * 3;
-
-      initialFieldValues['RUANG_PEMORSIAN'] = `${fmt3('portioningRoomTemp')} (Standar ≤ 24°C)`;
-      initialFieldValues['RUANG_PENGOLAHAN'] = `${fmt3('cookingRoomTemp')} (Standar ≤ 28°C)`;
-      initialFieldValues['GUDANG_BASAH'] = `${fmt3('wetWarehouseTemp')} (Standar 10 - 16°C)`;
-      initialFieldValues['GUDANG_KERING'] = `${fmt3('dryWarehouseTemp')} (Standar ≤ 25°C)`;
-      initialFieldValues['UNIT_PENDINGIN'] = coolerSummary;
-      initialFieldValues['KELENGKAPAN_FOTO'] =
-        `${uploadedCount}/${totalSlots} bukti foto Ruang Pemorsian, Pengolahan, Gudang Basah/Kering & 6 Pendingin telah terupload di Divisi Persiapan, Pengolahan, dan Pemorsian.`;
-      initialFieldValues['PETUGAS_DIVISI'] = [
-        prepRecords[0]?.officerName || 'Tim Persiapan',
-        cookingRecords[0]?.officerName || 'Tim Pengolahan',
-        portioningRecords[0]?.officerName || 'Tim Pemorsian',
-      ].join(' • ');
-    }
-
     return initialFieldValues;
   };
 
@@ -297,7 +250,7 @@ export const LettersModule: React.FC = () => {
           : initialFieldValues['NAMA_PETUGAS'] ||
             initialFieldValues['PIHAK_KEDUA_NAMA'] ||
             initialFieldValues['LEMBAGA_MITRA'] ||
-            (tmpl.id === 'tmpl-bap-suhu' ? 'Badan Gizi Nasional / Kepala SPPG' : 'Pihak Terkait'),
+            'Pihak Terkait',
       recipientInstitution:
         tmpl.id === 'tmpl-bast'
           ? initialFieldValues['NAMA_LEMBAGA'] || prev.recipientInstitution
@@ -344,12 +297,10 @@ export const LettersModule: React.FC = () => {
           ? initialFieldValues['NAMA_PIC'] || 'PIC Lembaga'
           : initialFieldValues['NAMA_PETUGAS'] ||
             initialFieldValues['PIHAK_KEDUA_NAMA'] ||
-            (tmpl.id === 'tmpl-bap-suhu' ? 'Badan Gizi Nasional / Kepala SPPG' : 'Pihak Terkait'),
+            'Pihak Terkait',
       recipientInstitution:
         tmpl.id === 'tmpl-bast'
           ? initialFieldValues['NAMA_LEMBAGA'] || 'Lembaga Penerima Manfaat'
-          : tmpl.id === 'tmpl-bap-suhu'
-          ? 'Badan Gizi Nasional / Dinkes'
           : 'Mitra MBG / Instansi Terkait',
       recipientAddress:
         tmpl.id === 'tmpl-bast' && defaultInst ? defaultInst.address : 'Kabupaten Probolinggo',

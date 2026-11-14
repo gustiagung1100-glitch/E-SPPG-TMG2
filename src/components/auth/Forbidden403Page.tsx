@@ -13,8 +13,8 @@ export const Forbidden403Page: React.FC<Forbidden403PageProps> = ({
   deniedPath,
   onBackToHome,
 }) => {
-  const { currentUser, logout, sppgConfig } = useApp();
-  const safeDefaultMod = getDefaultModuleForRole(currentUser.role);
+  const { currentUser, roleModuleAccess, logout, sppgConfig } = useApp();
+  const safeDefaultMod = getDefaultModuleForRole(currentUser.role, roleModuleAccess);
   const safeDefaultPath = getPathForModule(safeDefaultMod);
 
   return (

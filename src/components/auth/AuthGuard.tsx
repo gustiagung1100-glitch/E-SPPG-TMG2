@@ -22,7 +22,7 @@ interface AuthGuardProps {
 }
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
-  const { authReady, isAuthenticated, currentUser, addToast } = useApp();
+  const { authReady, isAuthenticated, currentUser, roleModuleAccess, addToast } = useApp();
   const [pathname, setPathname] = useState<string>(() =>
     typeof window !== 'undefined' ? normalizePathname(window.location.pathname) : LOGIN_PATH
   );
@@ -47,7 +47,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
         return;
       }
 
-      if (!canRoleAccessModule(currentUser.role, module)) {
+      if (!canRoleAccessModule(currentUser.role, module, roleModuleAccess)) {
         const targetBlocked = getPathForModule(module);
         setDeniedPath(targetBlocked);
         window.history.pushState(null, '', FORBIDDEN_PATH);
@@ -67,7 +67,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
       }
       setPathname(nextPath);
     },
-    [isAuthenticated, currentUser.isActive, currentUser.role, addToast]
+    [isAuthenticated, currentUser.isActive, currentUser.role, roleModuleAccess, addToast]
   );
 
   // Global custom event navigation guarded by RBAC
@@ -97,7 +97,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
     const resolved = resolveRouteFromPathname(pathname);
 
     if (resolved.kind === 'login' || resolved.kind === 'root') {
-      const defaultMod = getDefaultModuleForRole(currentUser.role);
+      const defaultMod = getDefaultModuleForRole(currentUser.role, roleModuleAccess);
       const defaultPath = getPathForModule(defaultMod);
       window.history.replaceState(null, '', defaultPath);
       setDeniedPath(undefined);
@@ -112,12 +112,15 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
       return;
     }
 
-    if (resolved.kind === 'module' && !canRoleAccessModule(currentUser.role, resolved.module)) {
+    if (
+      resolved.kind === 'module' &&
+      !canRoleAccessModule(currentUser.role, resolved.module, roleModuleAccess)
+    ) {
       setDeniedPath(pathname);
       window.history.replaceState(null, '', FORBIDDEN_PATH);
       setPathname(FORBIDDEN_PATH);
     }
-  }, [authReady, isAuthenticated, currentUser.isActive, currentUser.role, pathname]);
+  }, [authReady, isAuthenticated, currentUser.isActive, currentUser.role, roleModuleAccess, pathname]);
 
   // 1. Sembunyikan seluruh data/komponen internal sebelum proses verifikasi autentikasi selesai (anti-FOUC)
   if (!authReady) {
@@ -152,7 +155,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   const resolved = resolveRouteFromPathname(pathname);
 
   if (resolved.kind === 'forbidden' || resolved.kind === 'unknown') {
-    const defaultMod = getDefaultModuleForRole(currentUser.role);
+    const defaultMod = getDefaultModuleForRole(currentUser.role, roleModuleAccess);
     return (
       <Forbidden403Page
         deniedPath={deniedPath || (resolved.kind === 'unknown' ? pathname : undefined)}
@@ -162,8 +165,8 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   }
 
   if (resolved.kind === 'module') {
-    if (!canRoleAccessModule(currentUser.role, resolved.module)) {
-      const defaultMod = getDefaultModuleForRole(currentUser.role);
+    if (!canRoleAccessModule(currentUser.role, resolved.module, roleModuleAccess)) {
+      const defaultMod = getDefaultModuleForRole(currentUser.role, roleModuleAccess);
       return (
         <Forbidden403Page
           deniedPath={deniedPath || pathname}
@@ -175,6 +178,6 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
   }
 
   // Fallback untuk root '/' atau '/login' saat transisi replaceState ke default module
-  const fallbackModule = getDefaultModuleForRole(currentUser.role);
+  const fallbackModule = getDefaultModuleForRole(currentUser.role, roleModuleAccess);
   return <>{children({ activeModule: fallbackModule, navigateToModule })}</>;
 };

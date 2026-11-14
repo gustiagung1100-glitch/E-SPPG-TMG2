@@ -315,3 +315,192 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
     </div>
   );
 };
+
+export interface StackedDailySegment {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+export interface StackedDailyBarItem {
+  date: string;
+  label: string;
+  total: number;
+  segments: StackedDailySegment[];
+  subMeta?: string;
+}
+
+interface StackedDailyBarChartProps {
+  data: StackedDailyBarItem[];
+  legendItems: { key: string; label: string; color: string }[];
+  unitLabel?: string;
+  height?: number;
+  selectedDate?: string;
+  onSelectDate?: (date: string) => void;
+  emptyMessage?: string;
+}
+
+export const StackedDailyBarChart: React.FC<StackedDailyBarChartProps> = ({
+  data,
+  legendItems,
+  unitLabel = 'kg',
+  height = 210,
+  selectedDate,
+  onSelectDate,
+  emptyMessage = 'Belum ada data harian yang tercatat.',
+}) => {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  if (data.length === 0) {
+    return (
+      <div className="py-10 px-4 text-center border border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50/50 dark:bg-slate-800/30">
+        <p className="text-xs text-slate-500 dark:text-slate-400">{emptyMessage}</p>
+      </div>
+    );
+  }
+
+  const rawMax = Math.max(...data.map(d => d.total), 1);
+  const niceMax = Math.max(5, Math.ceil(rawMax / 5) * 5);
+  const midTick = niceMax / 2;
+
+  return (
+    <div className="space-y-3">
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+        {legendItems.map(item => (
+          <span key={item.key} className="inline-flex items-center gap-1.5">
+            <span
+              className="w-2.5 h-2.5 rounded-xs shrink-0"
+              style={{ backgroundColor: item.color }}
+            />
+            <span>{item.label}</span>
+          </span>
+        ))}
+      </div>
+
+      {/* Chart Area */}
+      <div className="relative pl-10 pr-2 pt-7 pb-1">
+        {/* Y-axis gridlines */}
+        <div
+          className="absolute left-10 right-2 top-7 bottom-7 pointer-events-none flex flex-col justify-between"
+          aria-hidden="true"
+        >
+          <div className="relative border-t border-dashed border-slate-200 dark:border-slate-800">
+            <span className="absolute -left-10 -top-2 w-8 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              {niceMax} {unitLabel}
+            </span>
+          </div>
+          <div className="relative border-t border-dashed border-slate-200 dark:border-slate-800">
+            <span className="absolute -left-10 -top-2 w-8 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              {midTick % 1 === 0 ? midTick : midTick.toFixed(1)}
+            </span>
+          </div>
+          <div className="relative border-t border-slate-300 dark:border-slate-700">
+            <span className="absolute -left-10 -top-2 w-8 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              0
+            </span>
+          </div>
+        </div>
+
+        {/* Bars */}
+        <div
+          className="relative flex items-end justify-around gap-3 sm:gap-5"
+          style={{ height: `${height}px` }}
+        >
+          {data.map((day, idx) => {
+            const totalHeightPct = Math.min(100, (day.total / niceMax) * 100);
+            const isHovered = hoveredIdx === idx;
+            const isSelected = selectedDate ? selectedDate === day.date : false;
+
+            return (
+              <div
+                key={day.date}
+                onMouseEnter={() => setHoveredIdx(idx)}
+                onMouseLeave={() => setHoveredIdx(null)}
+                onClick={() => onSelectDate?.(day.date)}
+                className={`flex-1 max-w-[84px] h-full flex flex-col items-center justify-end group relative ${
+                  onSelectDate ? 'cursor-pointer' : ''
+                }`}
+              >
+                {/* Hover Tooltip */}
+                {isHovered && (
+                  <div className="absolute -top-4 -translate-y-full z-30 bg-[#142B4A]/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-2 px-3 rounded-lg shadow-xl border border-white/10 whitespace-nowrap pointer-events-none tabular-nums">
+                    <div className="font-bold text-[#F2D58B] mb-1">
+                      {day.label} · Total {day.total.toFixed(1)} {unitLabel}
+                    </div>
+                    <div className="space-y-0.5">
+                      {day.segments.map(seg => (
+                        <div key={seg.key} className="flex items-center justify-between gap-4 text-[10px]">
+                          <span className="inline-flex items-center gap-1.5 text-slate-200">
+                            <span
+                              className="w-2 h-2 rounded-xs shrink-0"
+                              style={{ backgroundColor: seg.color }}
+                            />
+                            {seg.label}
+                          </span>
+                          <span className="font-mono font-semibold text-white">
+                            {seg.value.toFixed(1)} {unitLabel}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {day.subMeta && (
+                      <div className="mt-1 pt-1 border-t border-white/15 text-[10px] text-teal-300">
+                        {day.subMeta}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Stacked Bar Column */}
+                <div className="w-full flex flex-col items-center justify-end h-[calc(100%-24px)]">
+                  <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-200 mb-1 tabular-nums">
+                    {day.total.toFixed(1)}
+                  </span>
+                  <div
+                    className={`w-full max-w-[42px] rounded-t-md overflow-hidden flex flex-col-reverse transition-all duration-200 ${
+                      isSelected
+                        ? 'ring-2 ring-[#071D49] dark:ring-sky-400 ring-offset-1 dark:ring-offset-slate-900'
+                        : 'group-hover:brightness-105'
+                    }`}
+                    style={{
+                      height: `${Math.max(totalHeightPct, day.total > 0 ? 6 : 2)}%`,
+                    }}
+                  >
+                    {day.segments.map(seg => {
+                      const segPct = day.total > 0 ? (seg.value / day.total) * 100 : 0;
+                      if (segPct <= 0) return null;
+                      return (
+                        <div
+                          key={seg.key}
+                          style={{
+                            height: `${segPct}%`,
+                            backgroundColor: seg.color,
+                          }}
+                          className="w-full transition-all duration-300 border-b border-white/25 last:border-b-0"
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* X-axis Date Label */}
+                <span
+                  className={`mt-1.5 text-[10px] font-medium truncate w-full text-center transition-colors ${
+                    isSelected
+                      ? 'text-[#071D49] dark:text-sky-300 font-bold'
+                      : 'text-[#64748B] dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'
+                  }`}
+                >
+                  {day.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+

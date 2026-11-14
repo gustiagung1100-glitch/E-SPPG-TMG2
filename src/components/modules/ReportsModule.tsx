@@ -20,17 +20,16 @@ import {
   resolveOrganolepticAutoFields,
   exportOrganolepticChecklistPDF,
 } from '../common/OrganolepticChecklistSheet';
-import { FACILITY_TEMP_UNITS } from '../common/FacilityTempUploadSection';
-import {
-  RoomTempChecklistSheet,
-  resolveRoomTempChecklistData,
-  exportRoomTempChecklistPDF,
-} from '../common/RoomTempChecklistSheet';
 import {
   CookingFoodTempSheet,
   resolveCookingFoodTempData,
   exportCookingFoodTempPDF,
 } from '../common/CookingFoodTempSheet';
+import {
+  PortioningFoodTempSheet,
+  resolvePortioningFoodTempData,
+  exportPortioningFoodTempPDF,
+} from '../common/PortioningFoodTempSheet';
 import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
@@ -68,7 +67,7 @@ import {
   FileSignature,
 } from 'lucide-react';
 
-// Definisi 20 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
+// Definisi 19 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
 export const REPORT_CONFIGS: ReportMetaConfig[] = [
   // 1. Distribusi & Lapangan
   {
@@ -177,11 +176,11 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   // 3. Dapur & Keamanan Pangan
   {
     key: 'suhu_makanan_pemorsian',
-    title: 'Suhu Makanan & Gramasi Pemorsian Ompreng',
+    title: 'Pemantauan Standar Porsi & Suhu Makanan Pemorsian',
     category: 'Dapur & Keamanan Pangan',
     codePrefix: 'TEMP-PORT',
-    description: 'Pengawasan suhu makanan saat masuk boks ompreng (min 60°C) dan verifikasi timbangan gramasi.',
-    sourceModule: 'Pemorsian Steril (portioningId, menuId)',
+    description: 'Pemantauan standar berat mentah, faktor konversi, berat matang, suhu Sesi 1–3 (°C), dan dokumentasi foto ompreng per hari.',
+    sourceModule: 'Divisi Pemorsian & Master Menu (portioningId, menuId)',
     defaultOrientation: 'landscape',
     approverRole: 'Koordinator Pemorsian & QC',
   },
@@ -194,16 +193,6 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
     sourceModule: 'Divisi Pengolahan, Master Menu & Master Data Relawan',
     defaultOrientation: 'landscape',
     approverRole: 'Kepala Bagian Masak (Head Chef)',
-  },
-  {
-    key: 'suhu_ruang',
-    title: 'Checklist Pemantauan Suhu & Kelembapan Ruang / Gudang',
-    category: 'Dapur & Keamanan Pangan',
-    codePrefix: 'TEMP-ENV',
-    description: 'Check list pemantauan suhu & kelembapan Gudang Basah, Gudang Kering, Pemorsian, Pengolahan & Pendingin beserta bukti foto Shift 1-3.',
-    sourceModule: 'Produksi 3 Divisi (Persiapan, Pengolahan, Pemorsian)',
-    defaultOrientation: 'landscape',
-    approverRole: 'Pengawas Higiene & Sanitasi',
   },
   {
     key: 'food_waste',
@@ -332,9 +321,6 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [orgaMengetahuiOverride, setOrgaMengetahuiOverride] = useState<string>('');
   const [orgaCustomRows, setOrgaCustomRows] = useState<OrganolepticFoodRow[] | null>(null);
   const [showOrgaEditor, setShowOrgaEditor] = useState<boolean>(false);
-  const [roomChecklistUnitId, setRoomChecklistUnitId] = useState<string>('wet-warehouse');
-  const [roomNotesByDate, setRoomNotesByDate] = useState<Record<string, string>>({});
-  const [showRoomNotesEditor, setShowRoomNotesEditor] = useState<boolean>(false);
 
   // Active Report Metadata
   const currentConfig = useMemo(() => {
@@ -400,31 +386,6 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     orgaCustomRows,
   ]);
 
-  // Auto-resolved Check List Pemantauan Suhu & Kelembapan dari 3 Divisi Produksi
-  const roomTempChecklistData = useMemo(() => {
-    return resolveRoomTempChecklistData({
-      unitId: roomChecklistUnitId,
-      prepRecords,
-      cookingRecords,
-      portioningRecords,
-      sppgConfig,
-      startDate,
-      endDate,
-      periodType,
-      notesByDate: roomNotesByDate,
-    });
-  }, [
-    roomChecklistUnitId,
-    prepRecords,
-    cookingRecords,
-    portioningRecords,
-    sppgConfig,
-    startDate,
-    endDate,
-    periodType,
-    roomNotesByDate,
-  ]);
-
   // Auto-resolved Pemantauan Suhu Makanan Pengolahan & CCP (Divisi Pengolahan + Master Menu + Master Relawan)
   const cookingFoodTempData = useMemo(() => {
     return resolveCookingFoodTempData({
@@ -440,6 +401,25 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     cookingRecords,
     menuItems,
     masterVolunteers,
+    sppgConfig,
+    startDate,
+    endDate,
+    periodType,
+  ]);
+
+  // Auto-resolved Pemantauan Standar Porsi & Suhu Makanan Pemorsian (Divisi Pemorsian + Master Menu)
+  const portioningFoodTempData = useMemo(() => {
+    return resolvePortioningFoodTempData({
+      portioningRecords,
+      menuItems,
+      sppgConfig,
+      startDate,
+      endDate,
+      periodType,
+    });
+  }, [
+    portioningRecords,
+    menuItems,
     sppgConfig,
     startDate,
     endDate,
@@ -897,31 +877,107 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 11. Suhu Makanan Pemorsian
+      // 11. Pemantauan Standar Porsi & Suhu Makanan Pemorsian
       case 'suhu_makanan_pemorsian': {
-        headers = ['No', 'Line Pemorsian', 'Waktu Pemorsian', 'Komponen Makanan', 'Suhu Masuk Ompreng', 'Uji Timbang Porsi Kecil', 'Uji Timbang Porsi Besar', 'Segel Wadah', 'Petugas'];
-        rows = [
-          [1, 'Meja Steril Line 1', '06:45 - 07:15 WIB', 'Nasi & Ayam Fillet', '66.5°C (Min 60°C)', '382 gram (Target 380g)', '584 gram (Target 580g)', 'Terpasang Kuat', 'Nurul Hidayati'],
-          [2, 'Meja Steril Line 2', '07:15 - 07:45 WIB', 'Tempe & Sop Sayur', '65.0°C (Min 60°C)', '380 gram (Target 380g)', '582 gram (Target 580g)', 'Terpasang Kuat', 'Mbak Ririn'],
-          [3, 'Meja Steril Line 3', '07:45 - 08:15 WIB', 'Pisang & Tutup Rapat', 'Suhu Ruang', 'Lengkap 5 Komponen', 'Lengkap 5 Komponen', 'Segel Biru BGN', 'Suparman'],
+        headers = [
+          'Tanggal',
+          'Jenis Bahan',
+          'Nama Makanan / Menu',
+          'Danger Zone',
+          'Berat Mentah',
+          'Faktor Konversi',
+          'Berat Matang',
+          'Suhu Sesi 1 / 2 / 3 (°C)',
+          'Dokumentasi Foto',
         ];
 
-        excelData = rows.map(r => ({
-          'Line': r[1],
-          'Waktu': r[2],
-          'Suhu Masuk': r[4],
-          'Berat Kecil': r[5],
-          'Berat Besar': r[6],
-          'Status Segel': r[7],
+        const flattenedRows = portioningFoodTempData.groups.flatMap(g =>
+          g.rows.map(row => ({ group: g, row }))
+        );
+
+        const filteredRows = searchKeyword.trim()
+          ? flattenedRows.filter(({ group, row }) => {
+              const kw = searchKeyword.toLowerCase();
+              return (
+                group.dayName.toLowerCase().includes(kw) ||
+                group.shortDate.toLowerCase().includes(kw) ||
+                row.jenisBahan.toLowerCase().includes(kw) ||
+                row.namaMenu.toLowerCase().includes(kw) ||
+                group.officerName.toLowerCase().includes(kw)
+              );
+            })
+          : flattenedRows;
+
+        rows = filteredRows.map(({ group, row }) => {
+          const photoCount = [row.sesi1.photoUrl, row.sesi2.photoUrl, row.sesi3.photoUrl].filter(Boolean).length;
+          return [
+            `${group.dayName} ${group.shortDate}`,
+            row.jenisBahan,
+            row.namaMenu,
+            row.dangerZone,
+            row.beratMentahDisplay,
+            row.faktorKonversiDisplay,
+            `${row.beratMatangDisplay} g`,
+            `${row.sesi1.tempDisplay} / ${row.sesi2.tempDisplay} / ${row.sesi3.tempDisplay}`,
+            `${photoCount}/3 Foto`,
+          ];
+        });
+
+        excelData = filteredRows.map(({ group, row }) => ({
+          'Hari': group.dayName,
+          'Tanggal': group.shortDate,
+          'Waktu Pemorsian': group.portioningTime,
+          'Jenis Bahan': row.jenisBahan,
+          'Nama Makanan / Menu': row.namaMenu,
+          'Danger Zone': row.dangerZone,
+          'Berat Mentah': row.beratMentahDisplay,
+          'Faktor Konversi': row.faktorKonversiDisplay,
+          'Berat Matang (g)': row.beratMatangDisplay,
+          'Suhu Sesi 1 (°C)': row.sesi1.tempDisplay,
+          'Suhu Sesi 2 (°C)': row.sesi2.tempDisplay,
+          'Suhu Sesi 3 (°C)': row.sesi3.tempDisplay,
+          'Foto Sesi 1': row.sesi1.photoUrl || '-',
+          'Foto Sesi 2': row.sesi2.photoUrl || '-',
+          'Foto Sesi 3': row.sesi3.photoUrl || '-',
+          'Petugas': group.officerName,
         }));
 
+        const allSessionReadings = filteredRows.flatMap(({ row }) => [row.sesi1, row.sesi2, row.sesi3]);
+        const hotTemps = filteredRows
+          .filter(({ row }) => row.categoryKey !== 'fruit')
+          .flatMap(({ row }) => [row.sesi1.tempNum, row.sesi2.tempNum, row.sesi3.tempNum])
+          .filter((v): v is number => typeof v === 'number');
+        const minHotTemp = hotTemps.length > 0 ? Math.min(...hotTemps) : null;
+        const totalPhotos = allSessionReadings.filter(r => Boolean(r.photoUrl)).length;
+        const latestRec = portioningRecords[0];
+
         metrics = [
-          { label: 'Suhu Terendah Pemorsian', value: '65.0°C', sublabel: 'Aman > 60°C', color: 'text-emerald-700' },
-          { label: 'Akurasi Gramasi', value: '99.4%', color: 'text-blue-700' },
-          { label: 'Total Boks Diproses', value: '1.450 Ompreng', color: 'text-purple-700' },
-          { label: 'Integritas Segel', value: '100% Rapat', color: 'text-slate-700' },
+          {
+            label: 'Suhu Terendah Hidangan Panas',
+            value: minHotTemp !== null ? `${minHotTemp.toFixed(1).replace('.', ',')}°C` : '-',
+            sublabel: minHotTemp !== null && minHotTemp >= 60 ? 'Di Atas Danger Zone (≥60°C)' : 'Pantau Danger Zone (60-5°C)',
+            color: minHotTemp !== null && minHotTemp >= 60 ? 'text-emerald-700' : 'text-amber-700',
+          },
+          {
+            label: 'Sampling Berat Ompreng',
+            value: latestRec ? `${latestRec.smallPortionWeightGrams}g / ${latestRec.largePortionWeightGrams}g` : '-',
+            sublabel: 'Porsi Kecil / Porsi Besar',
+            color: 'text-blue-700',
+          },
+          {
+            label: 'Dokumentasi Foto Sesi 1–3',
+            value: `${totalPhotos} Foto`,
+            sublabel: `Dari ${filteredRows.length} baris standar porsi`,
+            color: 'text-purple-700',
+          },
+          {
+            label: 'Jumlah Hari Tercatat',
+            value: `${portioningFoodTempData.groups.length} Hari`,
+            sublabel: 'Sinkron Divisi Pemorsian',
+            color: 'text-slate-700',
+          },
         ];
-        notes = 'Proses pemorsian menggunakan sarung tangan nitrile steril, celemek, masker, dan hairnet secara ketat.';
+        notes = 'Seluruh standar berat mentah, faktor konversi, berat matang, suhu Sesi 1–3 (°C), dan dokumentasi foto disinkronkan otomatis dari Divisi Pemorsian & Master Menu.';
         break;
       }
 
@@ -1037,113 +1093,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 13. Check List Pemantauan Suhu & Kelembapan Ruang / Gudang (3 Shift + Bukti Foto)
-      case 'suhu_ruang': {
-        headers = [
-          'Tanggal',
-          'Batas Kritis (°C)',
-          'Shift 1 Persiapan (Jam / Suhu / RH)',
-          'Shift 2 Pengolahan (Jam / Suhu / RH)',
-          'Shift 3 Pemorsian (Jam / Suhu / RH)',
-          'Batas Kritis RH',
-          'Bukti Foto (S1/S2/S3)',
-          'Keterangan',
-        ];
-
-        const filteredRows = searchKeyword.trim()
-          ? roomTempChecklistData.rows.filter(r => {
-              const kw = searchKeyword.toLowerCase();
-              return (
-                r.tanggalDisplay.toLowerCase().includes(kw) ||
-                r.keterangan.toLowerCase().includes(kw) ||
-                (r.shift1.officerName || '').toLowerCase().includes(kw) ||
-                (r.shift2.officerName || '').toLowerCase().includes(kw) ||
-                (r.shift3.officerName || '').toLowerCase().includes(kw)
-              );
-            })
-          : roomTempChecklistData.rows;
-
-        rows = filteredRows.map(r => {
-          const uploadedShifts = [
-            r.shift1.photoUrl ? 'S1' : null,
-            r.shift2.photoUrl ? 'S2' : null,
-            r.shift3.photoUrl ? 'S3' : null,
-          ].filter(Boolean);
-          return [
-            r.tanggalDisplay,
-            r.batasKritisSuhu,
-            `${r.shift1.jam} | ${r.shift1.suhuHasil}°C | ${r.shift1.kelembapanHasil}`,
-            `${r.shift2.jam} | ${r.shift2.suhuHasil}°C | ${r.shift2.kelembapanHasil}`,
-            `${r.shift3.jam} | ${r.shift3.suhuHasil}°C | ${r.shift3.kelembapanHasil}`,
-            r.batasKritisKelembapan,
-            `${uploadedShifts.length}/3 Foto (${uploadedShifts.join(', ') || '-'})`,
-            r.keterangan || '-',
-          ];
-        });
-
-        excelData = filteredRows.map(r => ({
-          'Tanggal': r.tanggalDisplay,
-          'Ruang / Unit': roomTempChecklistData.unit.label,
-          'Batas Kritis Suhu (°C)': r.batasKritisSuhu,
-          'Shift 1 Persiapan - Jam': r.shift1.jam,
-          'Shift 1 Persiapan - Suhu (°C)': r.shift1.suhuHasil,
-          'Shift 1 Persiapan - Kelembapan (%)': r.shift1.kelembapanHasil,
-          'Shift 1 Persiapan - Bukti Foto': r.shift1.photoUrl ? 'Terupload' : 'Kosong',
-          'Shift 2 Pengolahan - Jam': r.shift2.jam,
-          'Shift 2 Pengolahan - Suhu (°C)': r.shift2.suhuHasil,
-          'Shift 2 Pengolahan - Kelembapan (%)': r.shift2.kelembapanHasil,
-          'Shift 2 Pengolahan - Bukti Foto': r.shift2.photoUrl ? 'Terupload' : 'Kosong',
-          'Shift 3 Pemorsian - Jam': r.shift3.jam,
-          'Shift 3 Pemorsian - Suhu (°C)': r.shift3.suhuHasil,
-          'Shift 3 Pemorsian - Kelembapan (%)': r.shift3.kelembapanHasil,
-          'Shift 3 Pemorsian - Bukti Foto': r.shift3.photoUrl ? 'Terupload' : 'Kosong',
-          'Batas Kritis Kelembapan': r.batasKritisKelembapan,
-          'Keterangan': r.keterangan || '-',
-        }));
-
-        const totalShiftSlots = roomTempChecklistData.rows.length * 3;
-        const uploadedPhotosCount = roomTempChecklistData.rows.reduce(
-          (sum, r) =>
-            sum +
-            [r.shift1.photoUrl, r.shift2.photoUrl, r.shift3.photoUrl].filter(Boolean).length,
-          0
-        );
-        const latestRow = roomTempChecklistData.rows[roomTempChecklistData.rows.length - 1];
-
-        metrics = [
-          {
-            label: 'Unit / Ruangan Dipantau',
-            value: roomTempChecklistData.unit.shortLabel,
-            sublabel: `Batas Suhu ${roomTempChecklistData.unit.standard}`,
-            color: 'text-sky-700',
-          },
-          {
-            label: 'Periode & Jumlah Hari',
-            value: `${roomTempChecklistData.rows.length} Hari`,
-            sublabel: roomTempChecklistData.periodeLabel,
-            color: 'text-blue-700',
-          },
-          {
-            label: 'Suhu Terkini (S1 / S2 / S3)',
-            value: latestRow
-              ? `${latestRow.shift1.suhuHasil}° / ${latestRow.shift2.suhuHasil}° / ${latestRow.shift3.suhuHasil}°C`
-              : '-',
-            sublabel: latestRow ? `Tanggal ${latestRow.tanggalDisplay}` : 'Belum ada data',
-            color: 'text-indigo-700',
-          },
-          {
-            label: 'Bukti Foto 3 Divisi',
-            value: `${uploadedPhotosCount}/${totalShiftSlots} Foto`,
-            sublabel: 'Persiapan, Pengolahan & Pemorsian',
-            color: 'text-emerald-700',
-          },
-        ];
-        notes =
-          'Checklist pemantauan suhu, kelembapan (%), waktu pencatatan, dan dokumentasi foto Shift 1 (Divisi Persiapan), Shift 2 (Divisi Pengolahan), dan Shift 3 (Divisi Pemorsian) terhubung otomatis ke setiap catatan tugas divisi.';
-        break;
-      }
-
-      // 14. Food Waste
+      // 13. Food Waste
       case 'food_waste': {
         headers = [
           'No',
@@ -1685,8 +1635,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     sppgConfig,
     dynamicFormSchemas,
     organolepticData,
-    roomTempChecklistData,
     cookingFoodTempData,
+    portioningFoodTempData,
   ]);
 
   // Filter Categories
@@ -1705,12 +1655,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       await exportOrganolepticChecklistPDF(organolepticData);
       return;
     }
-    if (activeReportKey === 'suhu_ruang') {
-      await exportRoomTempChecklistPDF(roomTempChecklistData);
-      return;
-    }
     if (activeReportKey === 'suhu_makanan_pengolahan') {
       await exportCookingFoodTempPDF(cookingFoodTempData);
+      return;
+    }
+    if (activeReportKey === 'suhu_makanan_pemorsian') {
+      await exportPortioningFoodTempPDF(portioningFoodTempData);
       return;
     }
 
@@ -1746,10 +1696,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; Checklist Organoleptik, Suhu Ruang & Suhu Pengolahan menggunakan Kop BGN bawaan) */}
+      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; Checklist Organoleptik, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
       {activeReportKey !== 'organoleptik_penerima' &&
-        activeReportKey !== 'suhu_ruang' &&
-        activeReportKey !== 'suhu_makanan_pengolahan' && (
+        activeReportKey !== 'suhu_makanan_pengolahan' &&
+        activeReportKey !== 'suhu_makanan_pemorsian' && (
         <div className="hidden print:block mb-6">
           <PrintHeader
             title={reportPayload.title}
@@ -1782,7 +1732,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             Pusat Laporan & Cetak Resmi SPPG
           </h1>
           <p className="text-sm text-slate-600 mt-1">
-            Pusat administrasi 20 laporan resmi operasional pemenuhan gizi, terhubung otomatis ke relasi ID unik antar-modul dengan pratinjau dan pengesahan sah.
+            Pusat administrasi {REPORT_CONFIGS.length} laporan resmi operasional pemenuhan gizi, terhubung otomatis ke relasi ID unik antar-modul dengan pratinjau dan pengesahan sah.
           </p>
         </div>
 
@@ -2261,111 +2211,6 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <OrganolepticChecklistSheet data={organolepticData} />
               </div>
             </div>
-          ) : activeReportKey === 'suhu_ruang' ? (
-            <div className="space-y-4">
-              {/* Control Bar Khusus Check List Pemantauan Suhu & Kelembapan (Tersembunyi saat Cetak) */}
-              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                      Integrasi Otomatis Suhu, Kelembapan &amp; Bukti Foto 3 Divisi
-                    </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Shift 1 diambil dari Tugas Divisi Persiapan, Shift 2 dari Divisi Pengolahan, dan Shift 3 dari Divisi Pemorsian. Klik foto di tabel untuk memperbesar.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowRoomNotesEditor(v => !v)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-900 text-white hover:bg-blue-800 transition"
-                    >
-                      {showRoomNotesEditor ? 'Tutup Editor Keterangan' : 'Edit Keterangan Harian'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs items-end">
-                  <div className="md:col-span-2">
-                    <label className="block font-semibold text-slate-600 mb-1">
-                      Pilih Ruangan / Gudang / Pendingin yang Dipantau
-                    </label>
-                    <select
-                      value={roomChecklistUnitId}
-                      onChange={e => setRoomChecklistUnitId(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium"
-                    >
-                      {FACILITY_TEMP_UNITS.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.label} ({u.badge} • Batas {u.standard})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="md:col-span-2 flex flex-wrap gap-2">
-                    <span className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 font-medium">
-                      Shift 1 (Persiapan):{' '}
-                      <strong>
-                        {roomTempChecklistData.rows.filter(r => Boolean(r.shift1.photoUrl)).length}/
-                        {roomTempChecklistData.rows.length} Foto
-                      </strong>
-                    </span>
-                    <span className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 font-medium">
-                      Shift 2 (Pengolahan):{' '}
-                      <strong>
-                        {roomTempChecklistData.rows.filter(r => Boolean(r.shift2.photoUrl)).length}/
-                        {roomTempChecklistData.rows.length} Foto
-                      </strong>
-                    </span>
-                    <span className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 font-medium">
-                      Shift 3 (Pemorsian):{' '}
-                      <strong>
-                        {roomTempChecklistData.rows.filter(r => Boolean(r.shift3.photoUrl)).length}/
-                        {roomTempChecklistData.rows.length} Foto
-                      </strong>
-                    </span>
-                  </div>
-                </div>
-
-                {showRoomNotesEditor && (
-                  <div className="pt-3 border-t border-slate-200 space-y-2">
-                    <span className="text-xs font-bold text-slate-700 block">
-                      Isi Kolom Keterangan per Tanggal
-                    </span>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {roomTempChecklistData.rows.map(r => (
-                        <div key={r.isoDate} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200 text-xs">
-                          <span className="font-mono font-semibold text-slate-700 shrink-0">
-                            {r.tanggalDisplay}
-                          </span>
-                          <input
-                            type="text"
-                            value={roomNotesByDate[r.isoDate] ?? ''}
-                            onChange={e =>
-                              setRoomNotesByDate(prev => ({
-                                ...prev,
-                                [r.isoDate]: e.target.value,
-                              }))
-                            }
-                            placeholder="Catatan / keterangan..."
-                            className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Lembar Surat Resmi CHECK LIST PEMANTAUAN SUHU & KELEMBAPAN */}
-              <div className="w-full">
-                <RoomTempChecklistSheet
-                  data={roomTempChecklistData}
-                  onPreviewPhoto={setPreviewPhoto}
-                />
-              </div>
-            </div>
           ) : activeReportKey === 'suhu_makanan_pengolahan' ? (
             <div className="space-y-4">
               {/* Control & Info Bar Integrasi Divisi Pengolahan + Master Menu + Master Relawan (Tersembunyi saat Cetak) */}
@@ -2407,6 +2252,46 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               <div className="w-full">
                 <CookingFoodTempSheet
                   data={cookingFoodTempData}
+                  onPreviewPhoto={setPreviewPhoto}
+                />
+              </div>
+            </div>
+          ) : activeReportKey === 'suhu_makanan_pemorsian' ? (
+            <div className="space-y-4">
+              {/* Control & Info Bar Integrasi Divisi Pemorsian + Master Menu (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    Sinkronisasi Otomatis: Tugas Divisi Pemorsian + Master Menu
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Nama makanan/menu ditarik dari Master Menu, sedangkan standar berat mentah, faktor konversi, berat matang, suhu Sesi 1–3 (°C), dan dokumentasi foto diambil otomatis dari Divisi Pemorsian. Klik foto untuk memperbesar.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 font-medium">
+                      Catatan Pemorsian: <strong>{portioningFoodTempData.groups.length} Hari</strong>
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-700 font-medium">
+                      Standar Danger Zone: <strong>60-5°C</strong>
+                    </span>
+                  </div>
+                </div>
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('production')}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                  >
+                    <span>Input di Divisi Pemorsian</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi PEMANTAUAN STANDAR PORSI & SUHU MAKANAN PEMORSIAN */}
+              <div className="w-full">
+                <PortioningFoodTempSheet
+                  data={portioningFoodTempData}
                   onPreviewPhoto={setPreviewPhoto}
                 />
               </div>
@@ -2547,13 +2432,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* LIST OF ALL 20 REPORTS QUICK SELECTOR GRID */}
+      {/* LIST OF ALL REPORTS QUICK SELECTOR GRID */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Layers className="w-5 h-5 text-blue-600" />
-              Direktori 20 Laporan Resmi SPPG
+              Direktori {REPORT_CONFIGS.length} Laporan Resmi SPPG
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Klik kartu laporan di bawah ini untuk beralih pratinjau dan mencetak dokumen secara langsung.
@@ -2662,15 +2547,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   data={organolepticData}
                   className="max-w-4xl w-full border-slate-300 shadow-md"
                 />
-              ) : activeReportKey === 'suhu_ruang' ? (
-                <RoomTempChecklistSheet
-                  data={roomTempChecklistData}
-                  onPreviewPhoto={setPreviewPhoto}
-                  className="max-w-6xl w-full border-slate-300 shadow-md"
-                />
               ) : activeReportKey === 'suhu_makanan_pengolahan' ? (
                 <CookingFoodTempSheet
                   data={cookingFoodTempData}
+                  onPreviewPhoto={setPreviewPhoto}
+                  className="max-w-6xl w-full border-slate-300 shadow-md"
+                />
+              ) : activeReportKey === 'suhu_makanan_pemorsian' ? (
+                <PortioningFoodTempSheet
+                  data={portioningFoodTempData}
                   onPreviewPhoto={setPreviewPhoto}
                   className="max-w-6xl w-full border-slate-300 shadow-md"
                 />
