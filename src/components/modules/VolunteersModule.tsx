@@ -3,7 +3,19 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
-import { VolunteerAttendance, VolunteerAbsenceRecord } from '../../types';
+import { VolunteerAttendance, VolunteerAbsenceRecord, DynamicFormId } from '../../types';
+import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getInitialCustomFieldValues,
+} from '../../lib/dynamicFormSchemas';
 import {
   Users2,
   Plus,
@@ -44,10 +56,18 @@ export const VolunteersModule: React.FC = () => {
     hasPermission,
     sppgConfig,
     addToast,
+    dynamicFormSchemas,
   } = useApp();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'attendance' | 'absences' | 'directory'>('absences');
+
+  // Dynamic Form Builder States
+  const [isEditingVolSchema, setIsEditingVolSchema] = useState(false);
+  const [builderVolFormId, setBuilderVolFormId] = useState<DynamicFormId>('volunteer_absence_form');
+  const [isModalAbsenceSchemaEdit, setIsModalAbsenceSchemaEdit] = useState(false);
+  const [isModalAttSchemaEdit, setIsModalAttSchemaEdit] = useState(false);
+  const [previewCustomPhoto, setPreviewCustomPhoto] = useState<{ label: string; url: string } | null>(null);
 
   // Attendance Form Modal
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
@@ -72,6 +92,7 @@ export const VolunteersModule: React.FC = () => {
     reason: '',
     replacementVolunteer: '',
     notes: 'Kondisi fit prima, APD celemek, hairnet & sarung tangan lengkap.',
+    customFields: {},
   });
 
   // Absence Form State (Modul Ketidakhadiran Relawan)
@@ -87,6 +108,7 @@ export const VolunteersModule: React.FC = () => {
     replacementDivision: 'Persiapan',
     approvalStatus: 'Menunggu Persetujuan',
     notes: 'Mohon izin tidak hadir dan telah konfirmasi pengganti shift.',
+    customFields: {},
   });
 
   // Search & Filter States
@@ -108,6 +130,14 @@ export const VolunteersModule: React.FC = () => {
   // Submit Absence Request
   const handleSaveAbsence = async (e: React.FormEvent) => {
     e.preventDefault();
+    const validationErr = validateDynamicFormFields(
+      dynamicFormSchemas.volunteer_absence_form,
+      { ...absenceFormData, ...(absenceFormData.customFields || {}) }
+    );
+    if (validationErr) {
+      addToast('error', 'Validasi Form Gagal', validationErr);
+      return;
+    }
     if (!absenceFormData.volunteerName || !absenceFormData.replacementVolunteerName) {
       addToast('error', 'Validasi Gagal', 'Nama relawan dan nama pengganti wajib diisi.');
       return;
@@ -115,6 +145,7 @@ export const VolunteersModule: React.FC = () => {
 
     await addVolunteerAbsence(absenceFormData);
     setIsAbsenceModalOpen(false);
+    setIsModalAbsenceSchemaEdit(false);
 
     // Reset form
     setAbsenceFormData({
@@ -129,6 +160,7 @@ export const VolunteersModule: React.FC = () => {
       replacementDivision: 'Persiapan',
       approvalStatus: 'Menunggu Persetujuan',
       notes: 'Mohon izin tidak hadir dan telah konfirmasi pengganti shift.',
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
     });
   };
 
@@ -150,12 +182,21 @@ export const VolunteersModule: React.FC = () => {
   // Attendance Form Submit
   const handleSaveAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
+    const validationErr = validateDynamicFormFields(
+      dynamicFormSchemas.volunteer_attendance_form,
+      { ...attFormData, ...(attFormData.customFields || {}) }
+    );
+    if (validationErr) {
+      addToast('error', 'Validasi Form Gagal', validationErr);
+      return;
+    }
     if (selectedAtt) {
       await updateAttendance(selectedAtt.id, attFormData);
     } else {
       await recordAttendance(attFormData);
     }
     setIsAttendanceModalOpen(false);
+    setIsModalAttSchemaEdit(false);
   };
 
   // Filtered Absences
@@ -186,11 +227,10 @@ export const VolunteersModule: React.FC = () => {
 
   // Export handlers
   const handleExportAbsencePDF = () => {
-    exportTableToPDF({
-      title: 'LAPORAN KETIDAKHADIRAN & PERGANTIAN RELAWAN SPPG',
-      subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} (ID: ${sppgConfig.sppgId})`,
-      headers: ['Tanggal', 'Nama Relawan', 'Divisi Asal', 'Alasan', 'Relawan Pengganti', 'Divisi Pengganti', 'Status Persetujuan'],
-      rows: filteredAbsences.map(a => [
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.volunteer_absence_form,
+      ['Tanggal', 'Nama Relawan', 'Divisi Asal', 'Alasan', 'Relawan Pengganti', 'Divisi Pengganti', 'Status Persetujuan'],
+      filteredAbsences.map(a => [
         formatIndonesianDate(a.date),
         a.volunteerName,
         a.division,
@@ -199,6 +239,13 @@ export const VolunteersModule: React.FC = () => {
         a.replacementDivision,
         a.approvalStatus,
       ]),
+      filteredAbsences
+    );
+    exportTableToPDF({
+      title: 'LAPORAN KETIDAKHADIRAN & PERGANTIAN RELAWAN SPPG',
+      subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} (ID: ${sppgConfig.sppgId})`,
+      headers,
+      rows,
       fileName: 'Laporan_Ketidakhadiran_Relawan_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
@@ -207,20 +254,74 @@ export const VolunteersModule: React.FC = () => {
   };
 
   const handleExportAbsenceExcel = () => {
-    const data = filteredAbsences.map(a => ({
-      'Tanggal': a.date,
-      'Nama Relawan': a.volunteerName,
-      'Divisi': a.division,
-      'Alasan': a.reason,
-      'Detail Alasan': a.reasonDetails || '-',
-      'Nama Pengganti': a.replacementVolunteerName,
-      'Divisi Pengganti': a.replacementDivision,
-      'Status Persetujuan': a.approvalStatus,
-      'Disetujui Oleh': a.approvedBy || '-',
-      'Tanggal Persetujuan': a.approvedAt || '-',
-      'Alasan Penolakan': a.rejectionReason || '-',
-    }));
+    const data = filteredAbsences.map(a =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.volunteer_absence_form,
+        {
+          'Tanggal': a.date,
+          'Nama Relawan': a.volunteerName,
+          'Divisi': a.division,
+          'Alasan': a.reason,
+          'Detail Alasan': a.reasonDetails || '-',
+          'Nama Pengganti': a.replacementVolunteerName,
+          'Divisi Pengganti': a.replacementDivision,
+          'Status Persetujuan': a.approvalStatus,
+          'Disetujui Oleh': a.approvedBy || '-',
+          'Tanggal Persetujuan': a.approvedAt || '-',
+          'Alasan Penolakan': a.rejectionReason || '-',
+        },
+        a
+      )
+    );
     exportToExcel(data, 'Data_Ketidakhadiran_Relawan_SPPG_TMG2');
+  };
+
+  const handleExportAttendancePDF = () => {
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.volunteer_attendance_form,
+      ['Tanggal', 'Nama Relawan', 'Divisi', 'Shift', 'Status', 'Cek Kesehatan', 'APD Lengkap', 'Catatan'],
+      volunteerAttendance.map(row => [
+        formatIndonesianDate(row.date),
+        row.volunteerName,
+        row.division,
+        row.shift,
+        row.status,
+        row.healthCheckPassed ? 'Sehat' : 'Tidak Sehat',
+        row.hygieneGearComplete ? 'Lengkap' : 'Belum Lengkap',
+        row.notes || '-',
+      ]),
+      volunteerAttendance
+    );
+    exportTableToPDF({
+      title: 'LAPORAN PRESENSI HARIAN & SANITASI RELAWAN SPPG',
+      subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} (ID: ${sppgConfig.sppgId})`,
+      headers,
+      rows,
+      fileName: 'Laporan_Presensi_Relawan_SPPG_TMG2',
+      sppgConfig,
+      signerName: sppgConfig.headOfSppg,
+      signerRole: 'Kepala SPPG Temenggungan 2',
+    });
+  };
+
+  const handleExportAttendanceExcel = () => {
+    const data = volunteerAttendance.map(row =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.volunteer_attendance_form,
+        {
+          'Tanggal': row.date,
+          'Nama Relawan': row.volunteerName,
+          'Divisi': row.division,
+          'Shift': row.shift,
+          'Status': row.status,
+          'Cek Kesehatan': row.healthCheckPassed ? 'Sehat' : 'Tidak Sehat',
+          'APD Lengkap': row.hygieneGearComplete ? 'Ya' : 'Tidak',
+          'Catatan': row.notes || '-',
+        },
+        row
+      )
+    );
+    exportToExcel(data, 'Presensi_Relawan_SPPG_TMG2');
   };
 
   // DataTable Columns for Absence Records
@@ -317,6 +418,10 @@ export const VolunteersModule: React.FC = () => {
         );
       },
     },
+    ...buildDynamicTableColumns<VolunteerAbsenceRecord>(
+      dynamicFormSchemas.volunteer_absence_form,
+      (url, label) => setPreviewCustomPhoto({ url, label })
+    ),
     {
       key: 'actions',
       header: 'Otorisasi & Aksi',
@@ -445,6 +550,10 @@ export const VolunteersModule: React.FC = () => {
         </div>
       ),
     },
+    ...buildDynamicTableColumns<VolunteerAttendance>(
+      dynamicFormSchemas.volunteer_attendance_form,
+      (url, label) => setPreviewCustomPhoto({ url, label })
+    ),
   ];
 
   return (
@@ -481,7 +590,9 @@ export const VolunteersModule: React.FC = () => {
                   replacementDivision: masterVolunteers[0]?.division || 'Persiapan',
                   approvalStatus: 'Menunggu Persetujuan',
                   notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
+                  customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
                 });
+                setIsModalAbsenceSchemaEdit(false);
                 setIsAbsenceModalOpen(true);
               }}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-md transition-all active:scale-95"
@@ -505,7 +616,9 @@ export const VolunteersModule: React.FC = () => {
                   reason: '',
                   replacementVolunteer: '',
                   notes: 'Kondisi fit dan APD lengkap',
+                  customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_attendance_form),
                 });
+                setIsModalAttSchemaEdit(false);
                 setIsAttendanceModalOpen(true);
               }}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm border border-white/20 backdrop-blur-sm transition-all active:scale-95"
@@ -519,6 +632,29 @@ export const VolunteersModule: React.FC = () => {
         {/* Decorative background shape */}
         <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-sky-400/10 rounded-full blur-2xl pointer-events-none" />
       </div>
+
+      {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
+      <DynamicFormEditToggleBar
+        formId={builderVolFormId}
+        isEditing={isEditingVolSchema}
+        onToggleEdit={() => setIsEditingVolSchema(v => !v)}
+        extraSelector={
+          <select
+            value={builderVolFormId}
+            onChange={e => setBuilderVolFormId(e.target.value as DynamicFormId)}
+            className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
+          >
+            <option value="volunteer_absence_form">Form Ketidakhadiran Relawan</option>
+            <option value="volunteer_attendance_form">Form Presensi Harian Relawan</option>
+          </select>
+        }
+      />
+      {isEditingVolSchema && (
+        <DynamicFormBuilderPanel
+          formId={builderVolFormId}
+          onClose={() => setIsEditingVolSchema(false)}
+        />
+      )}
 
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -743,7 +879,8 @@ export const VolunteersModule: React.FC = () => {
             keyExtractor={(item: any) => item.id}
             searchPlaceholder="Cari nama relawan atau divisi..."
             searchKeys={['volunteerName', 'division', 'status', 'notes']}
-            onExportPDF={handleExportAbsencePDF}
+            onExportPDF={handleExportAttendancePDF}
+            onExportExcel={handleExportAttendanceExcel}
             onPrint={triggerPrint}
           />
         </div>
@@ -788,157 +925,82 @@ export const VolunteersModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={isAbsenceModalOpen}
-        onClose={() => setIsAbsenceModalOpen(false)}
+        onClose={() => {
+          setIsAbsenceModalOpen(false);
+          setIsModalAbsenceSchemaEdit(false);
+        }}
         title="Form Pengajuan Ketidakhadiran & Pergantian Relawan"
         maxWidth="3xl"
       >
-        <form onSubmit={handleSaveAbsence} className="space-y-4">
-          <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 p-3 rounded-xl text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
-            <span>
-              Sistem akan memverifikasi bahwa setiap relawan yang tidak hadir memiliki pengganti yang bertugas di divisi terkait agar produksi MBG tetap berjalan lancar.
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Tanggal Ketidakhadiran
-              </label>
-              <input
-                type="date"
-                value={absenceFormData.date}
-                onChange={(e) => setAbsenceFormData({ ...absenceFormData, date: e.target.value })}
-                required
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Relawan yang Berhalangan
-              </label>
-              <select
-                value={absenceFormData.volunteerName}
-                onChange={(e) => handleVolunteerSelect(e.target.value)}
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                {masterVolunteers.map(v => (
-                  <option key={v.id} value={v.name}>
-                    {v.name} (Divisi {v.division})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Divisi Asal Relawan
-              </label>
-              <select
-                value={absenceFormData.division}
-                onChange={(e) => setAbsenceFormData({ ...absenceFormData, division: e.target.value })}
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              >
-                <option value="Persiapan">Persiapan</option>
-                <option value="Pengolahan">Pengolahan</option>
-                <option value="Pemorsian">Pemorsian</option>
-                <option value="Distribusi">Distribusi</option>
-                <option value="Cuci Ompreng">Cuci Ompreng</option>
-                <option value="Kebersihan">Kebersihan</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Alasan Ketidakhadiran
-              </label>
-              <select
-                value={absenceFormData.reason}
-                onChange={(e) => setAbsenceFormData({ ...absenceFormData, reason: e.target.value as any })}
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                <option value="Sakit">Sakit</option>
-                <option value="Izin Keperluan Keluarga">Izin Keperluan Keluarga</option>
-                <option value="Tugas Belajar / Kuliah">Tugas Belajar / Kuliah</option>
-                <option value="Kendala Transportasi / Cuaca">Kendala Transportasi / Cuaca</option>
-                <option value="Kedukaan">Kedukaan</option>
-                <option value="Lainnya">Lainnya</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Rincian Alasan / Keterangan Tambahan
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Contoh: Gejala demam flu ringan, disarankan istirahat demi sanitasi pangan dapur MBG..."
-              value={absenceFormData.reasonDetails || ''}
-              onChange={(e) => setAbsenceFormData({ ...absenceFormData, reasonDetails: e.target.value })}
-              className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+        <div className="space-y-4">
+          <DynamicFormEditToggleBar
+            formId="volunteer_absence_form"
+            isEditing={isModalAbsenceSchemaEdit}
+            onToggleEdit={() => setIsModalAbsenceSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalAbsenceSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="volunteer_absence_form"
+              onClose={() => setIsModalAbsenceSchemaEdit(false)}
             />
-          </div>
+          )}
 
-          {/* Section: Relawan Pengganti Shift */}
-          <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/60 space-y-3">
-            <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200 uppercase tracking-wider flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-emerald-600" />
-              Penunjukan Relawan Pengganti Shift
+          <form onSubmit={handleSaveAbsence} className="space-y-4">
+            <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 p-3 rounded-xl text-xs text-blue-900 dark:text-blue-200 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>
+                Sistem akan memverifikasi bahwa setiap relawan yang tidak hadir memiliki pengganti yang bertugas di divisi terkait agar produksi MBG tetap berjalan lancar.
+              </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Nama Relawan Pengganti
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Bu Anisa / Relawan Cadangan"
-                  value={absenceFormData.replacementVolunteerName}
-                  onChange={(e) => setAbsenceFormData({ ...absenceFormData, replacementVolunteerName: e.target.value })}
-                  required
-                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
-                />
-              </div>
+            <DynamicFormRenderer
+              schema={dynamicFormSchemas.volunteer_absence_form}
+              values={{
+                ...absenceFormData,
+                ...(absenceFormData.customFields || {}),
+              }}
+              dynamicOptions={{
+                volunteerName: masterVolunteers.map(v => ({
+                  value: v.name,
+                  label: `${v.name} (Divisi ${v.division})`,
+                })),
+              }}
+              onChange={(key, value, field) => {
+                if (field.isSystem) {
+                  if (key === 'volunteerName') {
+                    handleVolunteerSelect(String(value));
+                  } else {
+                    setAbsenceFormData(prev => ({ ...prev, [key]: value }));
+                  }
+                } else {
+                  setAbsenceFormData(prev => ({
+                    ...prev,
+                    customFields: { ...(prev.customFields || {}), [key]: value },
+                  }));
+                }
+              }}
+              onPreviewPhoto={url => setPreviewCustomPhoto({ label: 'Preview Foto', url })}
+              onUploadError={msg => addToast('error', 'Upload Gagal', msg)}
+            />
 
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Divisi Relawan Pengganti
-                </label>
-                <select
-                  value={absenceFormData.replacementDivision}
-                  onChange={(e) => setAbsenceFormData({ ...absenceFormData, replacementDivision: e.target.value })}
-                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                >
-                  <option value="Persiapan">Persiapan</option>
-                  <option value="Pengolahan">Pengolahan</option>
-                  <option value="Pemorsian">Pemorsian</option>
-                  <option value="Distribusi">Distribusi</option>
-                  <option value="Cuci Ompreng">Cuci Ompreng</option>
-                  <option value="Kebersihan">Kebersihan</option>
-                </select>
-              </div>
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAbsenceModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-md font-bold"
+              >
+                Simpan Pengajuan Ketidakhadiran
+              </button>
             </div>
-          </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setIsAbsenceModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-md font-bold"
-            >
-              Simpan Pengajuan Ketidakhadiran
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </Modal>
 
       {/* ========================================================================= */}
@@ -994,113 +1056,93 @@ export const VolunteersModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={isAttendanceModalOpen}
-        onClose={() => setIsAttendanceModalOpen(false)}
+        onClose={() => {
+          setIsAttendanceModalOpen(false);
+          setIsModalAttSchemaEdit(false);
+        }}
         title="Catat Presensi Harian Relawan"
         maxWidth="2xl"
       >
-        <form onSubmit={handleSaveAttendance} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Tanggal Presensi
-              </label>
-              <input
-                type="date"
-                value={attFormData.date}
-                onChange={(e) => setAttFormData({ ...attFormData, date: e.target.value })}
-                required
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
+        <div className="space-y-4">
+          <DynamicFormEditToggleBar
+            formId="volunteer_attendance_form"
+            isEditing={isModalAttSchemaEdit}
+            onToggleEdit={() => setIsModalAttSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalAttSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="volunteer_attendance_form"
+              onClose={() => setIsModalAttSchemaEdit(false)}
+            />
+          )}
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Relawan
-              </label>
-              <input
-                type="text"
-                placeholder="Nama relawan..."
-                value={attFormData.volunteerName}
-                onChange={(e) => setAttFormData({ ...attFormData, volunteerName: e.target.value })}
-                required
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
+          <form onSubmit={handleSaveAttendance} className="space-y-4">
+            <DynamicFormRenderer
+              schema={dynamicFormSchemas.volunteer_attendance_form}
+              values={{
+                ...attFormData,
+                ...(attFormData.customFields || {}),
+              }}
+              onChange={(key, value, field) => {
+                if (field.isSystem) {
+                  setAttFormData(prev => ({ ...prev, [key]: value }));
+                } else {
+                  setAttFormData(prev => ({
+                    ...prev,
+                    customFields: { ...(prev.customFields || {}), [key]: value },
+                  }));
+                }
+              }}
+              onPreviewPhoto={url => setPreviewCustomPhoto({ label: 'Preview Foto', url })}
+              onUploadError={msg => addToast('error', 'Upload Gagal', msg)}
+            />
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Divisi Tugas
-              </label>
-              <select
-                value={attFormData.division}
-                onChange={(e) => setAttFormData({ ...attFormData, division: e.target.value as any })}
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAttendanceModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
-                <option value="Persiapan">Persiapan</option>
-                <option value="Pengolahan">Pengolahan</option>
-                <option value="Pemorsian">Pemorsian</option>
-                <option value="Distribusi">Distribusi</option>
-                <option value="Cuci Ompreng">Cuci Ompreng</option>
-                <option value="Kebersihan">Kebersihan</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Status Kehadiran
-              </label>
-              <select
-                value={attFormData.status}
-                onChange={(e) => setAttFormData({ ...attFormData, status: e.target.value as any })}
-                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-md font-bold"
               >
-                <option value="Hadir">Hadir</option>
-                <option value="Izin">Izin</option>
-                <option value="Sakit">Sakit</option>
-                <option value="Alpa">Alpa</option>
-              </select>
+                Simpan Presensi
+              </button>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700">
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={attFormData.healthCheckPassed}
-                onChange={(e) => setAttFormData({ ...attFormData, healthCheckPassed: e.target.checked })}
-                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>Lolos Uji Kesehatan Bebas Flu & Batuk</span>
-            </label>
-
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={attFormData.hygieneGearComplete}
-                onChange={(e) => setAttFormData({ ...attFormData, hygieneGearComplete: e.target.checked })}
-                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              <span>APD Lengkap (Celemek, Hairnet, Sarung Tangan)</span>
-            </label>
-          </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setIsAttendanceModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-md font-bold"
-            >
-              Simpan Presensi
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       </Modal>
+
+      {/* Preview Custom Photo Modal */}
+      {previewCustomPhoto && (
+        <Modal
+          isOpen={Boolean(previewCustomPhoto)}
+          onClose={() => setPreviewCustomPhoto(null)}
+          title={previewCustomPhoto.label}
+          maxWidth="md"
+        >
+          <div className="space-y-3">
+            <img
+              src={previewCustomPhoto.url}
+              alt={previewCustomPhoto.label}
+              className="w-full max-h-96 object-contain rounded-xl border border-slate-200 dark:border-slate-800"
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPreviewCustomPhoto(null)}
+                className="px-4 py-2 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

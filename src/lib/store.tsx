@@ -38,7 +38,14 @@ import {
   QualityControlRecord,
   WebAccessUser,
   WebAccessPolicy,
+  DynamicFormId,
+  DynamicFormSchema,
 } from '../types';
+import {
+  defaultDynamicFormSchemas,
+  mergeDynamicFormSchemas,
+  isDynamicFormAdmin,
+} from './dynamicFormSchemas';
 import {
   hashLoginPassword,
   isProtectedSuperAdminEmail,
@@ -71,7 +78,7 @@ import {
   defaultQualityControlRecords,
 } from './plokData';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 export interface ToastMessage {
@@ -279,6 +286,12 @@ interface AppContextType {
   toasts: ToastMessage[];
   addToast: (type: ToastMessage['type'], title: string, message: string) => void;
   removeToast: (id: string) => void;
+
+  // Dynamic & Editable Form Schema Registry (Admin/Superuser Customizer)
+  dynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>;
+  isAdminUser: boolean;
+  saveDynamicFormSchema: (formId: DynamicFormId, schema: DynamicFormSchema) => Promise<void>;
+  resetDynamicFormSchema: (formId: DynamicFormId) => Promise<void>;
 
   isFirebaseConnected: boolean;
 }
@@ -1491,6 +1504,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : defaultVolunteerAbsences;
   });
 
+  const [dynamicFormSchemas, setDynamicFormSchemas] = useState<Record<DynamicFormId, DynamicFormSchema>>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_dynamic_form_schemas_v1');
+      return saved ? mergeDynamicFormSchemas(JSON.parse(saved)) : defaultDynamicFormSchemas;
+    } catch {
+      return defaultDynamicFormSchemas;
+    }
+  });
+
   const [kitchenProgress, setKitchenProgress] = useState<KitchenProgress>(initialKitchenProgress);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('esppg_dark_mode') === 'true';
@@ -1632,6 +1654,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [webAccessPolicy]);
 
   useEffect(() => {
+    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(dynamicFormSchemas));
+  }, [dynamicFormSchemas]);
+
+  useEffect(() => {
     localStorage.setItem('esppg_dark_mode', String(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -1692,6 +1718,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
         setIsAuthenticated(true);
+        // Load persisted dynamic form schemas from Firestore if available
+        getDoc(doc(db, 'app_settings', 'dynamic_form_schemas'))
+          .then(snap => {
+            if (snap.exists()) {
+              const cloudData = snap.data()?.schemas;
+              if (cloudData && typeof cloudData === 'object') {
+                setDynamicFormSchemas(prev => mergeDynamicFormSchemas({ ...prev, ...cloudData }));
+              }
+            }
+          })
+          .catch(() => {
+            // Keep localStorage schema fallback if offline
+          });
       }
       setAuthReady(true);
     });
@@ -1998,6 +2037,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     await logAudit('UPDATE', 'settings', `Memperbarui kebijakan akses login web`);
     addToast('success', 'Kebijakan Login Tersimpan', 'Pengaturan kontrol akses login berhasil diperbarui.');
+  };
+
+  // Dynamic Form Builder Actions (Admin Utama / Kepala SPPG)
+  const isAdminUser = isDynamicFormAdmin(currentUser.role);
+
+  const saveDynamicFormSchema = async (formId: DynamicFormId, schema: DynamicFormSchema) => {
+    if (!isDynamicFormAdmin(currentUser.role)) {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama / Kepala SPPG yang dapat mengubah struktur form.');
+      return;
+    }
+    const updatedSchema: DynamicFormSchema = {
+      ...schema,
+      formId,
+      version: (schema.version || 1) + 1,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser.name,
+    };
+    const nextMap: Record<DynamicFormId, DynamicFormSchema> = {
+      ...dynamicFormSchemas,
+      [formId]: updatedSchema,
+    };
+    setDynamicFormSchemas(nextMap);
+    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'dynamic_form_schemas'),
+          {
+            id: 'dynamic_form_schemas',
+            sppgId: 'GFBQSYXD',
+            schemas: nextMap,
+            updatedAt: updatedSchema.updatedAt,
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback to LocalStorage
+      }
+    }
+    await logAudit('UPDATE', schema.moduleKey || 'system', `Menyimpan struktur form dinamis: ${schema.title} (${schema.fields.length} field)`);
+    addToast('success', 'Struktur Form Disimpan', `Perubahan pada "${schema.title}" telah tersimpan permanen.`);
+  };
+
+  const resetDynamicFormSchema = async (formId: DynamicFormId) => {
+    if (!isDynamicFormAdmin(currentUser.role)) {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama / Kepala SPPG yang dapat mereset struktur form.');
+      return;
+    }
+    const defaultSchema: DynamicFormSchema = {
+      ...defaultDynamicFormSchemas[formId],
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser.name,
+    };
+    const nextMap: Record<DynamicFormId, DynamicFormSchema> = {
+      ...dynamicFormSchemas,
+      [formId]: defaultSchema,
+    };
+    setDynamicFormSchemas(nextMap);
+    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'dynamic_form_schemas'),
+          {
+            id: 'dynamic_form_schemas',
+            sppgId: 'GFBQSYXD',
+            schemas: nextMap,
+            updatedAt: defaultSchema.updatedAt,
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback
+      }
+    }
+    await logAudit('UPDATE', defaultSchema.moduleKey || 'system', `Mereset struktur form "${defaultSchema.title}" ke pengaturan default`);
+    addToast('info', 'Struktur Form Direset', `"${defaultSchema.title}" dikembalikan ke pengaturan default.`);
   };
 
   // Permission Check
@@ -3235,6 +3355,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toasts,
         addToast,
         removeToast,
+        dynamicFormSchemas,
+        isAdminUser,
+        saveDynamicFormSchema,
+        resetDynamicFormSchema,
         isFirebaseConnected,
       }}
     >

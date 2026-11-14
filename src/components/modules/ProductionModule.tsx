@@ -30,6 +30,17 @@ import {
   FacilityTemperatures,
 } from '../../types';
 import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  formatDynamicFieldValue,
+  getCustomTableFields,
+  getInitialCustomFieldValues,
+} from '../../lib/dynamicFormSchemas';
+import {
   Flame,
   ChefHat,
   Scissors,
@@ -85,14 +96,18 @@ export const ProductionModule: React.FC = () => {
     addWashingWasteRecord,
     beneficiaryAttendance,
     masterVolunteers,
+    menuItems,
     distributionLogs,
     kitchenProgress,
     updateKitchenProgress,
     currentUser,
     addToast,
+    dynamicFormSchemas,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<ProductionTab>('prep');
+  const [isEditingWasteSchema, setIsEditingWasteSchema] = useState(false);
+  const [isModalWasteSchemaEdit, setIsModalWasteSchemaEdit] = useState(false);
 
   // Modals state
   const [isPrepModalOpen, setIsPrepModalOpen] = useState(false);
@@ -241,17 +256,43 @@ export const ProductionModule: React.FC = () => {
   const [cookingForm, setCookingForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     time: '06:15 WIB',
-    officerName: 'Chef Wahyu Ramadhan & Tim Pengolahan',
-    riceTemp: 84.5,
+    officerName: 'Suparman & Hadi Sukamto',
+    menuId: '',
+    riceTemp: 93.5,
     ricePhoto: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
-    animalTemp: 82.0,
+    riceEquipment: 'Rice Steamer Gas 40 Tray',
+    riceS2Temp: '' as string | number,
+    riceS2Photo: '',
+    riceS3Temp: '' as string | number,
+    riceS3Photo: '',
+    animalTemp: 84.6,
     animalPhoto: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
-    plantTemp: 78.5,
+    animalEquipment: 'Wajan Penggorengan A1',
+    animalS2Temp: '' as string | number,
+    animalS2Photo: '',
+    animalS3Temp: '' as string | number,
+    animalS3Photo: '',
+    plantTemp: 82.5,
     plantPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-    vegTemp: 76.2,
+    plantEquipment: 'Wajan Penggorengan A2',
+    plantS2Temp: '' as string | number,
+    plantS2Photo: '',
+    plantS3Temp: '' as string | number,
+    plantS3Photo: '',
+    vegTemp: 87.1,
     vegPhoto: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+    vegEquipment: 'Kettle Sup Uap 200L',
+    vegS2Temp: '' as string | number,
+    vegS2Photo: '',
+    vegS3Temp: '' as string | number,
+    vegS3Photo: '',
     fruitTemp: 18.0,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    fruitEquipment: 'Meja Steril Buah & Pelengkap',
+    fruitS2Temp: '' as string | number,
+    fruitS2Photo: '',
+    fruitS3Temp: '' as string | number,
+    fruitS3Photo: '',
     // Suhu Ruang & 6 Pendingin
     facilityTemps: {
       ...defaultFacilityTemperatures,
@@ -268,16 +309,64 @@ export const ProductionModule: React.FC = () => {
 
   const handleSaveCooking = async (e: React.FormEvent) => {
     e.preventDefault();
+    const toOptNum = (val: string | number) =>
+      val === '' || val === null || val === undefined ? undefined : Number(val);
+    const matchedMenu =
+      (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
+      menuItems.find(m => m.date === cookingForm.date) ||
+      menuItems[0];
+
     await addCookingRecord({
       date: cookingForm.date,
       time: cookingForm.time,
       officerName: cookingForm.officerName,
+      menuId: matchedMenu?.id,
       cookedFoods: {
-        rice: { temp: Number(cookingForm.riceTemp), photoUrl: cookingForm.ricePhoto },
-        animalProtein: { temp: Number(cookingForm.animalTemp), photoUrl: cookingForm.animalPhoto },
-        plantProtein: { temp: Number(cookingForm.plantTemp), photoUrl: cookingForm.plantPhoto },
-        vegetable: { temp: Number(cookingForm.vegTemp), photoUrl: cookingForm.vegPhoto },
-        fruit: { temp: Number(cookingForm.fruitTemp), photoUrl: cookingForm.fruitPhoto },
+        rice: {
+          temp: Number(cookingForm.riceTemp),
+          photoUrl: cookingForm.ricePhoto,
+          equipment: cookingForm.riceEquipment,
+          session2Temp: toOptNum(cookingForm.riceS2Temp),
+          session2PhotoUrl: cookingForm.riceS2Photo || undefined,
+          session3Temp: toOptNum(cookingForm.riceS3Temp),
+          session3PhotoUrl: cookingForm.riceS3Photo || undefined,
+        },
+        animalProtein: {
+          temp: Number(cookingForm.animalTemp),
+          photoUrl: cookingForm.animalPhoto,
+          equipment: cookingForm.animalEquipment,
+          session2Temp: toOptNum(cookingForm.animalS2Temp),
+          session2PhotoUrl: cookingForm.animalS2Photo || undefined,
+          session3Temp: toOptNum(cookingForm.animalS3Temp),
+          session3PhotoUrl: cookingForm.animalS3Photo || undefined,
+        },
+        plantProtein: {
+          temp: Number(cookingForm.plantTemp),
+          photoUrl: cookingForm.plantPhoto,
+          equipment: cookingForm.plantEquipment,
+          session2Temp: toOptNum(cookingForm.plantS2Temp),
+          session2PhotoUrl: cookingForm.plantS2Photo || undefined,
+          session3Temp: toOptNum(cookingForm.plantS3Temp),
+          session3PhotoUrl: cookingForm.plantS3Photo || undefined,
+        },
+        vegetable: {
+          temp: Number(cookingForm.vegTemp),
+          photoUrl: cookingForm.vegPhoto,
+          equipment: cookingForm.vegEquipment,
+          session2Temp: toOptNum(cookingForm.vegS2Temp),
+          session2PhotoUrl: cookingForm.vegS2Photo || undefined,
+          session3Temp: toOptNum(cookingForm.vegS3Temp),
+          session3PhotoUrl: cookingForm.vegS3Photo || undefined,
+        },
+        fruit: {
+          temp: Number(cookingForm.fruitTemp),
+          photoUrl: cookingForm.fruitPhoto,
+          equipment: cookingForm.fruitEquipment,
+          session2Temp: toOptNum(cookingForm.fruitS2Temp),
+          session2PhotoUrl: cookingForm.fruitS2Photo || undefined,
+          session3Temp: toOptNum(cookingForm.fruitS3Temp),
+          session3PhotoUrl: cookingForm.fruitS3Photo || undefined,
+        },
       },
       facilityTemps: {
         ...cookingForm.facilityTemps,
@@ -473,10 +562,27 @@ export const ProductionModule: React.FC = () => {
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
     unit: 'kg',
     notes: 'Sisa nasi kelas 1-2 SD dan kuah sop. Seluruh sisa dialokasikan untuk pakan ternak warga sekitar (Zero Food Waste).',
+    customFields: {} as Record<string, any>,
   });
+
+  const handleOpenWasteModal = () => {
+    setWasteForm(prev => ({
+      ...prev,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.production_waste_form),
+    }));
+    setIsWasteModalOpen(true);
+  };
 
   const handleSaveWaste = async (e: React.FormEvent) => {
     e.preventDefault();
+    const wasteErr = validateDynamicFormFields(dynamicFormSchemas.production_waste_form, {
+      ...wasteForm,
+      ...(wasteForm.customFields || {}),
+    });
+    if (wasteErr) {
+      addToast('error', 'Validasi Form Food Waste', wasteErr);
+      return;
+    }
     const total =
       Number(wasteForm.wasteRice) +
       Number(wasteForm.wasteAnimal) +
@@ -496,8 +602,10 @@ export const ProductionModule: React.FC = () => {
       unit: wasteForm.unit,
       notes: wasteForm.notes,
       sterilizationChecked: true,
+      customFields: wasteForm.customFields || {},
     });
     setIsWasteModalOpen(false);
+    setIsModalWasteSchemaEdit(false);
   };
 
   // Helper temperature badge
@@ -1415,6 +1523,19 @@ export const ProductionModule: React.FC = () => {
       {/* ========================================================= */}
       {activeTab === 'washing' && (
         <div className="space-y-6">
+          {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
+          <DynamicFormEditToggleBar
+            formId="production_waste_form"
+            isEditing={isEditingWasteSchema}
+            onToggleEdit={() => setIsEditingWasteSchema(v => !v)}
+          />
+          {isEditingWasteSchema && (
+            <DynamicFormBuilderPanel
+              formId="production_waste_form"
+              onClose={() => setIsEditingWasteSchema(false)}
+            />
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -1427,7 +1548,7 @@ export const ProductionModule: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={() => setIsWasteModalOpen(true)}
+              onClick={handleOpenWasteModal}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
             >
               <Plus className="w-4 h-4" />
@@ -1548,8 +1669,30 @@ export const ProductionModule: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
-                <strong>Catatan Evaluasi Sisa:</strong> {washingWasteRecords[0].notes}
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                <div>
+                  <strong>Catatan Evaluasi Sisa:</strong> {washingWasteRecords[0].notes}
+                </div>
+                {(() => {
+                  const customFields = getCustomTableFields(dynamicFormSchemas.production_waste_form);
+                  const latestCustom = washingWasteRecords[0].customFields || {};
+                  const filled = customFields.filter(
+                    f => latestCustom[f.key] !== undefined && latestCustom[f.key] !== ''
+                  );
+                  if (filled.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-2 pt-1.5">
+                      {filled.map(f => (
+                        <span
+                          key={f.id}
+                          className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-900/70 border border-amber-300 dark:border-amber-700 text-[11px]"
+                        >
+                          <strong>{f.label}:</strong> {formatDynamicFieldValue(f, latestCustom[f.key])}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -1579,6 +1722,11 @@ export const ProductionModule: React.FC = () => {
                     <th className="py-2.5 px-4 text-right">Total Limbah</th>
                     <th className="py-2.5 px-4">Evaluasi / Alasan</th>
                     <th className="py-2.5 px-4">Foto Sisa Makanan</th>
+                    {getCustomTableFields(dynamicFormSchemas.production_waste_form).map(cf => (
+                      <th key={cf.id} className="py-2.5 px-4 whitespace-nowrap">
+                        {cf.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -1590,6 +1738,7 @@ export const ProductionModule: React.FC = () => {
                       { label: 'Sayur', url: w.wasteVegetable?.photoUrl },
                       { label: 'Buah', url: w.wasteFruit?.photoUrl },
                     ].filter((item): item is { label: string; url: string } => Boolean(item.url && item.url.trim() !== ''));
+                    const customFields = getCustomTableFields(dynamicFormSchemas.production_waste_form);
 
                     return (
                       <tr key={w.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -1633,6 +1782,24 @@ export const ProductionModule: React.FC = () => {
                             <span className="text-[11px] italic text-slate-400">Belum ada foto</span>
                           )}
                         </td>
+                        {customFields.map(cf => {
+                          const val = w.customFields?.[cf.key];
+                          return (
+                            <td key={cf.id} className="py-2.5 px-4">
+                              {cf.type === 'photo' && typeof val === 'string' && val ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewPhotoUrl(val)}
+                                  className="p-0.5 rounded border border-slate-200 dark:border-slate-700 hover:border-blue-500"
+                                >
+                                  <img src={val} alt={cf.label} className="w-8 h-8 object-cover rounded-xs" />
+                                </button>
+                              ) : (
+                                <span>{formatDynamicFieldValue(cf, val)}</span>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
@@ -1945,7 +2112,7 @@ export const ProductionModule: React.FC = () => {
           maxWidth="xl"
         >
           <form onSubmit={handleSaveCooking} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Tanggal</label>
                 <input
@@ -1967,116 +2134,202 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Nama Petugas Pemeriksa</label>
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                  Petugas (Master Relawan Pengolahan)
+                </label>
+                <select
+                  value=""
+                  onChange={e => {
+                    if (e.target.value) setCookingForm(f => ({ ...f, officerName: e.target.value }));
+                  }}
+                  className="w-full px-2.5 py-1.5 mb-1 border rounded-lg bg-slate-50 dark:bg-slate-800 dark:border-slate-700 text-[11px]"
+                >
+                  <option value="">-- Pilih Relawan Div. Pengolahan --</option>
+                  {masterVolunteers
+                    .filter(v => v.isActive && v.division === 'Pengolahan')
+                    .map(v => (
+                      <option key={v.id} value={`${v.name} (${v.position})`}>
+                        {v.name} — {v.position}
+                      </option>
+                    ))}
+                </select>
                 <input
                   type="text"
                   required
                   value={cookingForm.officerName}
                   onChange={e => setCookingForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  className="w-full px-3 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
-            </div>
-
-            {/* Suhu Makanan Matang 5 Jenis */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <CookingPot className="w-4 h-4 text-amber-500" />
-                Input Suhu & Upload Foto Makanan Matang (Standar Inti &gt; 75°C)
-              </span>
-
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                {/* Nasi */}
-                <div>
-                  <label className="block font-semibold mb-1">1. Suhu Nasi (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.riceTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, riceTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, ricePhoto: url })))}
-                    className="w-full text-[10px] mt-1.5"
-                  />
-                </div>
-
-                {/* Hewani */}
-                <div>
-                  <label className="block font-semibold mb-1">2. Lauk Hewani (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.animalTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, animalTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, animalPhoto: url })))}
-                    className="w-full text-[10px] mt-1.5"
-                  />
-                </div>
-
-                {/* Nabati */}
-                <div>
-                  <label className="block font-semibold mb-1">3. Lauk Nabati (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.plantTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, plantTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, plantPhoto: url })))}
-                    className="w-full text-[10px] mt-1.5"
-                  />
-                </div>
-
-                {/* Sayur */}
-                <div>
-                  <label className="block font-semibold mb-1">4. Suhu Sayur (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.vegTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, vegTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, vegPhoto: url })))}
-                    className="w-full text-[10px] mt-1.5"
-                  />
-                </div>
-
-                {/* Buah */}
-                <div>
-                  <label className="block font-semibold mb-1">5. Suhu Buah (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cookingForm.fruitTemp}
-                    onChange={e => setCookingForm(f => ({ ...f, fruitTemp: Number(e.target.value) }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, fruitPhoto: url })))}
-                    className="w-full text-[10px] mt-1.5"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                  Menu Harian (Master Menu)
+                </label>
+                <select
+                  value={
+                    cookingForm.menuId ||
+                    menuItems.find(m => m.date === cookingForm.date)?.id ||
+                    menuItems[0]?.id ||
+                    ''
+                  }
+                  onChange={e => setCookingForm(f => ({ ...f, menuId: e.target.value }))}
+                  className="w-full px-2.5 py-2 border rounded-lg bg-slate-50 dark:bg-slate-800 dark:border-slate-700 text-[11px] font-semibold"
+                >
+                  {menuItems.map(m => (
+                    <option key={m.id} value={m.id}>
+                      [{m.menuCode}] {m.dayName} ({m.date})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
+
+            {/* Suhu Makanan Matang 5 Jenis (Sesi 1, Sesi 2, Sesi 3 + Peralatan Masak) */}
+            {(() => {
+              const selectedMenu =
+                (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
+                menuItems.find(m => m.date === cookingForm.date) ||
+                menuItems[0];
+
+              const foodFields = [
+                {
+                  label: '1. Makanan Pokok (Nasi)',
+                  menuTitle: selectedMenu?.stapleFood || '-',
+                  tempKey: 'riceTemp' as const,
+                  photoKey: 'ricePhoto' as const,
+                  equipKey: 'riceEquipment' as const,
+                  s2TempKey: 'riceS2Temp' as const,
+                  s2PhotoKey: 'riceS2Photo' as const,
+                  s3TempKey: 'riceS3Temp' as const,
+                  s3PhotoKey: 'riceS3Photo' as const,
+                },
+                {
+                  label: '2. Lauk Hewani',
+                  menuTitle: selectedMenu?.animalProtein || '-',
+                  tempKey: 'animalTemp' as const,
+                  photoKey: 'animalPhoto' as const,
+                  equipKey: 'animalEquipment' as const,
+                  s2TempKey: 'animalS2Temp' as const,
+                  s2PhotoKey: 'animalS2Photo' as const,
+                  s3TempKey: 'animalS3Temp' as const,
+                  s3PhotoKey: 'animalS3Photo' as const,
+                },
+                {
+                  label: '3. Lauk Nabati',
+                  menuTitle: selectedMenu?.plantProtein || '-',
+                  tempKey: 'plantTemp' as const,
+                  photoKey: 'plantPhoto' as const,
+                  equipKey: 'plantEquipment' as const,
+                  s2TempKey: 'plantS2Temp' as const,
+                  s2PhotoKey: 'plantS2Photo' as const,
+                  s3TempKey: 'plantS3Temp' as const,
+                  s3PhotoKey: 'plantS3Photo' as const,
+                },
+                {
+                  label: '4. Sayur',
+                  menuTitle: selectedMenu?.vegetable || '-',
+                  tempKey: 'vegTemp' as const,
+                  photoKey: 'vegPhoto' as const,
+                  equipKey: 'vegEquipment' as const,
+                  s2TempKey: 'vegS2Temp' as const,
+                  s2PhotoKey: 'vegS2Photo' as const,
+                  s3TempKey: 'vegS3Temp' as const,
+                  s3PhotoKey: 'vegS3Photo' as const,
+                },
+                {
+                  label: '5. Lainnya / Buah',
+                  menuTitle: selectedMenu?.fruit || selectedMenu?.milkOrExtra || '-',
+                  tempKey: 'fruitTemp' as const,
+                  photoKey: 'fruitPhoto' as const,
+                  equipKey: 'fruitEquipment' as const,
+                  s2TempKey: 'fruitS2Temp' as const,
+                  s2PhotoKey: 'fruitS2Photo' as const,
+                  s3TempKey: 'fruitS3Temp' as const,
+                  s3PhotoKey: 'fruitS3Photo' as const,
+                },
+              ];
+
+              return (
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
+                  <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                    <CookingPot className="w-4 h-4 text-amber-500" />
+                    Input Suhu, Peralatan &amp; Dokumentasi Sesi 1–3 (Standar Inti ≥ 75°C)
+                  </span>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                    {foodFields.map(ff => (
+                      <div key={ff.tempKey} className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+                        <div>
+                          <label className="block font-bold text-slate-800 dark:text-slate-100">{ff.label}</label>
+                          <p className="text-[10px] text-blue-700 dark:text-sky-400 font-medium line-clamp-1" title={ff.menuTitle}>
+                            Menu: {ff.menuTitle}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 font-semibold">Peralatan Masak</label>
+                          <input
+                            type="text"
+                            value={cookingForm[ff.equipKey]}
+                            onChange={e => setCookingForm(f => ({ ...f, [ff.equipKey]: e.target.value }))}
+                            className="w-full px-2 py-1 border rounded text-[11px] dark:bg-slate-800"
+                          />
+                        </div>
+                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+                          <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">Sesi 1 (°C &amp; Foto)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={cookingForm[ff.tempKey]}
+                            onChange={e => setCookingForm(f => ({ ...f, [ff.tempKey]: Number(e.target.value) }))}
+                            className="w-full px-2 py-1 border rounded font-mono text-xs dark:bg-slate-800 mt-0.5"
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.photoKey]: url })))}
+                            className="w-full text-[10px] mt-1"
+                          />
+                        </div>
+                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 2 (Opsional)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="Suhu Sesi 2 (°C)"
+                            value={cookingForm[ff.s2TempKey]}
+                            onChange={e => setCookingForm(f => ({ ...f, [ff.s2TempKey]: e.target.value }))}
+                            className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 mt-0.5"
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.s2PhotoKey]: url })))}
+                            className="w-full text-[10px] mt-1"
+                          />
+                        </div>
+                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 3 (Opsional)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="Suhu Sesi 3 (°C)"
+                            value={cookingForm[ff.s3TempKey]}
+                            onChange={e => setCookingForm(f => ({ ...f, [ff.s3TempKey]: e.target.value }))}
+                            className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 mt-0.5"
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.s3PhotoKey]: url })))}
+                            className="w-full text-[10px] mt-1"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Suhu Ruang & 6 Pendingin + Upload Foto */}
             <FacilityTempModalGrid
@@ -2731,43 +2984,50 @@ export const ProductionModule: React.FC = () => {
       {isWasteModalOpen && (
         <Modal
           isOpen={isWasteModalOpen}
-          onClose={() => setIsWasteModalOpen(false)}
+          onClose={() => {
+            setIsWasteModalOpen(false);
+            setIsModalWasteSchemaEdit(false);
+          }}
           title="Input Audit Sampah Makanan (Food Waste) Cuci Ompreng"
           maxWidth="xl"
         >
           <form onSubmit={handleSaveWaste} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block font-bold mb-1">Tanggal</label>
-                <input
-                  type="date"
-                  required
-                  value={wasteForm.date}
-                  onChange={e => setWasteForm(f => ({ ...f, date: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1">Waktu Pemeriksaan</label>
-                <input
-                  type="text"
-                  required
-                  value={wasteForm.time}
-                  onChange={e => setWasteForm(f => ({ ...f, time: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1">Petugas Sanitasi</label>
-                <input
-                  type="text"
-                  required
-                  value={wasteForm.officerName}
-                  onChange={e => setWasteForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
-              </div>
-            </div>
+            <DynamicFormEditToggleBar
+              formId="production_waste_form"
+              isEditing={isModalWasteSchemaEdit}
+              onToggleEdit={() => setIsModalWasteSchemaEdit(v => !v)}
+              compact
+            />
+            {isModalWasteSchemaEdit && (
+              <DynamicFormBuilderPanel
+                formId="production_waste_form"
+                onClose={() => setIsModalWasteSchemaEdit(false)}
+              />
+            )}
+
+            <DynamicFormRenderer
+              schema={dynamicFormSchemas.production_waste_form}
+              values={{
+                ...wasteForm,
+                ...(wasteForm.customFields || {}),
+              }}
+              excludeKeys={['notes']}
+              onChange={(key, value, field) => {
+                if (field.isSystem) {
+                  setWasteForm(f => ({ ...f, [key]: value }));
+                } else {
+                  setWasteForm(f => ({
+                    ...f,
+                    customFields: {
+                      ...(f.customFields || {}),
+                      [key]: value,
+                    },
+                  }));
+                }
+              }}
+              onPreviewPhoto={url => setViewPhotoUrl(url)}
+              onUploadError={handleUploadError}
+            />
 
             {/* 5 Kategori Food Waste */}
             <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
@@ -2879,20 +3139,31 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block font-bold mb-1">Catatan Evaluasi / Penyebab Sisa Makanan</label>
-              <textarea
-                rows={2}
-                value={wasteForm.notes}
-                onChange={e => setWasteForm(f => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-              />
-            </div>
+            {dynamicFormSchemas.production_waste_form.fields.some(f => f.key === 'notes') && (
+              <div>
+                <label className="block font-bold mb-1">
+                  {dynamicFormSchemas.production_waste_form.fields.find(f => f.key === 'notes')?.label ||
+                    'Catatan Evaluasi / Penyebab Sisa Makanan'}
+                </label>
+                <textarea
+                  rows={2}
+                  value={wasteForm.notes}
+                  onChange={e => setWasteForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder={
+                    dynamicFormSchemas.production_waste_form.fields.find(f => f.key === 'notes')?.placeholder || ''
+                  }
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                />
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 type="button"
-                onClick={() => setIsWasteModalOpen(false)}
+                onClick={() => {
+                  setIsWasteModalOpen(false);
+                  setIsModalWasteSchemaEdit(false);
+                }}
                 className="px-4 py-2 border rounded-xl"
               >
                 Batal

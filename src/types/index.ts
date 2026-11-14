@@ -148,6 +148,7 @@ export interface Institution {
   deliveryOrder: number;
   allergiesNote?: string;
   isActive: boolean;
+  customFields?: Record<string, any>;
 }
 
 // Master B: Master Bahan Pangan
@@ -243,6 +244,7 @@ export interface BeneficiaryAttendanceLog {
   notes?: string;
   recordedBy: string;
   bastConfirmed: boolean;
+  customFields?: Record<string, any>;
 }
 
 export interface BeneficiaryQuotaHistory {
@@ -287,6 +289,7 @@ export interface MenuItem {
   approvedBy?: string;
   notes?: string;
   ingredients?: RecipeIngredient[];
+  customFields?: Record<string, any>;
 }
 
 // Submodul PLOG: Perencanaan Menu, Bahan, Gizi, Food Cost, & Jobdesk Divisi
@@ -412,6 +415,7 @@ export interface StockMutation {
   notes: string;
   operatorName: string;
   recipientOrDepartment?: string;
+  customFields?: Record<string, any>;
 }
 
 export interface StockOpnameRecord {
@@ -448,6 +452,7 @@ export interface InventoryItem {
   expiryDate: string;
   qualityStatus: 'Baik' | 'Perlu Pemantauan' | 'Kadaluarsa';
   batches?: StockBatch[];
+  customFields?: Record<string, any>;
 }
 
 // Submodul PLOK: Perencanaan dan Pelaporan Operasional (RAB, PO, QC)
@@ -471,6 +476,7 @@ export interface RABItem {
   approvedAt?: string;
   poCreatedQuantity?: number;
   poCreatedAmount?: number;
+  customFields?: Record<string, any>;
 }
 
 export type POStatusPLOK =
@@ -587,6 +593,7 @@ export interface DistributionLog {
   photoEvidenceUrl?: string;
   bastNumber?: string;
   notes?: string;
+  customFields?: Record<string, any>;
 }
 
 export type FinancialApprovalStatus = 'Draft' | 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak' | 'Dibatalkan';
@@ -628,6 +635,7 @@ export interface FinancialTransaction {
   cancelledBy?: string;
   cancelledAt?: string;
   notes?: string;
+  customFields?: Record<string, any>;
 }
 
 export interface VolunteerAttendance {
@@ -643,6 +651,7 @@ export interface VolunteerAttendance {
   replacementVolunteer?: string;
   reason?: string;
   notes?: string;
+  customFields?: Record<string, any>;
 }
 
 export type AbsenceApprovalStatus = 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak';
@@ -665,6 +674,7 @@ export interface VolunteerAbsenceRecord {
   attachmentUrl?: string;
   notes?: string;
   createdAt: string;
+  customFields?: Record<string, any>;
 }
 
 export interface OfficialLetter {
@@ -727,6 +737,7 @@ export interface FacilityTemperatures {
   fridge3Photo?: string;
   fridge4Temp: number; // Kulkas 4 Bumbu Basah (4 s/d 6°C)
   fridge4Photo?: string;
+  humidityMap?: Record<string, number>; // Kelembapan (%) per key ruangan/pendingin
 }
 
 export interface DamagedMaterialItem {
@@ -755,6 +766,11 @@ export interface CookedFoodItem {
   temp: number;
   photoUrl?: string;
   notes?: string;
+  equipment?: string;
+  session2Temp?: number;
+  session2PhotoUrl?: string;
+  session3Temp?: number;
+  session3PhotoUrl?: string;
 }
 
 export interface CookingInspectionRecord {
@@ -762,6 +778,7 @@ export interface CookingInspectionRecord {
   date: string;
   time: string;
   officerName: string;
+  menuId?: string;
   cookedFoods: {
     rice: CookedFoodItem;
     animalProtein: CookedFoodItem;
@@ -816,6 +833,7 @@ export interface DistributionDeliveryRecord {
   status: 'Dalam Perjalanan' | 'Tiba di Lokasi' | 'Selesai Serah Terima';
   facilityTemps?: FacilityTemperatures;
   notes: string;
+  customFields?: Record<string, any>;
 }
 
 export interface OmprengReturnRecord {
@@ -875,6 +893,7 @@ export interface WashingWasteRecord {
   facilityTemps?: FacilityTemperatures;
   notes: string;
   sterilizationChecked: boolean;
+  customFields?: Record<string, any>;
 }
 
 // -------------------------------------------------------------
@@ -979,6 +998,59 @@ export interface ReportMetaConfig {
   sourceModule: string;
   defaultOrientation: 'portrait' | 'landscape';
   approverRole: string;
+}
+
+// -------------------------------------------------------------
+// DYNAMIC & EDITABLE FORM BUILDER (JSON SCHEMA CONFIGURATION)
+// -------------------------------------------------------------
+export type DynamicFieldType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'checkbox'
+  | 'radio'
+  | 'textarea'
+  | 'photo';
+
+export interface DynamicFormField {
+  id: string;
+  key: string;
+  label: string;
+  type: DynamicFieldType;
+  placeholder?: string;
+  helperText?: string;
+  required: boolean;
+  options?: string[];
+  defaultValue?: string | number | boolean;
+  isSystem?: boolean;
+  showInTable?: boolean;
+  width?: 'half' | 'full';
+}
+
+export type DynamicFormId =
+  | 'institution_form'
+  | 'beneficiary_attendance_form'
+  | 'menu_form'
+  | 'distribution_dispatch_form'
+  | 'distribution_report_form'
+  | 'finance_tx_form'
+  | 'volunteer_absence_form'
+  | 'volunteer_attendance_form'
+  | 'inventory_item_form'
+  | 'inventory_mutation_form'
+  | 'procurement_rab_form'
+  | 'production_waste_form';
+
+export interface DynamicFormSchema {
+  formId: DynamicFormId;
+  title: string;
+  description: string;
+  moduleKey: ModuleKey;
+  version: number;
+  updatedAt: string;
+  updatedBy?: string;
+  fields: DynamicFormField[];
 }
 
 

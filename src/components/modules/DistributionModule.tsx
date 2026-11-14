@@ -9,7 +9,19 @@ import {
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint } from '../../lib/exportUtils';
-import { DistributionLog } from '../../types';
+import { DistributionLog, DynamicFormId } from '../../types';
+import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getInitialCustomFieldValues,
+} from '../../lib/dynamicFormSchemas';
 import {
   Truck,
   Plus,
@@ -35,6 +47,8 @@ export const DistributionModule: React.FC = () => {
     currentUser,
     hasPermission,
     sppgConfig,
+    dynamicFormSchemas,
+    addToast,
   } = useApp();
 
   const [selectedLog, setSelectedLog] = useState<DistributionLog | null>(null);
@@ -42,6 +56,10 @@ export const DistributionModule: React.FC = () => {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [bastReturnTimeInput, setBastReturnTimeInput] = useState('');
+  const [isEditingDistSchema, setIsEditingDistSchema] = useState(false);
+  const [distBuilderFormId, setDistBuilderFormId] = useState<DynamicFormId>('distribution_dispatch_form');
+  const [isDispatchModalEdit, setIsDispatchModalEdit] = useState(false);
+  const [isReportModalEdit, setIsReportModalEdit] = useState(false);
 
   // Status Update Form State
   const [newStatus, setNewStatus] = useState<DistributionLog['status']>('Selesai Serah Terima');
@@ -49,7 +67,9 @@ export const DistributionModule: React.FC = () => {
   const [newReceivedBy, setNewReceivedBy] = useState('Drs. Slamet Hariyanto');
   const [newReceiverTitle, setNewReceiverTitle] = useState('Kepala Sekolah');
   const [arrivalTemp, setArrivalTemp] = useState<number>(64.5);
+  const [photoEvidenceUrl, setPhotoEvidenceUrl] = useState<string>('');
   const [notesInput, setNotesInput] = useState('Diterima utuh tanpa cacat, porsi dihitung bersama tim guru.');
+  const [reportCustomFields, setReportCustomFields] = useState<Record<string, any>>({});
 
   // Create Form State
   const [institutionId, setInstitutionId] = useState(institutions[0]?.id || '');
@@ -57,6 +77,9 @@ export const DistributionModule: React.FC = () => {
   const [driverName, setDriverName] = useState('Agus Santoso');
   const [departureTime, setDepartureTime] = useState('08:30 WIB');
   const [dispatchTemp, setDispatchTemp] = useState<number>(68.0);
+  const [dispatchCustomFields, setDispatchCustomFields] = useState<Record<string, any>>(
+    getInitialCustomFieldValues(dynamicFormSchemas.distribution_dispatch_form)
+  );
 
   const handleOpenUpdate = (log: DistributionLog) => {
     const matchedInst = institutions.find(i => i.id === log.institutionId);
@@ -66,7 +89,12 @@ export const DistributionModule: React.FC = () => {
     setNewReceivedBy(log.receivedBy || matchedInst?.picName || matchedInst?.contactPerson || '');
     setNewReceiverTitle(log.receiverTitle || 'PIC Penerima Manfaat / Kepala Sekolah');
     setArrivalTemp(log.foodTempAtArrival || 64.0);
+    setPhotoEvidenceUrl(log.photoEvidenceUrl || '');
     setNotesInput(log.notes || '');
+    setReportCustomFields(
+      getInitialCustomFieldValues(dynamicFormSchemas.distribution_report_form, log.customFields)
+    );
+    setIsReportModalEdit(false);
     setIsUpdateOpen(true);
   };
 
@@ -78,6 +106,21 @@ export const DistributionModule: React.FC = () => {
 
   const handleSaveStatus = async () => {
     if (!selectedLog) return;
+    const err = validateDynamicFormFields(dynamicFormSchemas.distribution_report_form, {
+      status: newStatus,
+      arrivalTime: newArrivalTime,
+      foodTempAtArrival: arrivalTemp,
+      receivedBy: newReceivedBy,
+      receiverTitle: newReceiverTitle,
+      photoEvidenceUrl,
+      notes: notesInput,
+      ...reportCustomFields,
+    });
+    if (err) {
+      addToast('error', 'Validasi Laporan Distribusi', err);
+      return;
+    }
+
     const bastNumber =
       selectedLog.bastNumber ||
       generateBastNumber(191 + (institutions.findIndex(i => i.id === selectedLog.institutionId) + 1 || 1), selectedLog.date);
@@ -87,14 +130,32 @@ export const DistributionModule: React.FC = () => {
       receivedBy: newReceivedBy,
       receiverTitle: newReceiverTitle,
       foodTempAtArrival: arrivalTemp,
+      photoEvidenceUrl: photoEvidenceUrl || undefined,
       notes: notesInput,
       bastNumber,
+      customFields: {
+        ...(selectedLog.customFields || {}),
+        ...reportCustomFields,
+      },
     });
     setIsUpdateOpen(false);
   };
 
   const handleCreateDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    const err = validateDynamicFormFields(dynamicFormSchemas.distribution_dispatch_form, {
+      institutionId,
+      vehicleNumber,
+      driverName,
+      departureTime,
+      foodTempAtDispatch: dispatchTemp,
+      ...dispatchCustomFields,
+    });
+    if (err) {
+      addToast('error', 'Validasi Keberangkatan Armada', err);
+      return;
+    }
+
     const inst = institutions.find(i => i.id === institutionId) || institutions[0];
     await addDistributionLog({
       date: new Date().toISOString().slice(0, 10),
@@ -110,25 +171,45 @@ export const DistributionModule: React.FC = () => {
       foodTempAtDispatch: dispatchTemp,
       status: 'Dalam Perjalanan',
       notes: 'Boks termal tersegel rapi.',
+      customFields: dispatchCustomFields,
     });
+    setDispatchCustomFields(
+      getInitialCustomFieldValues(dynamicFormSchemas.distribution_dispatch_form)
+    );
     setIsCreateOpen(false);
   };
 
-  // Export handlers
+  // Export handlers (Auto-synced with custom fields from both distribution forms)
+  const mergedDistCustomSchema = {
+    ...dynamicFormSchemas.distribution_report_form,
+    fields: [
+      ...dynamicFormSchemas.distribution_dispatch_form.fields.filter(f => !f.isSystem),
+      ...dynamicFormSchemas.distribution_report_form.fields,
+    ],
+  };
+
   const handleExportPDF = () => {
+    const baseHeaders = ['Sekolah Sasaran', 'Porsi', 'Armada & Supir', 'Jam Berangkat / Tiba', 'Suhu (°C)', 'Penerima', 'Status'];
+    const baseRows = distributionLogs.map(d => [
+      d.institutionName,
+      `${formatNumber(d.totalPortions)} (${d.smallPortions}K / ${d.largePortions}B)`,
+      `${d.vehicleNumber} - ${d.driverName}`,
+      `${d.departureTime} / ${d.arrivalTime}`,
+      `${d.foodTempAtDispatch}°C -> ${d.foodTempAtArrival || '-'}°C`,
+      d.receivedBy || 'Belum Diterima',
+      d.status,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      mergedDistCustomSchema,
+      baseHeaders,
+      baseRows,
+      distributionLogs
+    );
     exportTableToPDF({
       title: 'Laporan Rekapitulasi Distribusi & Pengiriman MBG',
       subtitle: `Satuan Pelayanan Pemenuhan Gizi (SPPG) Probolinggo Krejengan Temenggungan 2`,
-      headers: ['Sekolah Sasaran', 'Porsi', 'Armada & Supir', 'Jam Berangkat / Tiba', 'Suhu (°C)', 'Penerima', 'Status'],
-      rows: distributionLogs.map(d => [
-        d.institutionName,
-        `${formatNumber(d.totalPortions)} (${d.smallPortions}K / ${d.largePortions}B)`,
-        `${d.vehicleNumber} - ${d.driverName}`,
-        `${d.departureTime} / ${d.arrivalTime}`,
-        `${d.foodTempAtDispatch}°C -> ${d.foodTempAtArrival || '-'}°C`,
-        d.receivedBy || 'Belum Diterima',
-        d.status,
-      ]),
+      headers,
+      rows,
       fileName: 'Rekap_Distribusi_Armada_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
@@ -137,23 +218,29 @@ export const DistributionModule: React.FC = () => {
   };
 
   const handleExportExcel = () => {
-    const dataToExport = distributionLogs.map(d => ({
-      'Tanggal': d.date,
-      'Nama Sekolah': d.institutionName,
-      'Porsi Kecil': d.smallPortions,
-      'Porsi Besar': d.largePortions,
-      'Total Porsi': d.totalPortions,
-      'Armada Kendaraan': d.vehicleNumber,
-      'Nama Pengemudi': d.driverName,
-      'Waktu Berangkat': d.departureTime,
-      'Waktu Tiba': d.arrivalTime,
-      'Suhu Keberangkatan (°C)': d.foodTempAtDispatch,
-      'Suhu Tiba (°C)': d.foodTempAtArrival || '-',
-      'Nama Penerima': d.receivedBy || '-',
-      'Jabatan Penerima': d.receiverTitle || '-',
-      'Nomor BAST': d.bastNumber || '-',
-      'Status': d.status,
-    }));
+    const dataToExport = distributionLogs.map(d =>
+      appendDynamicExcelFields(
+        mergedDistCustomSchema,
+        {
+          'Tanggal': d.date,
+          'Nama Sekolah': d.institutionName,
+          'Porsi Kecil': d.smallPortions,
+          'Porsi Besar': d.largePortions,
+          'Total Porsi': d.totalPortions,
+          'Armada Kendaraan': d.vehicleNumber,
+          'Nama Pengemudi': d.driverName,
+          'Waktu Berangkat': d.departureTime,
+          'Waktu Tiba': d.arrivalTime,
+          'Suhu Keberangkatan (°C)': d.foodTempAtDispatch,
+          'Suhu Tiba (°C)': d.foodTempAtArrival || '-',
+          'Nama Penerima': d.receivedBy || '-',
+          'Jabatan Penerima': d.receiverTitle || '-',
+          'Nomor BAST': d.bastNumber || '-',
+          'Status': d.status,
+        },
+        d
+      )
+    );
     exportToExcel(dataToExport, 'Distribusi_MBG_SPPG_TMG2', 'Data Distribusi');
   };
 
@@ -239,6 +326,7 @@ export const DistributionModule: React.FC = () => {
         );
       },
     },
+    ...buildDynamicTableColumns<DistributionLog>(mergedDistCustomSchema),
     {
       key: 'actions',
       header: 'Aksi & Surat Jalan',
@@ -285,7 +373,13 @@ export const DistributionModule: React.FC = () => {
         {hasPermission('distribution', 'create') && (
           <button
             type="button"
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => {
+              setDispatchCustomFields(
+                getInitialCustomFieldValues(dynamicFormSchemas.distribution_dispatch_form)
+              );
+              setIsDispatchModalEdit(false);
+              setIsCreateOpen(true);
+            }}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
@@ -293,6 +387,30 @@ export const DistributionModule: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Dynamic & Editable Form Toggle Bar (Admin/Superuser Only) */}
+      <DynamicFormEditToggleBar
+        formId={distBuilderFormId}
+        isEditing={isEditingDistSchema}
+        onToggleEdit={() => setIsEditingDistSchema(v => !v)}
+        extraSelector={
+          <select
+            value={distBuilderFormId}
+            onChange={e => setDistBuilderFormId(e.target.value as DynamicFormId)}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+          >
+            <option value="distribution_dispatch_form">Form Keberangkatan Armada</option>
+            <option value="distribution_report_form">Form Laporan Serah Terima</option>
+          </select>
+        }
+      />
+
+      {isEditingDistSchema && (
+        <DynamicFormBuilderPanel
+          formId={distBuilderFormId}
+          onClose={() => setIsEditingDistSchema(false)}
+        />
+      )}
 
       {/* Fleet Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -343,86 +461,55 @@ export const DistributionModule: React.FC = () => {
         onPrint={triggerPrint}
       />
 
-      {/* Modal: Dispatch New Fleet */}
+      {/* Modal: Dispatch New Fleet (Dynamic & Editable Form) */}
       <Modal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         title="Catat Keberangkatan Armada Distribusi"
         subtitle="Pemberangkatan kloter pengiriman makanan siap saji ke sekolah"
-        maxWidth="md"
+        maxWidth="2xl"
       >
         <form onSubmit={handleCreateDispatch} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Pilih Lembaga Tujuan *
-            </label>
-            <select
-              value={institutionId}
-              onChange={e => setInstitutionId(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            >
-              {institutions.map(inst => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.name} ({formatNumber(inst.totalPortions)} porsi)
-                </option>
-              ))}
-            </select>
-          </div>
+          <DynamicFormEditToggleBar
+            formId="distribution_dispatch_form"
+            isEditing={isDispatchModalEdit}
+            onToggleEdit={() => setIsDispatchModalEdit(v => !v)}
+            compact
+          />
+          {isDispatchModalEdit && (
+            <DynamicFormBuilderPanel
+              formId="distribution_dispatch_form"
+              onClose={() => setIsDispatchModalEdit(false)}
+            />
+          )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                No. Kendaraan / Armada *
-              </label>
-              <input
-                type="text"
-                required
-                value={vehicleNumber}
-                onChange={e => setVehicleNumber(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Pengemudi *
-              </label>
-              <input
-                type="text"
-                required
-                value={driverName}
-                onChange={e => setDriverName(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jam Keberangkatan *
-              </label>
-              <input
-                type="text"
-                required
-                value={departureTime}
-                onChange={e => setDepartureTime(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Suhu Berangkat (°C) *
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                required
-                value={dispatchTemp}
-                onChange={e => setDispatchTemp(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-emerald-600 font-bold"
-              />
-            </div>
-          </div>
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.distribution_dispatch_form}
+            values={{
+              institutionId,
+              vehicleNumber,
+              driverName,
+              departureTime,
+              foodTempAtDispatch: dispatchTemp,
+              ...dispatchCustomFields,
+            }}
+            dynamicOptions={{
+              institutionId: institutions.map(inst => ({
+                value: inst.id,
+                label: `${inst.name} (${formatNumber(inst.totalPortions)} porsi)`,
+              })),
+            }}
+            onChange={(key, value, field) => {
+              if (!field.isSystem) {
+                setDispatchCustomFields(prev => ({ ...prev, [key]: value }));
+              } else if (key === 'institutionId') setInstitutionId(value);
+              else if (key === 'vehicleNumber') setVehicleNumber(value);
+              else if (key === 'driverName') setDriverName(value);
+              else if (key === 'departureTime') setDepartureTime(value);
+              else if (key === 'foodTempAtDispatch') setDispatchTemp(Number(value));
+            }}
+            onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+          />
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
@@ -442,103 +529,64 @@ export const DistributionModule: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Modal: Update BAST & Arrival Info */}
+      {/* Modal: Update BAST & Arrival Info (Dynamic & Editable Form) */}
       <Modal
         isOpen={isUpdateOpen}
         onClose={() => setIsUpdateOpen(false)}
         title="Konfirmasi Serah Terima (BAST)"
         subtitle={`Sekolah: ${selectedLog?.institutionName}`}
-        maxWidth="md"
+        maxWidth="2xl"
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Status Pengiriman *
-            </label>
-            <select
-              value={newStatus}
-              onChange={e => setNewStatus(e.target.value as any)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-            >
-              <option value="Dalam Perjalanan">Dalam Perjalanan</option>
-              <option value="Tiba di Lokasi">Tiba di Lokasi</option>
-              <option value="Selesai Serah Terima">Selesai Serah Terima (BAST Ditandatangani)</option>
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jam Tiba di Lokasi
-              </label>
-              <input
-                type="text"
-                value={newArrivalTime}
-                onChange={e => setNewArrivalTime(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Suhu Saat Tiba (°C)
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                value={arrivalTemp}
-                onChange={e => setArrivalTemp(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-emerald-600 font-bold"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Penerima (Kepsek / Guru)
-              </label>
-              <input
-                type="text"
-                placeholder="Drs. Slamet Hariyanto"
-                value={newReceivedBy}
-                onChange={e => setNewReceivedBy(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jabatan Penerima
-              </label>
-              <input
-                type="text"
-                placeholder="Kepala Sekolah / Guru Piket"
-                value={newReceiverTitle}
-                onChange={e => setNewReceiverTitle(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Catatan Kondisi Makanan & Ompreng
-            </label>
-            <textarea
-              rows={2}
-              value={notesInput}
-              onChange={e => setNotesInput(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+          <DynamicFormEditToggleBar
+            formId="distribution_report_form"
+            isEditing={isReportModalEdit}
+            onToggleEdit={() => setIsReportModalEdit(v => !v)}
+            compact
+          />
+          {isReportModalEdit && (
+            <DynamicFormBuilderPanel
+              formId="distribution_report_form"
+              onClose={() => setIsReportModalEdit(false)}
             />
-          </div>
+          )}
+
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.distribution_report_form}
+            values={{
+              status: newStatus,
+              arrivalTime: newArrivalTime,
+              foodTempAtArrival: arrivalTemp,
+              receivedBy: newReceivedBy,
+              receiverTitle: newReceiverTitle,
+              photoEvidenceUrl,
+              notes: notesInput,
+              ...reportCustomFields,
+            }}
+            onChange={(key, value, field) => {
+              if (!field.isSystem) {
+                setReportCustomFields(prev => ({ ...prev, [key]: value }));
+              } else if (key === 'status') setNewStatus(value);
+              else if (key === 'arrivalTime') setNewArrivalTime(value);
+              else if (key === 'foodTempAtArrival') setArrivalTemp(Number(value));
+              else if (key === 'receivedBy') setNewReceivedBy(value);
+              else if (key === 'receiverTitle') setNewReceiverTitle(value);
+              else if (key === 'photoEvidenceUrl') setPhotoEvidenceUrl(value);
+              else if (key === 'notes') setNotesInput(value);
+            }}
+            onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+          />
 
           <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
+              type="button"
               onClick={() => setIsUpdateOpen(false)}
               className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 rounded-lg transition"
             >
               Batal
             </button>
             <button
+              type="button"
               onClick={handleSaveStatus}
               className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition"
             >

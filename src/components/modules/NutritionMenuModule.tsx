@@ -20,6 +20,20 @@ import {
   DivisionJobdesk,
 } from '../../types';
 import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getCustomTableFields,
+  getInitialCustomFieldValues,
+  formatDynamicFieldValue,
+} from '../../lib/dynamicFormSchemas';
+import {
   defaultFoodCompositions,
   defaultNutritionTarget,
   sampleIngredientsMenu1,
@@ -80,7 +94,11 @@ export const NutritionMenuModule: React.FC = () => {
     hasPermission,
     sppgConfig,
     addToast,
+    dynamicFormSchemas,
   } = useApp();
+
+  const [isEditingMenuForm, setIsEditingMenuForm] = useState(false);
+  const [isModalMenuSchemaEdit, setIsModalMenuSchemaEdit] = useState(false);
 
   // Active Sub-module Tab
   const [activeTab, setActiveTab] = useState<SubModuleTab>('menu_bahan');
@@ -225,7 +243,21 @@ export const NutritionMenuModule: React.FC = () => {
 
   // Modal State for Create Menu
   const [isCreateMenuModalOpen, setIsCreateMenuModalOpen] = useState(false);
-  const [newMenuForm, setNewMenuForm] = useState({
+  const [newMenuForm, setNewMenuForm] = useState<{
+    date: string;
+    dayName: string;
+    cycleWeek: number;
+    menuCode: string;
+    stapleFood: string;
+    animalProtein: string;
+    plantProtein: string;
+    vegetable: string;
+    fruit: string;
+    milkOrExtra: string;
+    estimatedCostPerPortion: number;
+    notes: string;
+    customFields: Record<string, any>;
+  }>({
     date: '2026-11-12',
     dayName: 'Kamis',
     cycleWeek: 2,
@@ -238,6 +270,7 @@ export const NutritionMenuModule: React.FC = () => {
     milkOrExtra: 'Susu UHT Plain 125ml',
     estimatedCostPerPortion: 13500,
     notes: '',
+    customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
   });
 
   // Calculate actual total small & large portions from SPPG institutions
@@ -501,9 +534,24 @@ export const NutritionMenuModule: React.FC = () => {
 
   const handleCreateNewMenu = async (e: React.FormEvent) => {
     e.preventDefault();
+    const err = validateDynamicFormFields(dynamicFormSchemas.menu_form, {
+      ...newMenuForm,
+      ...(newMenuForm.customFields || {}),
+    });
+    if (err) {
+      addToast('error', 'Validasi Form Menu', err);
+      return;
+    }
+
+    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const parsedDay = new Date(`${newMenuForm.date}T00:00:00`);
+    const computedDayName = Number.isNaN(parsedDay.getTime())
+      ? newMenuForm.dayName
+      : dayNames[parsedDay.getDay()];
+
     const payload: Omit<MenuItem, 'id'> = {
       date: newMenuForm.date,
-      dayName: newMenuForm.dayName,
+      dayName: computedDayName,
       cycleWeek: newMenuForm.cycleWeek,
       menuCode: newMenuForm.menuCode,
       stapleFood: newMenuForm.stapleFood || 'Nasi Putih Pulen',
@@ -522,18 +570,83 @@ export const NutritionMenuModule: React.FC = () => {
       estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 13500),
       status: 'Draft',
       notes: newMenuForm.notes || 'Standar gizi terintegrasi PLOG.',
+      customFields: newMenuForm.customFields || {},
     };
 
     await addMenuItem(payload);
-    // Initialize empty or copied ingredients
     const newId = `menu-${Date.now()}`;
     setMenuIngredientsMap(prev => ({
       ...prev,
       [newId]: [...sampleIngredientsMenu1],
     }));
     setSelectedMenuId(newId);
+    setNewMenuForm(prev => ({
+      ...prev,
+      menuCode: `MBG-TMG2-H${Math.floor(Math.random() * 80) + 25}`,
+      stapleFood: '',
+      animalProtein: '',
+      plantProtein: '',
+      vegetable: '',
+      fruit: '',
+      notes: '',
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+    }));
     setIsCreateMenuModalOpen(false);
     addToast('success', 'Menu Baru Dibuat', `Menu ${newMenuForm.menuCode} berhasil ditambahkan.`);
+  };
+
+  const handleExportMenusPDF = () => {
+    const baseHeaders = ['Tanggal', 'Kode Menu', 'Makanan Pokok', 'Lauk Hewani', 'Nabati & Sayur', 'Buah & Susu', 'Status'];
+    const baseRows = menuItems.map(m => [
+      `${m.dayName}, ${formatIndonesianDate(m.date)}`,
+      m.menuCode,
+      m.stapleFood,
+      m.animalProtein,
+      `${m.plantProtein} / ${m.vegetable}`,
+      `${m.fruit} (${m.milkOrExtra})`,
+      m.status,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.menu_form,
+      baseHeaders,
+      baseRows,
+      menuItems
+    );
+    exportTableToPDF({
+      title: 'Daftar Perencanaan Menu Harian MBG',
+      subtitle: `SPPG Probolinggo Krejengan Temenggungan 2 • Yayasan Hafshawaty`,
+      headers,
+      rows,
+      fileName: 'Daftar_Menu_Makanan_MBG_SPPG_TMG2',
+      sppgConfig,
+      signerName: sppgConfig.nutritionOfficer,
+      signerRole: 'Pengawas Gizi Dietisien SPPG TMG2',
+    });
+  };
+
+  const handleExportMenusExcel = () => {
+    const dataToExport = menuItems.map(m =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.menu_form,
+        {
+          'Tanggal': m.date,
+          'Hari': m.dayName,
+          'Kode Menu': m.menuCode,
+          'Makanan Pokok': m.stapleFood,
+          'Lauk Hewani': m.animalProtein,
+          'Lauk Nabati': m.plantProtein,
+          'Sayuran': m.vegetable,
+          'Buah': m.fruit,
+          'Pelengkap / Susu': m.milkOrExtra,
+          'Kalori Kecil (kkal)': m.caloriesSmall,
+          'Kalori Besar (kkal)': m.caloriesLarge,
+          'Status': m.status,
+          'Catatan': m.notes || '-',
+        },
+        m
+      )
+    );
+    exportToExcel(dataToExport, 'Daftar_Menu_Makanan_MBG_SPPG_TMG2', 'Daftar Menu');
   };
 
   // Jobdesk Photo Upload
@@ -643,7 +756,14 @@ export const NutritionMenuModule: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setIsCreateMenuModalOpen(true)}
+            onClick={() => {
+              setNewMenuForm(prev => ({
+                ...prev,
+                customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+              }));
+              setIsModalMenuSchemaEdit(false);
+              setIsCreateMenuModalOpen(true);
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
           >
             <Plus className="w-4 h-4" />
@@ -651,6 +771,20 @@ export const NutritionMenuModule: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Dynamic & Editable Form Toggle Bar (Admin/Superuser Only) */}
+      <DynamicFormEditToggleBar
+        formId="menu_form"
+        isEditing={isEditingMenuForm}
+        onToggleEdit={() => setIsEditingMenuForm(v => !v)}
+      />
+
+      {isEditingMenuForm && (
+        <DynamicFormBuilderPanel
+          formId="menu_form"
+          onClose={() => setIsEditingMenuForm(false)}
+        />
+      )}
 
       {/* Metric Context Bar: Sasaran Penerima & Pagu Anggaran */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -733,6 +867,18 @@ export const NutritionMenuModule: React.FC = () => {
             <span>•</span>
             <span className="text-amber-300">{currentMenu?.fruit}</span>
           </div>
+          {getCustomTableFields(dynamicFormSchemas.menu_form).length > 0 && currentMenu?.customFields && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {getCustomTableFields(dynamicFormSchemas.menu_form).map(cf => (
+                <span
+                  key={cf.id}
+                  className="px-2 py-0.5 rounded bg-white/10 text-[11px] text-sky-100"
+                >
+                  <strong>{cf.label}:</strong> {formatDynamicFieldValue(cf, currentMenu.customFields?.[cf.key])}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -958,6 +1104,59 @@ export const NutritionMenuModule: React.FC = () => {
               </table>
             </div>
           </div>
+
+          {/* Daftar Menu Makanan Terjadwal (Auto-synced with Form Menu Custom Fields) */}
+          <DataTable
+            title="Daftar Siklus Menu Makanan MBG"
+            subtitle="Rekapitulasi menu harian lengkap beserta kolom custom dari Form Perencanaan Menu"
+            data={menuItems}
+            keyExtractor={item => item.id}
+            searchPlaceholder="Cari kode menu, lauk hewani, atau makanan pokok..."
+            searchKeys={['menuCode', 'stapleFood', 'animalProtein', 'plantProtein', 'vegetable', 'fruit']}
+            onExportPDF={handleExportMenusPDF}
+            onExportExcel={handleExportMenusExcel}
+            onPrint={triggerPrint}
+            columns={[
+              {
+                key: 'menuCode',
+                header: 'Kode & Tanggal Menu',
+                render: row => (
+                  <div>
+                    <div className="font-bold text-slate-900 dark:text-white font-mono">
+                      {row.menuCode}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {row.dayName}, {formatIndonesianDate(row.date)}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'stapleFood',
+                header: 'Komposisi Menu',
+                render: row => (
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-semibold text-slate-800 dark:text-slate-200">
+                      {row.stapleFood} • {row.animalProtein}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {row.plantProtein} • {row.vegetable} • {row.fruit}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                render: row => (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    {row.status}
+                  </span>
+                ),
+              },
+              ...buildDynamicTableColumns<MenuItem>(dynamicFormSchemas.menu_form),
+            ]}
+          />
         </div>
       )}
 
@@ -1825,123 +2024,47 @@ export const NutritionMenuModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: BUAT MENU BARU */}
+      {/* MODAL: BUAT MENU BARU (DYNAMIC & EDITABLE FORM) */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isCreateMenuModalOpen}
         onClose={() => setIsCreateMenuModalOpen(false)}
         title="Buat Perencanaan Menu Baru"
         subtitle="Rencanakan hidangan MBG lengkap dengan lauk hewani, nabati, sayuran, dan buah"
-        maxWidth="md"
+        maxWidth="2xl"
       >
-        <form onSubmit={handleCreateNewMenu} className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Tanggal Operasional *
-              </label>
-              <input
-                type="date"
-                required
-                value={newMenuForm.date}
-                onChange={e => setNewMenuForm({ ...newMenuForm, date: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kode Menu *
-              </label>
-              <input
-                type="text"
-                required
-                value={newMenuForm.menuCode}
-                onChange={e => setNewMenuForm({ ...newMenuForm, menuCode: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Makanan Pokok *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Nasi Liwet Wangi Daun Salam"
-              value={newMenuForm.stapleFood}
-              onChange={e => setNewMenuForm({ ...newMenuForm, stapleFood: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+        <form onSubmit={handleCreateNewMenu} className="space-y-4">
+          <DynamicFormEditToggleBar
+            formId="menu_form"
+            isEditing={isModalMenuSchemaEdit}
+            onToggleEdit={() => setIsModalMenuSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalMenuSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="menu_form"
+              onClose={() => setIsModalMenuSchemaEdit(false)}
             />
-          </div>
+          )}
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Lauk Hewani *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Ikan Gurame Bakar Bumbu Madu"
-              value={newMenuForm.animalProtein}
-              onChange={e => setNewMenuForm({ ...newMenuForm, animalProtein: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Lauk Nabati
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Tempe Orek Manis"
-                value={newMenuForm.plantProtein}
-                onChange={e => setNewMenuForm({ ...newMenuForm, plantProtein: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Sayuran
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Sayur Capcay Bakso"
-                value={newMenuForm.vegetable}
-                onChange={e => setNewMenuForm({ ...newMenuForm, vegetable: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Buah Segar
-              </label>
-              <input
-                type="text"
-                placeholder="Contoh: Melon Segar"
-                value={newMenuForm.fruit}
-                onChange={e => setNewMenuForm({ ...newMenuForm, fruit: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pelengkap / Susu
-              </label>
-              <input
-                type="text"
-                value={newMenuForm.milkOrExtra}
-                onChange={e => setNewMenuForm({ ...newMenuForm, milkOrExtra: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.menu_form}
+            values={{
+              ...newMenuForm,
+              ...(newMenuForm.customFields || {}),
+            }}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setNewMenuForm(prev => ({ ...prev, [key]: value }));
+              } else {
+                setNewMenuForm(prev => ({
+                  ...prev,
+                  customFields: { ...(prev.customFields || {}), [key]: value },
+                }));
+              }
+            }}
+            onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+          />
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button

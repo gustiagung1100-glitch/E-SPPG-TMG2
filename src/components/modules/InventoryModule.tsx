@@ -18,7 +18,20 @@ import {
   StockOpnameRecord,
   StockBatch,
   MutationType,
+  DynamicFormId,
 } from '../../types';
+import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getInitialCustomFieldValues,
+} from '../../lib/dynamicFormSchemas';
 import {
   defaultInventoryItemsWithBatches,
   defaultStockMutations,
@@ -86,7 +99,14 @@ export const InventoryModule: React.FC = () => {
     hasPermission,
     sppgConfig,
     addToast,
+    dynamicFormSchemas,
   } = useApp();
+
+  // Dynamic Form Builder States
+  const [isEditingInvSchema, setIsEditingInvSchema] = useState(false);
+  const [builderInvFormId, setBuilderInvFormId] = useState<DynamicFormId>('inventory_item_form');
+  const [isModalItemSchemaEdit, setIsModalItemSchemaEdit] = useState(false);
+  const [isModalMutSchemaEdit, setIsModalMutSchemaEdit] = useState(false);
 
   // Active Sub-Tab
   const [activeTab, setActiveTab] = useState<InventoryTab>('stok_gudang');
@@ -127,6 +147,7 @@ export const InventoryModule: React.FC = () => {
     lastRestocked: new Date().toISOString().slice(0, 10),
     expiryDate: new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10),
     qualityStatus: 'Baik',
+    customFields: {},
   });
 
   // Modal: Quick Transaction (Barang Masuk / Barang Keluar / Retur)
@@ -144,6 +165,7 @@ export const InventoryModule: React.FC = () => {
     photoUrl: '',
     notes: 'Penerimaan bahan pangan sesuai standar mutu',
     operatorName: currentUser.name,
+    customFields: {} as Record<string, any>,
   });
   const [viewMutationPhotoUrl, setViewMutationPhotoUrl] = useState<string | null>(null);
 
@@ -250,18 +272,30 @@ export const InventoryModule: React.FC = () => {
       lastRestocked: new Date().toISOString().slice(0, 10),
       expiryDate: new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10),
       qualityStatus: 'Baik',
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.inventory_item_form),
     });
     setIsItemModalOpen(true);
   };
 
   const handleOpenEditItem = (item: InventoryItem) => {
     setEditingItem(item);
-    setItemFormData({ ...item });
+    setItemFormData({
+      ...item,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.inventory_item_form, item.customFields),
+    });
     setIsItemModalOpen(true);
   };
 
   const handleSaveItem = (e: React.FormEvent) => {
     e.preventDefault();
+    const validationErr = validateDynamicFormFields(dynamicFormSchemas.inventory_item_form, {
+      ...itemFormData,
+      ...(itemFormData.customFields || {}),
+    });
+    if (validationErr) {
+      addToast('error', 'Validasi Form Item', validationErr);
+      return;
+    }
     if (editingItem) {
       setItems(prev =>
         prev.map(i =>
@@ -273,27 +307,30 @@ export const InventoryModule: React.FC = () => {
                 currentStock: Number(itemFormData.currentStock),
                 minimumStock: Number(itemFormData.minimumStock),
                 pricePerUnit: Number(itemFormData.pricePerUnit),
+                customFields: itemFormData.customFields || {},
               }
             : i
         )
       );
       addToast('success', 'Item Diperbarui', `Data bahan ${itemFormData.name} berhasil diperbarui.`);
     } else {
+      const stockVal = Number(itemFormData.currentStock);
       const newItem: InventoryItem = {
         id: `inv-${Date.now()}`,
         ...itemFormData,
-        initialStock: Number(itemFormData.initialStock),
-        currentStock: Number(itemFormData.currentStock),
+        initialStock: stockVal,
+        currentStock: stockVal,
         minimumStock: Number(itemFormData.minimumStock),
         pricePerUnit: Number(itemFormData.pricePerUnit),
+        customFields: itemFormData.customFields || {},
         batches: [
           {
             id: `b-${Date.now()}`,
             batchNumber: `BATCH-INIT-${Math.floor(Math.random() * 80) + 10}`,
             receivedDate: itemFormData.lastRestocked,
             expiryDate: itemFormData.expiryDate,
-            initialQty: Number(itemFormData.currentStock),
-            remainingQty: Number(itemFormData.currentStock),
+            initialQty: stockVal,
+            remainingQty: stockVal,
             unitPrice: Number(itemFormData.pricePerUnit),
             supplierName: itemFormData.supplierName,
           },
@@ -365,6 +402,7 @@ export const InventoryModule: React.FC = () => {
           ? 'Pengeluaran untuk produksi makan siang MBG 2.850 porsi'
           : 'Retur ke supplier karena bahan tidak sesuai standar mutu',
       operatorName: currentUser.name,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.inventory_mutation_form),
     });
     setIsMutationModalOpen(true);
   };
@@ -372,6 +410,16 @@ export const InventoryModule: React.FC = () => {
   const handleSaveMutation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemForMutation) return;
+
+    const mutErr = validateDynamicFormFields(
+      dynamicFormSchemas.inventory_mutation_form,
+      { ...mutationForm, ...(mutationForm.customFields || {}) },
+      mutationForm.type !== 'Barang Masuk' ? ['orderedQuantity'] : []
+    );
+    if (mutErr) {
+      addToast('error', 'Validasi Form Mutasi', mutErr);
+      return;
+    }
 
     const qty = Number(mutationForm.quantity);
     if (qty <= 0) {
@@ -429,6 +477,7 @@ export const InventoryModule: React.FC = () => {
       notes: mutationForm.notes,
       operatorName: mutationForm.operatorName,
       recipientOrDepartment: mutationForm.recipientOrDepartment,
+      customFields: mutationForm.customFields || {},
     };
 
     setMutations(prev => [newMutation, ...prev]);
@@ -582,26 +631,111 @@ export const InventoryModule: React.FC = () => {
   // EXPORTS
   // ---------------------------------------------------------------------------
   const handleExportInventoryPDF = () => {
+    const baseHeaders = ['Kode', 'Nama Bahan', 'Kategori', 'Stok Saat Ini', 'Batas Min', 'Harga Satuan', 'Total Nilai (Rp)', 'Status Stok', 'Kadaluarsa (FEFO)'];
+    const baseRows = filteredInventory.map(i => [
+      i.code,
+      i.name,
+      i.category,
+      `${formatNumber(i.currentStock)} ${i.unit}`,
+      `${formatNumber(i.minimumStock)} ${i.unit}`,
+      formatRupiah(i.pricePerUnit),
+      formatRupiah(i.currentStock * i.pricePerUnit),
+      i.currentStock <= i.minimumStock ? 'KRITIS' : 'Aman',
+      formatIndonesianDate(i.expiryDate),
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.inventory_item_form,
+      baseHeaders,
+      baseRows,
+      filteredInventory
+    );
     exportTableToPDF({
       title: 'Laporan Inventaris Stok Gudang & Metode FEFO',
       subtitle: 'Satuan Pelayanan Pemenuhan Gizi - SPPG Probolinggo Krejengan Temenggungan 2',
-      headers: ['Kode', 'Nama Bahan', 'Kategori', 'Stok Saat Ini', 'Batas Min', 'Harga Satuan', 'Total Nilai (Rp)', 'Status Stok', 'Kadaluarsa (FEFO)'],
-      rows: filteredInventory.map(i => [
-        i.code,
-        i.name,
-        i.category,
-        `${formatNumber(i.currentStock)} ${i.unit}`,
-        `${formatNumber(i.minimumStock)} ${i.unit}`,
-        formatRupiah(i.pricePerUnit),
-        formatRupiah(i.currentStock * i.pricePerUnit),
-        i.currentStock <= i.minimumStock ? 'KRITIS' : 'Aman',
-        formatIndonesianDate(i.expiryDate),
-      ]),
+      headers,
+      rows,
       fileName: 'Inventaris_Stok_Gudang_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
       signerRole: 'Kepala SPPG Temenggungan 2',
     });
+  };
+
+  const handleExportInventoryExcel = () => {
+    const data = filteredInventory.map(i =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.inventory_item_form,
+        {
+          Kode: i.code,
+          'Nama Bahan': i.name,
+          Kategori: i.category,
+          'Stok Saat Ini': i.currentStock,
+          'Stok Minimum': i.minimumStock,
+          Satuan: i.unit,
+          'Harga Satuan (Rp)': i.pricePerUnit,
+          'Valuasi Total (Rp)': i.currentStock * i.pricePerUnit,
+          'Lokasi Simpan': i.storageLocation,
+          Status: i.currentStock <= i.minimumStock ? 'KRITIS' : 'Aman',
+          'Kadaluarsa (FEFO)': i.expiryDate,
+        },
+        i
+      )
+    );
+    exportToExcel(data, 'Inventaris_Stok_Gudang_SPPG_TMG2', 'Stok Gudang');
+  };
+
+  const handleExportMutationsPDF = () => {
+    const baseHeaders = ['Waktu', 'No. Referensi', 'Jenis Mutasi', 'Bahan Pangan', 'Masuk (+)', 'Keluar (-)', 'Sisa Saldo', 'Petugas', 'Keterangan'];
+    const baseRows = filteredMutations.map(m => [
+      m.timestamp,
+      m.referenceNumber,
+      m.type,
+      m.itemName,
+      m.quantityIn > 0 ? `+${formatNumber(m.quantityIn)} ${m.unit}` : '-',
+      m.quantityOut > 0 ? `-${formatNumber(m.quantityOut)} ${m.unit}` : '-',
+      `${formatNumber(m.balance)} ${m.unit}`,
+      m.operatorName,
+      m.notes || '-',
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.inventory_mutation_form,
+      baseHeaders,
+      baseRows,
+      filteredMutations
+    );
+    exportTableToPDF({
+      title: 'Laporan Riwayat Mutasi Barang Gudang',
+      subtitle: 'Satuan Pelayanan Pemenuhan Gizi - SPPG Probolinggo Krejengan Temenggungan 2',
+      headers,
+      rows,
+      fileName: 'Riwayat_Mutasi_Gudang_SPPG_TMG2',
+      sppgConfig,
+      signerName: sppgConfig.headOfSppg,
+      signerRole: 'Kepala SPPG Temenggungan 2',
+    });
+  };
+
+  const handleExportMutationsExcel = () => {
+    const data = filteredMutations.map(m =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.inventory_mutation_form,
+        {
+          Waktu: m.timestamp,
+          'No. Referensi': m.referenceNumber,
+          'Jenis Mutasi': m.type,
+          'Bahan Pangan': m.itemName,
+          Dipesan: m.orderedQuantity ?? '-',
+          'Masuk (+)': m.quantityIn,
+          'Keluar (-)': m.quantityOut,
+          'Sisa Saldo': m.balance,
+          Satuan: m.unit,
+          Keterangan: m.notes || '-',
+          Operator: m.operatorName,
+        },
+        m
+      )
+    );
+    exportToExcel(data, 'Riwayat_Mutasi_Gudang_SPPG_TMG2', 'Mutasi Gudang');
   };
 
   const handleExportStockCardPDF = () => {
@@ -681,6 +815,29 @@ export const InventoryModule: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
+      <DynamicFormEditToggleBar
+        formId={builderInvFormId}
+        isEditing={isEditingInvSchema}
+        onToggleEdit={() => setIsEditingInvSchema(v => !v)}
+        extraSelector={
+          <select
+            value={builderInvFormId}
+            onChange={e => setBuilderInvFormId(e.target.value as DynamicFormId)}
+            className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
+          >
+            <option value="inventory_item_form">Form Data Barang Gudang</option>
+            <option value="inventory_mutation_form">Form Mutasi Barang Masuk/Keluar</option>
+          </select>
+        }
+      />
+      {isEditingInvSchema && (
+        <DynamicFormBuilderPanel
+          formId={builderInvFormId}
+          onClose={() => setIsEditingInvSchema(false)}
+        />
+      )}
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -866,10 +1023,17 @@ export const InventoryModule: React.FC = () => {
 
             <div className="flex items-center gap-2">
               <button
+                onClick={handleExportInventoryExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
+              <button
                 onClick={handleExportInventoryPDF}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-2xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <FileText className="w-3.5 h-3.5" />
                 <span>PDF Stok</span>
               </button>
               <button
@@ -989,6 +1153,10 @@ export const InventoryModule: React.FC = () => {
                   );
                 },
               },
+              ...buildDynamicTableColumns<InventoryItem>(
+                dynamicFormSchemas.inventory_item_form,
+                url => setViewMutationPhotoUrl(url)
+              ),
               {
                 key: 'actions',
                 header: 'Aksi & Mutasi',
@@ -1097,13 +1265,29 @@ export const InventoryModule: React.FC = () => {
               ))}
             </div>
 
-            <button
-              onClick={triggerPrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Cetak Log Mutasi</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportMutationsExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
+              <button
+                onClick={handleExportMutationsPDF}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>PDF Mutasi</span>
+              </button>
+              <button
+                onClick={triggerPrint}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Cetak Log Mutasi</span>
+              </button>
+            </div>
           </div>
 
           {/* DataTable Mutasi */}
@@ -1114,6 +1298,8 @@ export const InventoryModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari no referensi, bahan, operator, keterangan..."
             searchKeys={['referenceNumber', 'itemName', 'type', 'notes', 'operatorName', 'recipientOrDepartment']}
+            onExportExcel={handleExportMutationsExcel}
+            onExportPDF={handleExportMutationsPDF}
             columns={[
               {
                 key: 'timestamp',
@@ -1288,6 +1474,10 @@ export const InventoryModule: React.FC = () => {
                   </div>
                 ),
               },
+              ...buildDynamicTableColumns<StockMutation>(
+                dynamicFormSchemas.inventory_mutation_form,
+                url => setViewMutationPhotoUrl(url)
+              ),
               {
                 key: 'operatorName',
                 header: 'Petugas Operator',
@@ -1605,141 +1795,93 @@ export const InventoryModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={isMutationModalOpen}
-        onClose={() => setIsMutationModalOpen(false)}
+        onClose={() => {
+          setIsMutationModalOpen(false);
+          setIsModalMutSchemaEdit(false);
+        }}
         title="Catat Mutasi Stok Gudang (Buku Kartu Stok)"
         subtitle="Merekam barang masuk, pengeluaran dapur, atau retur secara permanen"
         maxWidth="lg"
       >
         <form onSubmit={handleSaveMutation} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jenis Mutasi *
-              </label>
-              <select
-                value={mutationForm.type}
-                onChange={e =>
-                  setMutationForm({
-                    ...mutationForm,
-                    type: e.target.value as MutationType,
-                  })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-              >
-                <option value="Barang Masuk">Barang Masuk (Penerimaan PO / Belanja Pasar)</option>
-                <option value="Barang Keluar">Barang Keluar (Untuk Dapur Pengolahan MBG)</option>
-                <option value="Retur Keluar">Retur Keluar (Pengembalian ke Supplier)</option>
-                <option value="Retur Masuk">Retur Masuk (Sisa Produksi Balik ke Gudang)</option>
-              </select>
-            </div>
+          <DynamicFormEditToggleBar
+            formId="inventory_mutation_form"
+            isEditing={isModalMutSchemaEdit}
+            onToggleEdit={() => setIsModalMutSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalMutSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="inventory_mutation_form"
+              onClose={() => setIsModalMutSchemaEdit(false)}
+            />
+          )}
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pilih Bahan Pangan *
-              </label>
-              <select
-                value={mutationForm.itemId}
-                onChange={e =>
-                  setMutationForm({ ...mutationForm, itemId: e.target.value })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                {items.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.code} - {i.name} (Stok Saat Ini: {formatNumber(i.currentStock)} {i.unit})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nomor Referensi Dokumen / Reff *
-              </label>
-              <input
-                type="text"
-                required
-                value={mutationForm.referenceNumber}
-                onChange={e =>
-                  setMutationForm({ ...mutationForm, referenceNumber: e.target.value })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-
-            {mutationForm.type === 'Barang Masuk' && (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Jumlah Dipesan ({selectedItemForMutation?.unit}) *
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  required
-                  value={mutationForm.orderedQuantity}
-                  onChange={e =>
-                    setMutationForm({ ...mutationForm, orderedQuantity: Number(e.target.value) })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                />
-              </div>
-            )}
-
-            <div className={mutationForm.type === 'Barang Masuk' ? '' : 'sm:col-span-2'}>
-              <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-300 mb-1">
-                {mutationForm.type === 'Barang Masuk'
-                  ? `Jumlah Diterima (${selectedItemForMutation?.unit}) *`
-                  : `Kuantitas / Jumlah Mutasi (${selectedItemForMutation?.unit}) *`}
-              </label>
-              <input
-                type="number"
-                min="0.1"
-                step="any"
-                required
-                value={mutationForm.quantity}
-                onChange={e =>
-                  setMutationForm({ ...mutationForm, quantity: Number(e.target.value) })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-emerald-400 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
-              />
-            </div>
-          </div>
-
-          {mutationForm.type === 'Barang Masuk' && (
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-              <div className="flex items-center gap-1.5 text-blue-900 dark:text-sky-300 font-bold">
-                <Calculator className="w-4 h-4" />
-                <span>Perhitungan Dipesan vs Diterima:</span>
-              </div>
-              {(() => {
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.inventory_mutation_form}
+            values={{
+              ...mutationForm,
+              ...(mutationForm.customFields || {}),
+            }}
+            dynamicOptions={{
+              itemId: items.map(i => ({
+                value: i.id,
+                label: `${i.code} - ${i.name} (Stok: ${formatNumber(i.currentStock)} ${i.unit})`,
+              })),
+            }}
+            excludeKeys={mutationForm.type !== 'Barang Masuk' ? ['orderedQuantity'] : []}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setMutationForm(prev => ({
+                  ...prev,
+                  [key]: value,
+                }));
+              } else {
+                setMutationForm(prev => ({
+                  ...prev,
+                  customFields: {
+                    ...(prev.customFields || {}),
+                    [key]: value,
+                  },
+                }));
+              }
+            }}
+            onPreviewPhoto={url => setViewMutationPhotoUrl(url)}
+            onUploadError={msg => addToast('error', 'Upload Gagal', msg)}
+            afterFieldRender={field => {
+              if (field.key === 'quantity' && mutationForm.type === 'Barang Masuk') {
                 const ordered = Number(mutationForm.orderedQuantity) || 0;
                 const received = Number(mutationForm.quantity) || 0;
                 const diff = received - ordered;
                 const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
                 return (
-                  <span
-                    className={`px-2.5 py-1 rounded-lg font-black ${
-                      diff === 0
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                        : diff < 0
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                    }`}
-                  >
-                    Selisih: {diff > 0 ? `+${diff}` : diff} {selectedItemForMutation?.unit} ({pct}% terpenuhi)
-                  </span>
+                  <div className="md:col-span-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                    <div className="flex items-center gap-1.5 text-blue-900 dark:text-sky-300 font-bold">
+                      <Calculator className="w-4 h-4" />
+                      <span>Perhitungan Dipesan vs Diterima:</span>
+                    </div>
+                    <span
+                      className={`px-2.5 py-1 rounded-lg font-black ${
+                        diff === 0
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : diff < 0
+                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                          : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                      }`}
+                    >
+                      Selisih: {diff > 0 ? `+${diff}` : diff} {selectedItemForMutation?.unit} ({pct}% terpenuhi)
+                    </span>
+                  </div>
                 );
-              })()}
-            </div>
-          )}
+              }
+              return null;
+            }}
+          />
 
-          {/* Batch & Expired (Optional/FEFO) */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Batch, Expired & Tujuan/Supplier Tambahan */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-xs">
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Nomor Batch / Lot (FEFO)
               </label>
               <input
@@ -1753,7 +1895,7 @@ export const InventoryModule: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Tanggal Kedaluwarsa (Exp)
               </label>
               <input
@@ -1765,11 +1907,9 @@ export const InventoryModule: React.FC = () => {
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               />
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                 {mutationForm.type === 'Barang Keluar' ? 'Divisi / Ruang Penerima' : 'Pemasok / Supplier'}
               </label>
               <input
@@ -1781,74 +1921,15 @@ export const InventoryModule: React.FC = () => {
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Foto Bukti Bahan / Barang Diterima
-              </label>
-              <div className="flex items-center gap-2">
-                {mutationForm.photoUrl ? (
-                  <img
-                    src={mutationForm.photoUrl}
-                    alt="Preview"
-                    onClick={() => setViewMutationPhotoUrl(mutationForm.photoUrl)}
-                    className="w-11 h-9 rounded-lg object-cover border border-emerald-500 cursor-pointer shrink-0"
-                  />
-                ) : (
-                  <div className="w-11 h-9 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
-                    <Camera className="w-4 h-4" />
-                  </div>
-                )}
-                <label className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold cursor-pointer transition">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>{mutationForm.photoUrl ? 'Ganti Foto' : 'Upload Foto'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={e =>
-                      processFacilityImageUpload(
-                        e,
-                        url => {
-                          setMutationForm(prev => ({ ...prev, photoUrl: url }));
-                          addToast('success', 'Foto Terunggah', 'Foto bukti barang berhasil dilampirkan.');
-                        },
-                        msg => addToast('error', 'Upload Gagal', msg)
-                      )
-                    }
-                  />
-                </label>
-                {mutationForm.photoUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setMutationForm(prev => ({ ...prev, photoUrl: '' }))}
-                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600"
-                    title="Hapus foto"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Keterangan Manual / Catatan Penerimaan Barang
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Isi keterangan kondisi bahan atau selisih penerimaan secara manual..."
-              value={mutationForm.notes}
-              onChange={e => setMutationForm({ ...mutationForm, notes: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsMutationModalOpen(false)}
+              onClick={() => {
+                setIsMutationModalOpen(false);
+                setIsModalMutSchemaEdit(false);
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
             >
               Batal
@@ -1975,145 +2056,64 @@ export const InventoryModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={isItemModalOpen}
-        onClose={() => setIsItemModalOpen(false)}
+        onClose={() => {
+          setIsItemModalOpen(false);
+          setIsModalItemSchemaEdit(false);
+        }}
         title={editingItem ? 'Edit Data Item Bahan Gudang' : 'Tambah Item Bahan Pangan Baru'}
         subtitle="Kelola batas minimum, harga satuan, dan lokasi penyimpanan"
         maxWidth="lg"
       >
         <form onSubmit={handleSaveItem} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kode Bahan *
-              </label>
-              <input
-                type="text"
-                required
-                value={itemFormData.code}
-                onChange={e => setItemFormData({ ...itemFormData, code: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kategori Bahan *
-              </label>
-              <select
-                value={itemFormData.category}
-                onChange={e => setItemFormData({ ...itemFormData, category: e.target.value as any })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                <option value="Bahan Segar">Bahan Segar</option>
-                <option value="Bahan Kering">Bahan Kering</option>
-                <option value="Bumbu & Rempah">Bumbu & Rempah</option>
-                <option value="Kemasan & Higiene">Kemasan & Higiene</option>
-                <option value="Pelengkap">Pelengkap</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Nama Lengkap Bahan Pangan *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Daging Ayam Broiler Fillet Segar"
-              value={itemFormData.name}
-              onChange={e => setItemFormData({ ...itemFormData, name: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+          <DynamicFormEditToggleBar
+            formId="inventory_item_form"
+            isEditing={isModalItemSchemaEdit}
+            onToggleEdit={() => setIsModalItemSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalItemSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="inventory_item_form"
+              onClose={() => setIsModalItemSchemaEdit(false)}
             />
-          </div>
+          )}
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Stok Awal *
-              </label>
-              <input
-                type="number"
-                min="0"
-                required
-                value={itemFormData.initialStock}
-                onChange={e =>
-                  setItemFormData({
-                    ...itemFormData,
-                    initialStock: Number(e.target.value),
-                    currentStock: editingItem ? itemFormData.currentStock : Number(e.target.value),
-                  })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-rose-600 dark:text-rose-400 mb-1">
-                Stok Minimum (Alert) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={itemFormData.minimumStock}
-                onChange={e => setItemFormData({ ...itemFormData, minimumStock: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Satuan *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="kg, liter, jerigen, pcs"
-                value={itemFormData.unit}
-                onChange={e => setItemFormData({ ...itemFormData, unit: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Harga Satuan Acuan (Rp) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={itemFormData.pricePerUnit}
-                onChange={e => setItemFormData({ ...itemFormData, pricePerUnit: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Lokasi Penyimpanan Gudang *
-              </label>
-              <select
-                value={itemFormData.storageLocation}
-                onChange={e => setItemFormData({ ...itemFormData, storageLocation: e.target.value as any })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                <option value="Cold Storage 1">Cold Storage 1 (Daging/Ayam &le; 4°C)</option>
-                <option value="Chiller Dapur">Chiller Dapur (Sayuran/Bumbu)</option>
-                <option value="Gudang Kering A">Gudang Kering A (Beras & Minyak)</option>
-                <option value="Gudang Kering B">Gudang Kering B (Buah & Telur)</option>
-                <option value="Rak Bumbu">Rak Bumbu Dapur</option>
-              </select>
-            </div>
-          </div>
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.inventory_item_form}
+            values={{
+              ...itemFormData,
+              ...(itemFormData.customFields || {}),
+            }}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setItemFormData(prev => {
+                  const next = { ...prev, [key]: value };
+                  if (key === 'currentStock' && !editingItem) {
+                    next.initialStock = Number(value) || 0;
+                  }
+                  return next;
+                });
+              } else {
+                setItemFormData(prev => ({
+                  ...prev,
+                  customFields: {
+                    ...(prev.customFields || {}),
+                    [key]: value,
+                  },
+                }));
+              }
+            }}
+            onPreviewPhoto={url => setViewMutationPhotoUrl(url)}
+            onUploadError={msg => addToast('error', 'Upload Gagal', msg)}
+          />
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsItemModalOpen(false)}
+              onClick={() => {
+                setIsItemModalOpen(false);
+                setIsModalItemSchemaEdit(false);
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
             >
               Batal

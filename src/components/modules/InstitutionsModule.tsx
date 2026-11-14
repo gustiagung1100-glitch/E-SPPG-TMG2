@@ -17,7 +17,21 @@ import {
   triggerPrint,
   formatIndonesianDate,
 } from '../../lib/exportUtils';
-import { Institution, BeneficiaryAttendanceLog, BeneficiaryQuotaHistory } from '../../types';
+import { Institution, BeneficiaryAttendanceLog, BeneficiaryQuotaHistory, DynamicFormId } from '../../types';
+import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getCustomTableFields,
+  getInitialCustomFieldValues,
+  formatDynamicFieldValue,
+} from '../../lib/dynamicFormSchemas';
 import {
   School,
   Plus,
@@ -75,10 +89,14 @@ export const InstitutionsModule: React.FC = () => {
     sppgConfig,
     currentUser,
     addToast,
+    dynamicFormSchemas,
   } = useApp();
 
   // Active Sub-Tab
   const [activeTab, setActiveTab] = useState<TabKey>('data_lembaga');
+  const [isEditingFormSchema, setIsEditingFormSchema] = useState(false);
+  const [builderFormId, setBuilderFormId] = useState<DynamicFormId>('institution_form');
+  const [isModalSchemaEdit, setIsModalSchemaEdit] = useState(false);
 
   // Filter Jenjang on Lembaga Tab
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
@@ -109,6 +127,7 @@ export const InstitutionsModule: React.FC = () => {
     deliveryOrder: 1,
     allergiesNote: '',
     isActive: true,
+    customFields: {},
   });
 
   // Modal State for Quota Change with History
@@ -121,7 +140,16 @@ export const InstitutionsModule: React.FC = () => {
   });
 
   // Daily Attendance Form State
-  const [attendanceForm, setAttendanceForm] = useState({
+  const [attendanceForm, setAttendanceForm] = useState<{
+    date: string;
+    institutionId: string;
+    absentSmall: number;
+    absentLarge: number;
+    notes: string;
+    recordedBy: string;
+    bastConfirmed: boolean;
+    customFields: Record<string, any>;
+  }>({
     date: '2026-11-08',
     institutionId: institutions[0]?.id || '',
     absentSmall: 0,
@@ -129,6 +157,7 @@ export const InstitutionsModule: React.FC = () => {
     notes: '',
     recordedBy: currentUser.name,
     bastConfirmed: true,
+    customFields: getInitialCustomFieldValues(dynamicFormSchemas.beneficiary_attendance_form),
   });
 
   // Rekap Date Picker (for Daily Rekap)
@@ -205,26 +234,45 @@ export const InstitutionsModule: React.FC = () => {
       deliveryOrder: institutions.length + 1,
       allergiesNote: '',
       isActive: true,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.institution_form),
     });
+    setIsModalSchemaEdit(false);
     setIsLembagaModalOpen(true);
   };
 
   // Open Edit Lembaga Modal
   const handleOpenEditLembaga = (inst: Institution) => {
     setSelectedInst(inst);
-    setFormData({ ...inst });
+    setFormData({
+      ...inst,
+      customFields: getInitialCustomFieldValues(
+        dynamicFormSchemas.institution_form,
+        inst.customFields
+      ),
+    });
+    setIsModalSchemaEdit(false);
     setIsLembagaModalOpen(true);
   };
 
   // Save Lembaga (Create or Edit)
   const handleSaveLembaga = async (e: React.FormEvent) => {
     e.preventDefault();
-    const calculatedTotal = Number(formData.smallPortions) + Number(formData.largePortions);
+    const validationErr = validateDynamicFormFields(dynamicFormSchemas.institution_form, {
+      ...formData,
+      ...(formData.customFields || {}),
+    });
+    if (validationErr) {
+      addToast('error', 'Validasi Form Lembaga', validationErr);
+      return;
+    }
+
+    const calculatedTotal = Number(formData.smallPortions || 0) + Number(formData.largePortions || 0);
     const payload = {
       ...formData,
-      smallPortions: Number(formData.smallPortions),
-      largePortions: Number(formData.largePortions),
+      smallPortions: Number(formData.smallPortions || 0),
+      largePortions: Number(formData.largePortions || 0),
       totalPortions: calculatedTotal,
+      customFields: formData.customFields || {},
     };
 
     if (selectedInst) {
@@ -282,6 +330,16 @@ export const InstitutionsModule: React.FC = () => {
       return;
     }
 
+    const attErr = validateDynamicFormFields(
+      dynamicFormSchemas.beneficiary_attendance_form,
+      { ...attendanceForm, ...(attendanceForm.customFields || {}) },
+      ['absentSmall', 'absentLarge']
+    );
+    if (attErr) {
+      addToast('error', 'Validasi Form Presensi', attErr);
+      return;
+    }
+
     const result = recordBeneficiaryAttendance({
       date: attendanceForm.date,
       institutionId: selectedInstForAttendance.id,
@@ -293,6 +351,7 @@ export const InstitutionsModule: React.FC = () => {
       notes: attendanceForm.notes.trim() || 'Semua porsi diterima dalam keadaan hangat dan higienis.',
       recordedBy: attendanceForm.recordedBy.trim() || currentUser.name,
       bastConfirmed: attendanceForm.bastConfirmed,
+      customFields: attendanceForm.customFields || {},
     });
 
     if (result.success) {
@@ -302,26 +361,35 @@ export const InstitutionsModule: React.FC = () => {
         absentSmall: 0,
         absentLarge: 0,
         notes: '',
+        customFields: getInitialCustomFieldValues(dynamicFormSchemas.beneficiary_attendance_form),
       }));
     }
   };
 
-  // Export Lembaga Table to PDF & Excel
+  // Export Lembaga Table to PDF & Excel (Auto-synced with Dynamic Form custom fields)
   const handleExportLembagaPDF = () => {
+    const baseHeaders = ['Nama Lembaga', 'NPSN & Jenjang', 'Porsi Kecil', 'Porsi Besar', 'Total Porsi', 'Rute', 'PIC MBG & Kontak', 'No. Rekening'];
+    const baseRows = filteredInstitutions.map(i => [
+      i.name,
+      `${i.npsn} (${i.level})`,
+      formatNumber(i.smallPortions),
+      formatNumber(i.largePortions),
+      formatNumber(i.totalPortions),
+      i.deliveryRoute,
+      `${i.picName} (${i.picPhone})`,
+      `${i.bankName || '-'}: ${i.accountNumber || '-'}`,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.institution_form,
+      baseHeaders,
+      baseRows,
+      filteredInstitutions
+    );
     exportTableToPDF({
       title: 'Daftar Lembaga & Kuota Penerima Manfaat MBG',
       subtitle: `Satuan Pelayanan Pemenuhan Gizi (SPPG) Probolinggo Krejengan Temenggungan 2`,
-      headers: ['Nama Lembaga', 'NPSN & Jenjang', 'Porsi Kecil', 'Porsi Besar', 'Total Porsi', 'Rute', 'PIC MBG & Kontak', 'No. Rekening'],
-      rows: filteredInstitutions.map(i => [
-        i.name,
-        `${i.npsn} (${i.level})`,
-        formatNumber(i.smallPortions),
-        formatNumber(i.largePortions),
-        formatNumber(i.totalPortions),
-        i.deliveryRoute,
-        `${i.picName} (${i.picPhone})`,
-        `${i.bankName || '-'}: ${i.accountNumber || '-'}`,
-      ]),
+      headers,
+      rows,
       fileName: 'Master_Penerima_Manfaat_Lembaga_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
@@ -330,67 +398,87 @@ export const InstitutionsModule: React.FC = () => {
   };
 
   const handleExportLembagaExcel = () => {
-    const dataToExport = filteredInstitutions.map(i => ({
-      'Nama Lembaga': i.name,
-      'NPSN': i.npsn,
-      'Jenjang': i.level,
-      'Jenis Lembaga': i.institutionType,
-      'Alamat Lengkap': i.address,
-      'Porsi Kecil': i.smallPortions,
-      'Porsi Besar': i.largePortions,
-      'Total Sasaran Porsi': i.totalPortions,
-      'Rute Distribusi': i.deliveryRoute,
-      'Urutan Antar': i.deliveryOrder,
-      'Nama PIC MBG': i.picName,
-      'No HP PIC': i.picPhone,
-      'Kepala Sekolah': i.contactPerson,
-      'Telepon Sekolah': i.phone,
-      'Bank Penerima': i.bankName || '-',
-      'Nomor Rekening': i.accountNumber || '-',
-      'Nama Pemilik Rekening': i.bankAccountName || '-',
-      'Catatan Alergi': i.allergiesNote || 'Tidak ada',
-      'Status': i.isActive ? 'Aktif' : 'Nonaktif',
-    }));
+    const dataToExport = filteredInstitutions.map(i =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.institution_form,
+        {
+          'Nama Lembaga': i.name,
+          'NPSN': i.npsn,
+          'Jenjang': i.level,
+          'Jenis Lembaga': i.institutionType,
+          'Alamat Lengkap': i.address,
+          'Porsi Kecil': i.smallPortions,
+          'Porsi Besar': i.largePortions,
+          'Total Sasaran Porsi': i.totalPortions,
+          'Rute Distribusi': i.deliveryRoute,
+          'Urutan Antar': i.deliveryOrder,
+          'Nama PIC MBG': i.picName,
+          'No HP PIC': i.picPhone,
+          'Kepala Sekolah': i.contactPerson,
+          'Telepon Sekolah': i.phone,
+          'Bank Penerima': i.bankName || '-',
+          'Nomor Rekening': i.accountNumber || '-',
+          'Nama Pemilik Rekening': i.bankAccountName || '-',
+          'Catatan Alergi': i.allergiesNote || 'Tidak ada',
+          'Status': i.isActive ? 'Aktif' : 'Nonaktif',
+        },
+        i
+      )
+    );
     exportToExcel(dataToExport, 'Master_Lembaga_Penerima_MBG_SPPG_TMG2', 'Lembaga Penerima');
   };
 
-  // Export Daily Attendance Log to Excel & PDF
+  // Export Daily Attendance Log to Excel & PDF (Auto-synced with Dynamic Form custom fields)
   const handleExportAttendanceExcel = () => {
-    const dataToExport = beneficiaryAttendance.map(log => ({
-      'Tanggal': log.date,
-      'Nama Lembaga': log.institutionName,
-      'Terdaftar Kecil': log.registeredSmall,
-      'Terdaftar Besar': log.registeredLarge,
-      'Total Terdaftar': log.totalRegistered,
-      'Tidak Hadir Kecil': log.absentSmall,
-      'Tidak Hadir Besar': log.absentLarge,
-      'Total Tidak Hadir': log.totalAbsent,
-      'Hadir Kecil (Aktual)': log.presentSmall,
-      'Hadir Besar (Aktual)': log.presentLarge,
-      'Jumlah Porsi Aktual': log.actualPortions,
-      'Tingkat Kehadiran (%)': ((log.actualPortions / log.totalRegistered) * 100).toFixed(1) + '%',
-      'Status BAST': log.bastConfirmed ? 'Terverifikasi' : 'Pending',
-      'Pencatat / PIC': log.recordedBy,
-      'Catatan': log.notes || '-',
-    }));
+    const dataToExport = beneficiaryAttendance.map(log =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.beneficiary_attendance_form,
+        {
+          'Tanggal': log.date,
+          'Nama Lembaga': log.institutionName,
+          'Terdaftar Kecil': log.registeredSmall,
+          'Terdaftar Besar': log.registeredLarge,
+          'Total Terdaftar': log.totalRegistered,
+          'Tidak Hadir Kecil': log.absentSmall,
+          'Tidak Hadir Besar': log.absentLarge,
+          'Total Tidak Hadir': log.totalAbsent,
+          'Hadir Kecil (Aktual)': log.presentSmall,
+          'Hadir Besar (Aktual)': log.presentLarge,
+          'Jumlah Porsi Aktual': log.actualPortions,
+          'Tingkat Kehadiran (%)': ((log.actualPortions / log.totalRegistered) * 100).toFixed(1) + '%',
+          'Status BAST': log.bastConfirmed ? 'Terverifikasi' : 'Pending',
+          'Pencatat / PIC': log.recordedBy,
+          'Catatan': log.notes || '-',
+        },
+        log
+      )
+    );
     exportToExcel(dataToExport, 'Log_Presensi_Penerima_Manfaat_MBG', 'Presensi Harian');
   };
 
   const handleExportAttendancePDF = () => {
+    const baseHeaders = ['Tanggal', 'Lembaga', 'Terdaftar', 'Tidak Hadir', 'Porsi Aktual', 'Kehadiran %', 'BAST', 'Pencatat'];
+    const baseRows = beneficiaryAttendance.map(log => [
+      formatIndonesianDate(log.date),
+      log.institutionName,
+      formatNumber(log.totalRegistered),
+      formatNumber(log.totalAbsent),
+      formatNumber(log.actualPortions),
+      `${((log.actualPortions / log.totalRegistered) * 100).toFixed(1)}%`,
+      log.bastConfirmed ? 'Sudah BAST' : 'Pending',
+      log.recordedBy,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.beneficiary_attendance_form,
+      baseHeaders,
+      baseRows,
+      beneficiaryAttendance
+    );
     exportTableToPDF({
       title: 'Rekapitulasi Log Presensi & Kehadiran Penerima Manfaat MBG',
       subtitle: `SPPG Probolinggo Krejengan Temenggungan 2 - Yayasan Hafshawaty`,
-      headers: ['Tanggal', 'Lembaga', 'Terdaftar', 'Tidak Hadir', 'Porsi Aktual', 'Kehadiran %', 'BAST', 'Pencatat'],
-      rows: beneficiaryAttendance.map(log => [
-        formatIndonesianDate(log.date),
-        log.institutionName,
-        formatNumber(log.totalRegistered),
-        formatNumber(log.totalAbsent),
-        formatNumber(log.actualPortions),
-        `${((log.actualPortions / log.totalRegistered) * 100).toFixed(1)}%`,
-        log.bastConfirmed ? 'Sudah BAST' : 'Pending',
-        log.recordedBy,
-      ]),
+      headers,
+      rows,
       fileName: 'Log_Presensi_Kehadiran_MBG_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
@@ -470,20 +558,28 @@ export const InstitutionsModule: React.FC = () => {
     };
   }, [dailyRekapLogs]);
 
-  // Export Daily Rekap to PDF
+  // Export Daily Rekap to PDF (Auto-synced with Dynamic Form custom fields)
   const handleExportDailyRekapPDF = () => {
+    const baseHeaders = ['Lembaga', 'Terdaftar (K/B/T)', 'Tidak Hadir', 'Porsi Aktual (K/B/T)', 'Tingkat Kehadiran', 'Status BAST'];
+    const baseRows = dailyRekapLogs.map(l => [
+      l.institutionName,
+      `${l.registeredSmall} / ${l.registeredLarge} / ${l.totalRegistered}`,
+      `${l.totalAbsent} siswa`,
+      `${l.presentSmall} / ${l.presentLarge} / ${l.actualPortions}`,
+      `${((l.actualPortions / l.totalRegistered) * 100).toFixed(1)}%`,
+      l.bastConfirmed ? 'Sudah BAST' : 'Pending Verifikasi',
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.beneficiary_attendance_form,
+      baseHeaders,
+      baseRows,
+      dailyRekapLogs
+    );
     exportTableToPDF({
       title: `Rekapitulasi Distribusi & Kehadiran Harian MBG`,
       subtitle: `Tanggal: ${formatIndonesianDate(rekapDate)} • SPPG Probolinggo Krejengan Temenggungan 2`,
-      headers: ['Lembaga', 'Terdaftar (K/B/T)', 'Tidak Hadir', 'Porsi Aktual (K/B/T)', 'Tingkat Kehadiran', 'Status BAST'],
-      rows: dailyRekapLogs.map(l => [
-        l.institutionName,
-        `${l.registeredSmall} / ${l.registeredLarge} / ${l.totalRegistered}`,
-        `${l.totalAbsent} siswa`,
-        `${l.presentSmall} / ${l.presentLarge} / ${l.actualPortions}`,
-        `${((l.actualPortions / l.totalRegistered) * 100).toFixed(1)}%`,
-        l.bastConfirmed ? 'Sudah BAST' : 'Pending Verifikasi',
-      ]),
+      headers,
+      rows,
       fileName: `Rekap_Distribusi_Harian_${rekapDate}_SPPG_TMG2`,
       sppgConfig,
       signerName: sppgConfig.headOfSppg,
@@ -598,6 +694,7 @@ export const InstitutionsModule: React.FC = () => {
         </div>
       ),
     },
+    ...buildDynamicTableColumns<Institution>(dynamicFormSchemas.institution_form),
     {
       key: 'actions',
       header: 'Aksi & Kelola',
@@ -670,6 +767,30 @@ export const InstitutionsModule: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Dynamic & Editable Form Toggle Bar (Admin/Superuser Only) */}
+      <DynamicFormEditToggleBar
+        formId={builderFormId}
+        isEditing={isEditingFormSchema}
+        onToggleEdit={() => setIsEditingFormSchema(v => !v)}
+        extraSelector={
+          <select
+            value={builderFormId}
+            onChange={e => setBuilderFormId(e.target.value as DynamicFormId)}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+          >
+            <option value="institution_form">Form Data Penerima Gizi</option>
+            <option value="beneficiary_attendance_form">Form Presensi Harian</option>
+          </select>
+        }
+      />
+
+      {isEditingFormSchema && (
+        <DynamicFormBuilderPanel
+          formId={builderFormId}
+          onClose={() => setIsEditingFormSchema(false)}
+        />
+      )}
 
       {/* KPI Cards: High-level Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -824,204 +945,171 @@ export const InstitutionsModule: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmitAttendance} className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Tanggal */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Tanggal Distribusi / Kehadiran *
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={attendanceForm.date}
-                    onChange={e => setAttendanceForm({ ...attendanceForm, date: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+              {(() => {
+                const absentSmallField = dynamicFormSchemas.beneficiary_attendance_form.fields.find(
+                  f => f.key === 'absentSmall'
+                );
+                const absentLargeField = dynamicFormSchemas.beneficiary_attendance_form.fields.find(
+                  f => f.key === 'absentLarge'
+                );
+                return (
+                  <DynamicFormRenderer
+                    schema={dynamicFormSchemas.beneficiary_attendance_form}
+                    values={{
+                      ...attendanceForm,
+                      ...(attendanceForm.customFields || {}),
+                    }}
+                    excludeKeys={['absentSmall', 'absentLarge']}
+                    dynamicOptions={{
+                      institutionId: institutions.map(inst => ({
+                        value: inst.id,
+                        label: `${inst.name} (${inst.level}) — Kuota: ${formatNumber(inst.totalPortions)} porsi (Kecil: ${inst.smallPortions}, Besar: ${inst.largePortions})`,
+                      })),
+                    }}
+                    onChange={(key, value, field) => {
+                      if (field.isSystem) {
+                        setAttendanceForm(prev => ({ ...prev, [key]: value }));
+                      } else {
+                        setAttendanceForm(prev => ({
+                          ...prev,
+                          customFields: { ...(prev.customFields || {}), [key]: value },
+                        }));
+                      }
+                    }}
+                    onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+                    afterFieldRender={field => {
+                      if (field.key !== 'institutionId') return null;
+                      return (
+                        <div className="md:col-span-2 space-y-4">
+                          {/* Quota vs Absent Input Cards */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                            {/* Porsi Kecil Section */}
+                            <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-sky-700 dark:text-sky-300">
+                                  Porsi Kecil (TK/PAUD & Kelas 1-3)
+                                </span>
+                                <span className="text-xs font-mono font-bold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded">
+                                  Terdaftar: {formatNumber(registeredSmallCurrent)} siswa
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 pt-1">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
+                                    {absentSmallField?.label || 'Jumlah Tidak Hadir (Kecil)'} *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={registeredSmallCurrent}
+                                    required={absentSmallField?.required ?? true}
+                                    value={attendanceForm.absentSmall}
+                                    onChange={e => setAttendanceForm({ ...attendanceForm, absentSmall: Number(e.target.value) })}
+                                    className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
+                                      isAbsentSmallInvalid
+                                        ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
+                                        : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
+                                    }`}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
+                                    Porsi Aktual Hadir (Kecil)
+                                  </label>
+                                  <div className="w-full px-3 py-2 text-xs rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 font-mono font-black text-emerald-800 dark:text-emerald-300">
+                                    {presentSmallCalculated} porsi
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isAbsentSmallInvalid && (
+                                <div className="text-[11px] text-rose-600 flex items-center gap-1 font-semibold mt-1">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Tidak hadir ({absentSmallCurrent}) melebihi kuota terdaftar ({registeredSmallCurrent})!</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Porsi Besar Section */}
+                            <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                                  Porsi Besar (Kelas 4-6, SMP, SMA, Santri)
+                                </span>
+                                <span className="text-xs font-mono font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 px-2 py-0.5 rounded">
+                                  Terdaftar: {formatNumber(registeredLargeCurrent)} siswa
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 pt-1">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
+                                    {absentLargeField?.label || 'Jumlah Tidak Hadir (Besar)'} *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={registeredLargeCurrent}
+                                    required={absentLargeField?.required ?? true}
+                                    value={attendanceForm.absentLarge}
+                                    onChange={e => setAttendanceForm({ ...attendanceForm, absentLarge: Number(e.target.value) })}
+                                    className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
+                                      isAbsentLargeInvalid
+                                        ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
+                                        : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
+                                    }`}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
+                                    Porsi Aktual Hadir (Besar)
+                                  </label>
+                                  <div className="w-full px-3 py-2 text-xs rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 font-mono font-black text-emerald-800 dark:text-emerald-300">
+                                    {presentLargeCalculated} porsi
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isAbsentLargeInvalid && (
+                                <div className="text-[11px] text-rose-600 flex items-center gap-1 font-semibold mt-1">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Tidak hadir ({absentLargeCurrent}) melebihi kuota terdaftar ({registeredLargeCurrent})!</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Live Formula Result Banner */}
+                          <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                            <div className="space-y-1">
+                              <div className="text-xs uppercase tracking-wider text-sky-300 font-bold">
+                                Kalkulasi Otomatis Porsi Aktual Lembaga:
+                              </div>
+                              <div className="text-sm font-semibold flex flex-wrap items-center gap-2">
+                                <span>Terdaftar ({totalRegisteredCurrent})</span>
+                                <span>-</span>
+                                <span className="text-rose-300">Tidak Hadir ({totalAbsentCurrent})</span>
+                                <span>=</span>
+                                <span className="text-xl font-black text-white bg-white/20 px-2 py-0.5 rounded">
+                                  {actualPortionsCalculated} Porsi Aktual
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right sm:border-l sm:border-white/20 sm:pl-4">
+                              <div className="text-[10px] text-sky-300 uppercase font-semibold">Tingkat Kehadiran</div>
+                              <div className="text-2xl font-black text-sky-300">{attendanceRateCalculated}%</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }}
                   />
-                </div>
+                );
+              })()}
 
-                {/* Pilih Lembaga */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Pilih Lembaga Penerima Sasaran *
-                  </label>
-                  <select
-                    value={attendanceForm.institutionId}
-                    onChange={e => setAttendanceForm({ ...attendanceForm, institutionId: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                  >
-                    {institutions.map(inst => (
-                      <option key={inst.id} value={inst.id}>
-                        {inst.name} ({inst.level}) — Kuota: {formatNumber(inst.totalPortions)} porsi (Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Quota vs Absent Input Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-                {/* Porsi Kecil Section */}
-                <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-sky-700 dark:text-sky-300">
-                      Porsi Kecil (TK/PAUD & Kelas 1-3)
-                    </span>
-                    <span className="text-xs font-mono font-bold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 px-2 py-0.5 rounded">
-                      Terdaftar: {formatNumber(registeredSmallCurrent)} siswa
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
-                        Jumlah Tidak Hadir (Kecil) *
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max={registeredSmallCurrent}
-                        required
-                        value={attendanceForm.absentSmall}
-                        onChange={e => setAttendanceForm({ ...attendanceForm, absentSmall: Number(e.target.value) })}
-                        className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
-                          isAbsentSmallInvalid
-                            ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
-                            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
-                        Porsi Aktual Hadir (Kecil)
-                      </label>
-                      <div className="w-full px-3 py-2 text-xs rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 font-mono font-black text-emerald-800 dark:text-emerald-300">
-                        {presentSmallCalculated} porsi
-                      </div>
-                    </div>
-                  </div>
-
-                  {isAbsentSmallInvalid && (
-                    <div className="text-[11px] text-rose-600 flex items-center gap-1 font-semibold mt-1">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Tidak hadir ({absentSmallCurrent}) melebihi kuota terdaftar ({registeredSmallCurrent})!</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Porsi Besar Section */}
-                <div className="space-y-2 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                      Porsi Besar (Kelas 4-6, SMP, SMA, Santri)
-                    </span>
-                    <span className="text-xs font-mono font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 px-2 py-0.5 rounded">
-                      Terdaftar: {formatNumber(registeredLargeCurrent)} siswa
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
-                        Jumlah Tidak Hadir (Besar) *
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max={registeredLargeCurrent}
-                        required
-                        value={attendanceForm.absentLarge}
-                        onChange={e => setAttendanceForm({ ...attendanceForm, absentLarge: Number(e.target.value) })}
-                        className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
-                          isAbsentLargeInvalid
-                            ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
-                            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 mb-1">
-                        Porsi Aktual Hadir (Besar)
-                      </label>
-                      <div className="w-full px-3 py-2 text-xs rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 font-mono font-black text-emerald-800 dark:text-emerald-300">
-                        {presentLargeCalculated} porsi
-                      </div>
-                    </div>
-                  </div>
-
-                  {isAbsentLargeInvalid && (
-                    <div className="text-[11px] text-rose-600 flex items-center gap-1 font-semibold mt-1">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Tidak hadir ({absentLargeCurrent}) melebihi kuota terdaftar ({registeredLargeCurrent})!</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Live Formula Result Banner */}
-              <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
-                <div className="space-y-1">
-                  <div className="text-xs uppercase tracking-wider text-sky-300 font-bold">
-                    Kalkulasi Otomatis Porsi Aktual Lembaga:
-                  </div>
-                  <div className="text-sm font-semibold flex flex-wrap items-center gap-2">
-                    <span>Terdaftar ({totalRegisteredCurrent})</span>
-                    <span>-</span>
-                    <span className="text-rose-300">Tidak Hadir ({totalAbsentCurrent})</span>
-                    <span>=</span>
-                    <span className="text-xl font-black text-white bg-white/20 px-2 py-0.5 rounded">
-                      {actualPortionsCalculated} Porsi Aktual
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right sm:border-l sm:border-white/20 sm:pl-4">
-                  <div className="text-[10px] text-sky-300 uppercase font-semibold">Tingkat Kehadiran</div>
-                  <div className="text-2xl font-black text-sky-300">{attendanceRateCalculated}%</div>
-                </div>
-              </div>
-
-              {/* Extra Meta: Notes, Recorder, BAST */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Catatan Presensi & Distribusi (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Contoh: 3 anak sakit flu, ompreng dibagikan habis."
-                    value={attendanceForm.notes}
-                    onChange={e => setAttendanceForm({ ...attendanceForm, notes: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Petugas / PIC Pencatat Kehadiran *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={attendanceForm.recordedBy}
-                    onChange={e => setAttendanceForm({ ...attendanceForm, recordedBy: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={attendanceForm.bastConfirmed}
-                    onChange={e => setAttendanceForm({ ...attendanceForm, bastConfirmed: e.target.checked })}
-                    className="w-4 h-4 rounded text-blue-900 focus:ring-sky-500"
-                  />
-                  <span>
-                    Konfirmasi Berita Acara Serah Terima (BAST) & Kehadiran Fisik Siswa Telah Diverifikasi
-                  </span>
-                </label>
-
+              <div className="flex justify-end pt-2">
                 <button
                   type="submit"
                   disabled={isAttendanceInvalid}
@@ -1133,6 +1221,9 @@ export const InstitutionsModule: React.FC = () => {
                   </span>
                 ),
               },
+              ...buildDynamicTableColumns<BeneficiaryAttendanceLog>(
+                dynamicFormSchemas.beneficiary_attendance_form
+              ),
               {
                 key: 'actions',
                 header: 'Aksi BAST',
@@ -1349,97 +1440,114 @@ export const InstitutionsModule: React.FC = () => {
           </div>
 
           {/* Comprehensive Daily Table */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">No</th>
-                    <th className="p-3">Nama Lembaga & Jenjang</th>
-                    <th className="p-3 text-center">Terdaftar (K / B / Total)</th>
-                    <th className="p-3 text-center text-rose-600">Tidak Hadir (K / B / Total)</th>
-                    <th className="p-3 text-center text-emerald-700 dark:text-emerald-400">Porsi Aktual (K / B / Total)</th>
-                    <th className="p-3 text-center">% Kehadiran</th>
-                    <th className="p-3 text-center">Status BAST</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {dailyRekapLogs.map((item, idx) => {
-                    const rate = ((item.actualPortions / item.totalRegistered) * 100).toFixed(1);
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
-                        <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900 dark:text-white">
-                            {item.institutionName}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {item.notes || 'Normal'}
-                          </div>
-                        </td>
-                        <td className="p-3 text-center font-mono">
-                          <span className="font-bold text-slate-800 dark:text-slate-200">
-                            {item.totalRegistered}
-                          </span>
-                          <div className="text-[10px] text-slate-400">
-                            {item.registeredSmall} / {item.registeredLarge}
-                          </div>
-                        </td>
-                        <td className="p-3 text-center font-mono text-rose-600 font-bold">
-                          {item.totalAbsent}
-                          <div className="text-[10px] text-rose-400 font-normal">
-                            {item.absentSmall} / {item.absentLarge}
-                          </div>
-                        </td>
-                        <td className="p-3 text-center font-mono text-emerald-700 dark:text-emerald-400 font-black">
-                          {item.actualPortions}
-                          <div className="text-[10px] text-emerald-600 font-normal">
-                            {item.presentSmall} / {item.presentLarge}
-                          </div>
-                        </td>
-                        <td className="p-3 text-center font-mono font-bold text-sky-700 dark:text-sky-300">
-                          {rate}%
+          {(() => {
+            const customAttFields = getCustomTableFields(
+              dynamicFormSchemas.beneficiary_attendance_form
+            );
+            return (
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                        <th className="p-3">No</th>
+                        <th className="p-3">Nama Lembaga & Jenjang</th>
+                        <th className="p-3 text-center">Terdaftar (K / B / Total)</th>
+                        <th className="p-3 text-center text-rose-600">Tidak Hadir (K / B / Total)</th>
+                        <th className="p-3 text-center text-emerald-700 dark:text-emerald-400">Porsi Aktual (K / B / Total)</th>
+                        <th className="p-3 text-center">% Kehadiran</th>
+                        <th className="p-3 text-center">Status BAST</th>
+                        {customAttFields.map(cf => (
+                          <th key={cf.id} className="p-3 text-center">
+                            {cf.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {dailyRekapLogs.map((item, idx) => {
+                        const rate = ((item.actualPortions / item.totalRegistered) * 100).toFixed(1);
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
+                            <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900 dark:text-white">
+                                {item.institutionName}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {item.notes || 'Normal'}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center font-mono">
+                              <span className="font-bold text-slate-800 dark:text-slate-200">
+                                {item.totalRegistered}
+                              </span>
+                              <div className="text-[10px] text-slate-400">
+                                {item.registeredSmall} / {item.registeredLarge}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center font-mono text-rose-600 font-bold">
+                              {item.totalAbsent}
+                              <div className="text-[10px] text-rose-400 font-normal">
+                                {item.absentSmall} / {item.absentLarge}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center font-mono text-emerald-700 dark:text-emerald-400 font-black">
+                              {item.actualPortions}
+                              <div className="text-[10px] text-emerald-600 font-normal">
+                                {item.presentSmall} / {item.presentLarge}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center font-mono font-bold text-sky-700 dark:text-sky-300">
+                              {rate}%
+                            </td>
+                            <td className="p-3 text-center">
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  item.bastConfirmed
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                }`}
+                              >
+                                {item.bastConfirmed ? 'Sudah BAST' : 'Pending'}
+                              </span>
+                            </td>
+                            {customAttFields.map(cf => (
+                              <td key={cf.id} className="p-3 text-center text-xs text-slate-700 dark:text-slate-300">
+                                {formatDynamicFieldValue(cf, item.customFields?.[cf.key])}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-blue-900 text-white font-bold font-mono">
+                        <td colSpan={2} className="p-3 text-right uppercase tracking-wider">
+                          TOTAL KESELURUHAN ({dailyRekapLogs.length} Lembaga):
                         </td>
                         <td className="p-3 text-center">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                              item.bastConfirmed
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                            }`}
-                          >
-                            {item.bastConfirmed ? 'Sudah BAST' : 'Pending'}
-                          </span>
+                          {dailyRekapSummary.regTotal} ({dailyRekapSummary.regSmall}/{dailyRekapSummary.regLarge})
+                        </td>
+                        <td className="p-3 text-center text-rose-300">
+                          {dailyRekapSummary.absTotal} ({dailyRekapSummary.absSmall}/{dailyRekapSummary.absLarge})
+                        </td>
+                        <td className="p-3 text-center text-emerald-300 text-sm">
+                          {dailyRekapSummary.actTotal} ({dailyRekapSummary.actSmall}/{dailyRekapSummary.actLarge})
+                        </td>
+                        <td className="p-3 text-center text-sky-300 text-sm">
+                          {dailyRekapSummary.overallRate}%
+                        </td>
+                        <td className="p-3 text-center text-xs" colSpan={1 + customAttFields.length}>
+                          100% Tercatat
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-blue-900 text-white font-bold font-mono">
-                    <td colSpan={2} className="p-3 text-right uppercase tracking-wider">
-                      TOTAL KESELURUHAN ({dailyRekapLogs.length} Lembaga):
-                    </td>
-                    <td className="p-3 text-center">
-                      {dailyRekapSummary.regTotal} ({dailyRekapSummary.regSmall}/{dailyRekapSummary.regLarge})
-                    </td>
-                    <td className="p-3 text-center text-rose-300">
-                      {dailyRekapSummary.absTotal} ({dailyRekapSummary.absSmall}/{dailyRekapSummary.absLarge})
-                    </td>
-                    <td className="p-3 text-center text-emerald-300 text-sm">
-                      {dailyRekapSummary.actTotal} ({dailyRekapSummary.actSmall}/{dailyRekapSummary.actLarge})
-                    </td>
-                    <td className="p-3 text-center text-sky-300 text-sm">
-                      {dailyRekapSummary.overallRate}%
-                    </td>
-                    <td className="p-3 text-center text-xs">
-                      100% Tercatat
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1692,228 +1800,53 @@ export const InstitutionsModule: React.FC = () => {
         onClose={() => setIsLembagaModalOpen(false)}
         title={selectedInst ? 'Edit Data Lembaga Penerima' : 'Tambah Lembaga Sasaran MBG Baru'}
         subtitle="Lengkapi data institusi, kontak PIC, nomor rekening, dan kuota awal"
-        maxWidth="2xl"
+        maxWidth="3xl"
       >
         <form onSubmit={handleSaveLembaga} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Lembaga Sekolah / Madrasah *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: SDN Temenggungan 1"
-                value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jenjang *
-              </label>
-              <select
-                value={formData.level}
-                onChange={e => setFormData({ ...formData, level: e.target.value as any })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              >
-                {['PAUD', 'SD', 'MI', 'SMP', 'MTs', 'SMA', 'SMK', 'Pesantren'].map(l => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                NPSN / Kode Lembaga *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: 20546781"
-                value={formData.npsn}
-                onChange={e => setFormData({ ...formData, npsn: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jenis Lembaga *
-              </label>
-              <select
-                value={formData.institutionType}
-                onChange={e => setFormData({ ...formData, institutionType: e.target.value as any })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              >
-                <option value="Sekolah Dasar (SD)">Sekolah Dasar (SD)</option>
-                <option value="Madrasah Ibtidaiyah (MI)">Madrasah Ibtidaiyah (MI)</option>
-                <option value="SMP">SMP</option>
-                <option value="MTs">MTs</option>
-                <option value="SMA">SMA</option>
-                <option value="SMK">SMK</option>
-                <option value="PAUD/TK">PAUD/TK</option>
-                <option value="Pondok Pesantren">Pondok Pesantren</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Rute Pengantaran *
-              </label>
-              <select
-                value={formData.deliveryRoute}
-                onChange={e => setFormData({ ...formData, deliveryRoute: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              >
-                <option value="Rute A - Temenggungan">Rute A - Temenggungan</option>
-                <option value="Rute B - Hafshawaty Sentral">Rute B - Hafshawaty Sentral</option>
-                <option value="Rute C - Krejengan Raya">Rute C - Krejengan Raya</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Alamat Lengkap Lembaga *
-            </label>
-            <input
-              type="text"
-              required
-              placeholder="Contoh: Dusun Krajan RT 01/RW 01, Desa Temenggungan, Kec. Krejengan"
-              value={formData.address}
-              onChange={e => setFormData({ ...formData, address: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+          <DynamicFormEditToggleBar
+            formId="institution_form"
+            isEditing={isModalSchemaEdit}
+            onToggleEdit={() => setIsModalSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="institution_form"
+              onClose={() => setIsModalSchemaEdit(false)}
             />
-          </div>
+          )}
 
-          {/* Kuota Penerima */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div>
-              <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
-                Porsi Kecil (PAUD / SD 1-3)
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.smallPortions}
-                onChange={e => setFormData({ ...formData, smallPortions: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
-                Porsi Besar (SD 4-6, SMP, Santri)
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={formData.largePortions}
-                onChange={e => setFormData({ ...formData, largePortions: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Total Porsi (Otomatis)
-              </label>
-              <div className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-black text-blue-900 dark:text-sky-400">
-                {Number(formData.smallPortions) + Number(formData.largePortions)} porsi
-              </div>
-            </div>
-          </div>
-
-          {/* PIC & Bank Info */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Guru PIC MBG Sekolah *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: Hariyanto, S.Pd."
-                value={formData.picName}
-                onChange={e => setFormData({ ...formData, picName: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                No. HP / WhatsApp PIC *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: 0812-9988-7711"
-                value={formData.picPhone}
-                onChange={e => setFormData({ ...formData, picPhone: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Bank Rekening
-              </label>
-              <input
-                type="text"
-                placeholder="Bank Jatim / BRI / BSI"
-                value={formData.bankName}
-                onChange={e => setFormData({ ...formData, bankName: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nomor Rekening
-              </label>
-              <input
-                type="text"
-                placeholder="0132-9981-22"
-                value={formData.accountNumber}
-                onChange={e => setFormData({ ...formData, accountNumber: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Atas Nama Rekening
-              </label>
-              <input
-                type="text"
-                placeholder="BOS SDN Temenggungan 1"
-                value={formData.bankAccountName}
-                onChange={e => setFormData({ ...formData, bankAccountName: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Catatan Alergi Siswa (Bila Ada)
-            </label>
-            <input
-              type="text"
-              placeholder="Contoh: 2 siswa intoleran laktosa susu sapi, 1 siswa alergi telur."
-              value={formData.allergiesNote}
-              onChange={e => setFormData({ ...formData, allergiesNote: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.institution_form}
+            values={{
+              ...formData,
+              ...(formData.customFields || {}),
+            }}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setFormData(prev => ({ ...prev, [key]: value }));
+              } else {
+                setFormData(prev => ({
+                  ...prev,
+                  customFields: { ...(prev.customFields || {}), [key]: value },
+                }));
+              }
+            }}
+            onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+            afterFieldRender={field => {
+              if (field.key !== 'largePortions') return null;
+              return (
+                <div className="md:col-span-2 p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 flex items-center justify-between text-xs">
+                  <span className="font-bold text-blue-900 dark:text-sky-300">
+                    Total Kuota Porsi Lembaga (Otomatis):
+                  </span>
+                  <span className="font-mono font-black text-blue-900 dark:text-sky-300 text-sm">
+                    {Number(formData.smallPortions || 0) + Number(formData.largePortions || 0)} porsi
+                  </span>
+                </div>
+              );
+            }}
+          />
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button

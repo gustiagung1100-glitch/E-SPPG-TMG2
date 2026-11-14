@@ -7,6 +7,19 @@ import { PrintHeader } from '../common/PrintHeader';
 import { exportTableToPDF, exportToExcel, formatRupiah, formatNumber, formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
 import { FinancialTransaction, FinancialApprovalStatus, BankAccountType } from '../../types';
 import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  getCustomTableFields,
+  getInitialCustomFieldValues,
+  formatDynamicFieldValue,
+} from '../../lib/dynamicFormSchemas';
+import {
   Wallet,
   Plus,
   ArrowUpRight,
@@ -53,9 +66,13 @@ export const FinanceModule: React.FC = () => {
     currentUser,
     hasPermission,
     sppgConfig,
+    dynamicFormSchemas,
+    addToast,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<FinanceTab>('bku');
+  const [isEditingFinanceForm, setIsEditingFinanceForm] = useState(false);
+  const [isModalFinanceSchemaEdit, setIsModalFinanceSchemaEdit] = useState(false);
 
   // Filter & Search States
   const [searchTerm, setSearchTerm] = useState('');
@@ -100,6 +117,7 @@ export const FinanceModule: React.FC = () => {
     proofFileUrl: string;
     approvalStatus: FinancialApprovalStatus;
     notes: string;
+    customFields: Record<string, any>;
   }>({
     date: new Date().toISOString().slice(0, 10),
     category: 'Bahan Baku',
@@ -113,6 +131,7 @@ export const FinanceModule: React.FC = () => {
     proofFileUrl: 'https://images.unsplash.com/photo-1554415707-9e4466b404c0?auto=format&fit=crop&w=500&q=80',
     approvalStatus: 'Menunggu Persetujuan',
     notes: '',
+    customFields: {},
   });
 
   // Handle photo upload to base64
@@ -154,12 +173,23 @@ export const FinanceModule: React.FC = () => {
           ? 'Disetujui'
           : 'Menunggu Persetujuan',
       notes: '',
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.finance_tx_form),
     });
+    setIsModalFinanceSchemaEdit(false);
     setIsCreateModalOpen(true);
   };
 
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
+    const err = validateDynamicFormFields(dynamicFormSchemas.finance_tx_form, {
+      ...formData,
+      ...(formData.customFields || {}),
+    });
+    if (err) {
+      addToast('error', 'Validasi Form Keuangan', err);
+      return;
+    }
+
     const isApprovedImmediately = formData.approvalStatus === 'Disetujui';
     await addTransaction({
       transactionNumber: formData.proofNumber,
@@ -179,6 +209,7 @@ export const FinanceModule: React.FC = () => {
       approvedBy: isApprovedImmediately ? currentUser.name : undefined,
       approvedAt: isApprovedImmediately ? new Date().toLocaleString('id-ID') : undefined,
       notes: formData.notes,
+      customFields: formData.customFields || {},
     });
     setIsCreateModalOpen(false);
   };
@@ -417,21 +448,29 @@ export const FinanceModule: React.FC = () => {
     return financialTransactions.filter(t => t.approvalStatus === 'Menunggu Persetujuan');
   }, [financialTransactions]);
 
-  // Export handlers
+  // Export handlers (Auto-synced with custom fields from finance_tx_form)
   const handleExportPDF = () => {
+    const baseHeaders = ['No. Bukti', 'Tanggal', 'Uraian Transaksi', 'Rekening', 'Debet (Masuk)', 'Kredit (Keluar)', 'Status'];
+    const baseRows = filteredBKU.map(t => [
+      t.transactionNumber,
+      t.date,
+      `${t.description} (${t.sourceOrRecipient})`,
+      t.bankAccount.split(' (')[0],
+      t.debit > 0 ? formatRupiah(t.debit) : '-',
+      t.credit > 0 ? formatRupiah(t.credit) : '-',
+      t.approvalStatus,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.finance_tx_form,
+      baseHeaders,
+      baseRows,
+      filteredBKU
+    );
     exportTableToPDF({
       title: 'BUKU KAS UMUM (BKU) DAN LAPORAN ARUS KAS MBG',
       subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} (ID: ${sppgConfig.sppgId})`,
-      headers: ['No. Bukti', 'Tanggal', 'Uraian Transaksi', 'Rekening', 'Debet (Masuk)', 'Kredit (Keluar)', 'Status'],
-      rows: filteredBKU.map(t => [
-        t.transactionNumber,
-        t.date,
-        `${t.description} (${t.sourceOrRecipient})`,
-        t.bankAccount.split(' (')[0],
-        t.debit > 0 ? formatRupiah(t.debit) : '-',
-        t.credit > 0 ? formatRupiah(t.credit) : '-',
-        t.approvalStatus,
-      ]),
+      headers,
+      rows,
       fileName: `BKU_Keuangan_SPPG_TMG2_${new Date().toISOString().slice(0, 10)}`,
       sppgConfig,
       signerName: sppgConfig.financeOfficer,
@@ -440,22 +479,28 @@ export const FinanceModule: React.FC = () => {
   };
 
   const handleExportExcel = () => {
-    const dataToExport = filteredBKU.map(t => ({
-      'No. Bukti Transaksi': t.transactionNumber,
-      'Tanggal': t.date,
-      'Arus Kas': t.type,
-      'Kategori': t.category,
-      'Uraian Transaksi': t.description,
-      'Pihak Terkait / Rekanan': t.sourceOrRecipient,
-      'Rekening Pembukuan': t.bankAccount,
-      'Debet (Rp)': t.debit,
-      'Kredit (Rp)': t.credit,
-      'Saldo Berjalan (Rp)': t.runningBalance,
-      'Status Persetujuan': t.approvalStatus,
-      'Disetujui Oleh': t.approvedBy || '-',
-      'Tanggal Persetujuan': t.approvedAt || '-',
-      'Alasan Batal (Jika ada)': t.cancellationReason || '-',
-    }));
+    const dataToExport = filteredBKU.map(t =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.finance_tx_form,
+        {
+          'No. Bukti Transaksi': t.transactionNumber,
+          'Tanggal': t.date,
+          'Arus Kas': t.type,
+          'Kategori': t.category,
+          'Uraian Transaksi': t.description,
+          'Pihak Terkait / Rekanan': t.sourceOrRecipient,
+          'Rekening Pembukuan': t.bankAccount,
+          'Debet (Rp)': t.debit,
+          'Kredit (Rp)': t.credit,
+          'Saldo Berjalan (Rp)': t.runningBalance,
+          'Status Persetujuan': t.approvalStatus,
+          'Disetujui Oleh': t.approvedBy || '-',
+          'Tanggal Persetujuan': t.approvedAt || '-',
+          'Alasan Batal (Jika ada)': t.cancellationReason || '-',
+        },
+        t
+      )
+    );
     exportToExcel(dataToExport, `BKU_Keuangan_SPPG_TMG2_${new Date().toISOString().slice(0, 10)}`, 'Buku Kas Umum');
   };
 
@@ -558,6 +603,19 @@ export const FinanceModule: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
+      <DynamicFormEditToggleBar
+        formId="finance_tx_form"
+        isEditing={isEditingFinanceForm}
+        onToggleEdit={() => setIsEditingFinanceForm(v => !v)}
+      />
+      {isEditingFinanceForm && (
+        <DynamicFormBuilderPanel
+          formId="finance_tx_form"
+          onClose={() => setIsEditingFinanceForm(false)}
+        />
+      )}
 
       {/* ========================================================= */}
       {/* KARTU STATISTIK: REKAP SALDO KAS & RUMUS SALDO AKHIR      */}
@@ -804,13 +862,21 @@ export const FinanceModule: React.FC = () => {
                     <th className="py-3 px-4 text-right">Kredit (Keluar)</th>
                     <th className="py-3 px-4 text-right">Saldo Berjalan</th>
                     <th className="py-3 px-4 text-center">Status</th>
+                    {getCustomTableFields(dynamicFormSchemas.finance_tx_form).map(cf => (
+                      <th key={cf.id} className="py-3 px-4 text-left">
+                        {cf.label}
+                      </th>
+                    ))}
                     <th className="py-3 px-4 text-center">Aksi / Opsi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                   {paginatedBKU.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400 font-sans">
+                      <td
+                        colSpan={8 + getCustomTableFields(dynamicFormSchemas.finance_tx_form).length}
+                        className="py-12 text-center text-slate-400 font-sans"
+                      >
                         Tidak ada transaksi kas yang sesuai dengan filter pencarian.
                       </td>
                     </tr>
@@ -885,6 +951,23 @@ export const FinanceModule: React.FC = () => {
                               {t.approvalStatus}
                             </span>
                           </td>
+
+                          {/* Custom Fields Auto-Columns */}
+                          {getCustomTableFields(dynamicFormSchemas.finance_tx_form).map(cf => (
+                            <td key={cf.id} className="py-3 px-4 font-sans text-xs text-slate-700 dark:text-slate-300">
+                              {cf.type === 'photo' && t.customFields?.[cf.key] ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewPhotoUrl(String(t.customFields?.[cf.key]))}
+                                  className="inline-flex items-center gap-1 text-blue-800 dark:text-sky-400 underline"
+                                >
+                                  Lihat Foto
+                                </button>
+                              ) : (
+                                formatDynamicFieldValue(cf, t.customFields?.[cf.key])
+                              )}
+                            </td>
+                          ))}
 
                           {/* Aksi & Jejak Audit */}
                           <td className="py-3 px-4 font-sans text-center whitespace-nowrap">
@@ -1439,231 +1522,103 @@ export const FinanceModule: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL INPUT: KAS MASUK / KAS KELUAR                       */}
+      {/* MODAL INPUT: KAS MASUK / KAS KELUAR (DYNAMIC & EDITABLE)  */}
       {/* ========================================================= */}
       {isCreateModalOpen && (
         <Modal
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           title={`Input Transaksi ${createType === 'Pemasukan' ? 'Kas Masuk (BKM)' : 'Kas Keluar (BKK)'}`}
-          maxWidth="xl"
+          maxWidth="2xl"
         >
           <form onSubmit={handleSaveTransaction} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold mb-1">Nomor Bukti (Otomatis/Bisa Diedit)</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.proofNumber}
-                  onChange={e => setFormData(f => ({ ...f, proofNumber: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono"
-                />
-              </div>
-              <div>
-                <label className="block font-bold mb-1">Tanggal Transaksi</label>
-                <input
-                  type="date"
-                  required
-                  value={formData.date}
-                  onChange={e => setFormData(f => ({ ...f, date: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold mb-1">Kategori Transaksi</label>
-                <select
-                  required
-                  value={formData.category}
-                  onChange={e => setFormData(f => ({ ...f, category: e.target.value as any }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                >
-                  {createType === 'Pemasukan' ? (
-                    <>
-                      <option value="Dana Termin BGN">Dana Termin BGN (Badan Gizi Nasional)</option>
-                      <option value="Dana Talangan Yayasan">Dana Talangan Yayasan Hafshawaty</option>
-                      <option value="Operasional Dapur">Penerimaan Jasa / Lainnya</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="Bahan Baku">Bahan Baku Pangan MBG</option>
-                      <option value="Operasional Dapur">Operasional Dapur (Gas LPG, Air, Listrik)</option>
-                      <option value="Upah Relawan">Insentif & Upah Relawan</option>
-                      <option value="Logistik & Armada">Logistik, BBM & Armada Pengiriman</option>
-                      <option value="Perlengkapan">Perlengkapan, Kemasan & Ompreng</option>
-                      <option value="Utilitas Listrik/Gas/Air">Utilitas Listrik / Gas / Air</option>
-                      <option value="Higiene & Sanitasi">Higiene, Sanitasi & APD</option>
-                    </>
-                  )}
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">Nominal Transaksi (Rp)</label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  value={formData.amount}
-                  onChange={e => setFormData(f => ({ ...f, amount: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono text-base font-bold"
-                />
-                <span className="text-[11px] text-slate-500 mt-0.5 block">
-                  Terbilang: {formatRupiah(formData.amount)}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold mb-1">
-                  {createType === 'Pemasukan' ? 'Sumber Dana / Pengirim' : 'Pihak Penerima / Rekanan'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={createType === 'Pemasukan' ? 'Misal: KPPN Probolinggo / BGN' : 'Misal: UD Sembako Jaya'}
-                  value={formData.sourceOrRecipient}
-                  onChange={e => setFormData(f => ({ ...f, sourceOrRecipient: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">Pilih Master Supplier (Opsional)</label>
-                <select
-                  value={formData.supplierName}
-                  onChange={e => {
-                    const sup = e.target.value;
-                    setFormData(f => ({
-                      ...f,
-                      supplierName: sup,
-                      sourceOrRecipient: sup || f.sourceOrRecipient,
-                    }));
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                >
-                  <option value="">-- Pilih Supplier Terdaftar --</option>
-                  {masterSuppliers.map(s => (
-                    <option key={s.id} value={s.name}>
-                      {s.name} ({s.suppliedCategories?.join(', ') || s.code})
-                    </option>
-                  ))}
-                </select>
-                {formData.supplierName && (() => {
-                  const s = masterSuppliers.find(sup => sup.name === formData.supplierName);
-                  if (!s) return null;
-                  return (
-                    <div className="mt-1.5 p-2 bg-blue-50/70 dark:bg-slate-800/80 rounded-lg text-[11px] text-blue-900 dark:text-sky-300 border border-blue-200/60 dark:border-slate-700/80">
-                      <div><strong>Rekening:</strong> {s.bankName} - {s.accountNumber} (a.n. {s.bankAccountName || s.name})</div>
-                      <div><strong>PIC:</strong> {s.contactPerson} • {s.phone}</div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold mb-1">Rekening Pembukuan</label>
-                <select
-                  required
-                  value={formData.bankAccount}
-                  onChange={e => setFormData(f => ({ ...f, bankAccount: e.target.value as any }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                >
-                  <option value="Bank BRI SPPG Yayasan Hafshawaty (0034-01-00291-53-1)">
-                    Bank BRI SPPG Yayasan Hafshawaty
-                  </option>
-                  <option value="Bank Jatim Cab. Kraksaan (0132-99-8812)">
-                    Bank Jatim Cab. Kraksaan
-                  </option>
-                  <option value="Kas Tunai Dapur (Petty Cash)">
-                    Kas Tunai Dapur (Petty Cash)
-                  </option>
-                  <option value="Kas Operasional Lapangan">
-                    Kas Operasional Lapangan
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">Metode Pembayaran</label>
-                <select
-                  value={formData.paymentMethod}
-                  onChange={e => setFormData(f => ({ ...f, paymentMethod: e.target.value as any }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                >
-                  <option value="Transfer Bank">Transfer Bank / Virtual Account</option>
-                  <option value="Tunai">Tunai / Uang Pas</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block font-bold mb-1">Uraian / Deskripsi Transaksi</label>
-              <textarea
-                required
-                rows={2}
-                placeholder="Rincian peruntukan pengeluaran atau sumber dana pemasukan..."
-                value={formData.description}
-                onChange={e => setFormData(f => ({ ...f, description: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+            <DynamicFormEditToggleBar
+              formId="finance_tx_form"
+              isEditing={isModalFinanceSchemaEdit}
+              onToggleEdit={() => setIsModalFinanceSchemaEdit(v => !v)}
+              compact
+            />
+            {isModalFinanceSchemaEdit && (
+              <DynamicFormBuilderPanel
+                formId="finance_tx_form"
+                onClose={() => setIsModalFinanceSchemaEdit(false)}
               />
-            </div>
+            )}
 
-            {/* Upload Bukti */}
-            <div className="p-3.5 rounded-xl border bg-slate-50 dark:bg-slate-800/40 space-y-2">
-              <span className="font-bold text-slate-800 dark:text-white block">
-                Upload Bukti Kuitansi / Nota / Bukti Transfer:
-              </span>
-              <div className="flex items-center gap-3">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="text-xs"
-                />
-                {formData.proofFileUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setViewPhotoUrl(formData.proofFileUrl)}
-                    className="text-xs text-blue-900 dark:text-sky-400 font-bold hover:underline"
-                  >
-                    Preview Bukti
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Status Persetujuan */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold mb-1">Status Persetujuan</label>
-                <select
-                  value={formData.approvalStatus}
-                  onChange={e => setFormData(f => ({ ...f, approvalStatus: e.target.value as any }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                >
-                  <option value="Menunggu Persetujuan">Menunggu Persetujuan (Pengajuan)</option>
-                  <option value="Disetujui">Langsung Disetujui (Otorisasi Pimpinan)</option>
-                  <option value="Draft">Draft (Belum Diajukan)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block font-bold mb-1">Catatan Tambahan</label>
-                <input
-                  type="text"
-                  placeholder="Keterangan pendukung..."
-                  value={formData.notes}
-                  onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
-              </div>
-            </div>
+            <DynamicFormRenderer
+              schema={dynamicFormSchemas.finance_tx_form}
+              values={{
+                ...formData,
+                ...(formData.customFields || {}),
+              }}
+              onChange={(key, value, field) => {
+                if (field.isSystem) {
+                  setFormData(prev => ({ ...prev, [key]: value }));
+                } else {
+                  setFormData(prev => ({
+                    ...prev,
+                    customFields: { ...(prev.customFields || {}), [key]: value },
+                  }));
+                }
+              }}
+              onPreviewPhoto={url => setViewPhotoUrl(url)}
+              onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+              afterFieldRender={field => {
+                if (field.key !== 'sourceOrRecipient') return null;
+                return (
+                  <div className="md:col-span-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 dark:text-slate-300">
+                        Pilih Master Supplier (Opsional Auto-Isi)
+                      </label>
+                      <select
+                        value={formData.supplierName}
+                        onChange={e => {
+                          const sup = e.target.value;
+                          setFormData(f => ({
+                            ...f,
+                            supplierName: sup,
+                            sourceOrRecipient: sup || f.sourceOrRecipient,
+                          }));
+                        }}
+                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800"
+                      >
+                        <option value="">-- Pilih Supplier Terdaftar --</option>
+                        {masterSuppliers.map(s => (
+                          <option key={s.id} value={s.name}>
+                            {s.name} ({s.suppliedCategories?.join(', ') || s.code})
+                          </option>
+                        ))}
+                      </select>
+                      {formData.supplierName && (() => {
+                        const s = masterSuppliers.find(sup => sup.name === formData.supplierName);
+                        if (!s) return null;
+                        return (
+                          <div className="mt-1.5 p-2 bg-blue-50/70 dark:bg-slate-800/80 rounded-lg text-[11px] text-blue-900 dark:text-sky-300 border border-blue-200/60 dark:border-slate-700/80">
+                            <div><strong>Rekening:</strong> {s.bankName} - {s.accountNumber}</div>
+                            <div><strong>PIC:</strong> {s.contactPerson} • {s.phone}</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1 text-slate-700 dark:text-slate-300">
+                        Status Persetujuan Awal
+                      </label>
+                      <select
+                        value={formData.approvalStatus}
+                        onChange={e => setFormData(f => ({ ...f, approvalStatus: e.target.value as any }))}
+                        className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800"
+                      >
+                        <option value="Menunggu Persetujuan">Menunggu Persetujuan (Pengajuan)</option>
+                        <option value="Disetujui">Langsung Disetujui (Otorisasi Pimpinan)</option>
+                        <option value="Draft">Draft (Belum Diajukan)</option>
+                      </select>
+                    </div>
+                  </div>
+                );
+              }}
+            />
 
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button

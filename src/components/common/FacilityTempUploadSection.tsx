@@ -209,6 +209,44 @@ export function applyFacilityPhotoPatch(
   };
 }
 
+export const DEFAULT_FACILITY_HUMIDITY: Record<FacilityTempKey, number> = {
+  portioningRoomTemp: 55,
+  cookingRoomTemp: 58,
+  wetWarehouseTemp: 56,
+  dryWarehouseTemp: 52,
+  freezer1Temp: 45,
+  freezer2Temp: 44,
+  fridge1Temp: 54,
+  fridge2Temp: 58,
+  fridge3Temp: 57,
+  fridge4Temp: 53,
+};
+
+export function getFacilityHumidityValue(
+  temps: Partial<FacilityTemperatures> | undefined,
+  tempKey: FacilityTempKey
+): number {
+  const mapped = temps?.humidityMap?.[tempKey];
+  if (typeof mapped === 'number' && !Number.isNaN(mapped)) {
+    return mapped;
+  }
+  return DEFAULT_FACILITY_HUMIDITY[tempKey] ?? 55;
+}
+
+export function applyFacilityHumidityPatch(
+  current: FacilityTemperatures,
+  tempKey: FacilityTempKey,
+  nextHumidity: number
+): FacilityTemperatures {
+  return {
+    ...current,
+    humidityMap: {
+      ...(current.humidityMap || {}),
+      [tempKey]: nextHumidity,
+    },
+  };
+}
+
 export function processFacilityImageUpload(
   e: React.ChangeEvent<HTMLInputElement>,
   onSuccess: (dataUrl: string) => void,
@@ -545,17 +583,35 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
                 <span className="text-[10px] font-mono text-slate-400 shrink-0">{unit.standard}</span>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  step="0.1"
-                  value={tempVal}
-                  onChange={e =>
-                    onChange(applyFacilityTempPatch(value, unit.tempKey, Number(e.target.value)))
-                  }
-                  className="w-full px-2 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
-                />
-                <span className="text-[11px] font-mono text-slate-500">°C</span>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={tempVal}
+                    onChange={e =>
+                      onChange(applyFacilityTempPatch(value, unit.tempKey, Number(e.target.value)))
+                    }
+                    title="Suhu (°C)"
+                    className="w-full px-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
+                  />
+                  <span className="text-[10px] font-mono text-slate-500">°C</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    max="100"
+                    value={getFacilityHumidityValue(value, unit.tempKey)}
+                    onChange={e =>
+                      onChange(applyFacilityHumidityPatch(value, unit.tempKey, Number(e.target.value)))
+                    }
+                    title="Kelembapan (%)"
+                    className="w-full px-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
+                  />
+                  <span className="text-[10px] font-mono text-slate-500">%</span>
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5">

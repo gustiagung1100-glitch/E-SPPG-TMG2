@@ -22,6 +22,18 @@ import {
   QCStatusPLOK,
   QualityControlRecord,
 } from '../../types';
+import {
+  DynamicFormEditToggleBar,
+  DynamicFormBuilderPanel,
+  DynamicFormRenderer,
+  validateDynamicFormFields,
+} from '../common/DynamicFormBuilder';
+import {
+  appendDynamicExcelFields,
+  appendDynamicExportColumns,
+  buildDynamicTableColumns,
+  getInitialCustomFieldValues,
+} from '../../lib/dynamicFormSchemas';
 import { defaultRABItems, defaultQualityControlRecords } from '../../lib/plokData';
 import {
   ShoppingCart,
@@ -159,7 +171,12 @@ export const ProcurementModule: React.FC = () => {
     qualityControlRecords,
     addQualityControlRecord,
     updateQualityControlRecord,
+    dynamicFormSchemas,
   } = useApp();
+
+  // Dynamic Form Builder States (RAB)
+  const [isEditingRabSchema, setIsEditingRabSchema] = useState(false);
+  const [isModalRabSchemaEdit, setIsModalRabSchemaEdit] = useState(false);
 
   // Active Sub-Module Tab
   const [activeTab, setActiveTab] = useState<SubModuleTab>('rab');
@@ -185,6 +202,7 @@ export const ProcurementModule: React.FC = () => {
     status: 'Menunggu Persetujuan',
     poCreatedQuantity: 0,
     poCreatedAmount: 0,
+    customFields: {},
   });
 
   // --- STATE SUBMODUL B: PURCHASE ORDER (PO) ---
@@ -311,28 +329,60 @@ export const ProcurementModule: React.FC = () => {
       status: 'Menunggu Persetujuan',
       poCreatedQuantity: 0,
       poCreatedAmount: 0,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form),
+    });
+    setIsRABModalOpen(true);
+  };
+
+  const handleOpenEditRAB = (rab: RABItem) => {
+    setSelectedRAB(rab);
+    setRabForm({
+      category: rab.category,
+      budgetCode: rab.budgetCode,
+      planDate: rab.planDate,
+      periodMonth: rab.periodMonth,
+      itemName: rab.itemName,
+      volume: rab.volume,
+      unit: rab.unit,
+      unitPrice: rab.unitPrice,
+      notes: rab.notes || '',
+      status: rab.status,
+      approvedBy: rab.approvedBy,
+      poCreatedQuantity: rab.poCreatedQuantity || 0,
+      poCreatedAmount: rab.poCreatedAmount || 0,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form, rab.customFields),
     });
     setIsRABModalOpen(true);
   };
 
   const handleSaveRAB = async (e: React.FormEvent) => {
     e.preventDefault();
-    const calculatedTotal = Number(rabForm.volume) * Number(rabForm.unitPrice);
+    const rabErr = validateDynamicFormFields(dynamicFormSchemas.procurement_rab_form, {
+      ...rabForm,
+      ...(rabForm.customFields || {}),
+    });
+    if (rabErr) {
+      addToast('error', 'Validasi Form RAB', rabErr);
+      return;
+    }
 
     if (selectedRAB) {
       await updateRABItem(selectedRAB.id, {
         ...rabForm,
         volume: Number(rabForm.volume),
         unitPrice: Number(rabForm.unitPrice),
+        customFields: rabForm.customFields || {},
       });
     } else {
       await addRABItem({
         ...rabForm,
         volume: Number(rabForm.volume),
         unitPrice: Number(rabForm.unitPrice),
+        customFields: rabForm.customFields || {},
       });
     }
     setIsRABModalOpen(false);
+    setIsModalRabSchemaEdit(false);
   };
 
   const handleApproveRAB = async (rabId: string) => {
@@ -705,20 +755,28 @@ export const ProcurementModule: React.FC = () => {
   // EXPORTS
   // ---------------------------------------------------------------------------
   const handleExportRABPDF = () => {
+    const baseHeaders = ['Kode Anggaran', 'Kategori', 'Nama Barang', 'Volume', 'Harga Satuan', 'Total Anggaran', 'Status', 'Sisa Kuota PO'];
+    const baseRows = filteredRAB.map(r => [
+      r.budgetCode,
+      r.category,
+      r.itemName,
+      `${formatNumber(r.volume)} ${r.unit}`,
+      formatRupiah(r.unitPrice),
+      formatRupiah(r.totalBudget),
+      r.status,
+      `${formatNumber(Math.max(0, r.volume - (r.poCreatedQuantity || 0)))} ${r.unit}`,
+    ]);
+    const { headers, rows } = appendDynamicExportColumns(
+      dynamicFormSchemas.procurement_rab_form,
+      baseHeaders,
+      baseRows,
+      filteredRAB
+    );
     exportTableToPDF({
       title: 'Rencana Anggaran Belanja (RAB) SPPG TMG2',
       subtitle: 'Satuan Pelayanan Pemenuhan Gizi - Yayasan Hafshawaty Probolinggo',
-      headers: ['Kode Anggaran', 'Kategori', 'Nama Barang', 'Volume', 'Harga Satuan', 'Total Anggaran', 'Status', 'Sisa Kuota PO'],
-      rows: filteredRAB.map(r => [
-        r.budgetCode,
-        r.category,
-        r.itemName,
-        `${formatNumber(r.volume)} ${r.unit}`,
-        formatRupiah(r.unitPrice),
-        formatRupiah(r.totalBudget),
-        r.status,
-        `${formatNumber(Math.max(0, r.volume - (r.poCreatedQuantity || 0)))} ${r.unit}`,
-      ]),
+      headers,
+      rows,
       fileName: 'RAB_Operasional_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.financeOfficer,
@@ -727,23 +785,29 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const handleExportRABExcel = () => {
-    const data = filteredRAB.map(r => ({
-      'Kode Anggaran': r.budgetCode,
-      'Kategori': r.category,
-      'Periode': r.periodMonth,
-      'Tanggal Rencana': r.planDate,
-      'Nama Barang': r.itemName,
-      'Volume': r.volume,
-      'Satuan': r.unit,
-      'Harga Satuan (Rp)': r.unitPrice,
-      'Total Anggaran (Rp)': r.totalBudget,
-      'Keterangan': r.notes || '-',
-      'Status Persetujuan': r.status,
-      'Disetujui Oleh': r.approvedBy || '-',
-      'Volume PO Dibuat': r.poCreatedQuantity || 0,
-      'Nilai PO Dibuat': r.poCreatedAmount || 0,
-      'Sisa Volume Tersedia': Math.max(0, r.volume - (r.poCreatedQuantity || 0)),
-    }));
+    const data = filteredRAB.map(r =>
+      appendDynamicExcelFields(
+        dynamicFormSchemas.procurement_rab_form,
+        {
+          'Kode Anggaran': r.budgetCode,
+          'Kategori': r.category,
+          'Periode': r.periodMonth,
+          'Tanggal Rencana': r.planDate,
+          'Nama Barang': r.itemName,
+          'Volume': r.volume,
+          'Satuan': r.unit,
+          'Harga Satuan (Rp)': r.unitPrice,
+          'Total Anggaran (Rp)': r.totalBudget,
+          'Keterangan': r.notes || '-',
+          'Status Persetujuan': r.status,
+          'Disetujui Oleh': r.approvedBy || '-',
+          'Volume PO Dibuat': r.poCreatedQuantity || 0,
+          'Nilai PO Dibuat': r.poCreatedAmount || 0,
+          'Sisa Volume Tersedia': Math.max(0, r.volume - (r.poCreatedQuantity || 0)),
+        },
+        r
+      )
+    );
     exportToExcel(data, 'RAB_Operasional_Bahan_SPPG_TMG2', 'RAB SPPG');
   };
 
@@ -989,6 +1053,19 @@ export const ProcurementModule: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'rab' && (
         <div className="space-y-4">
+          {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
+          <DynamicFormEditToggleBar
+            formId="procurement_rab_form"
+            isEditing={isEditingRabSchema}
+            onToggleEdit={() => setIsEditingRabSchema(v => !v)}
+          />
+          {isEditingRabSchema && (
+            <DynamicFormBuilderPanel
+              formId="procurement_rab_form"
+              onClose={() => setIsEditingRabSchema(false)}
+            />
+          )}
+
           {/* Filter Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1176,12 +1253,27 @@ export const ProcurementModule: React.FC = () => {
                   </div>
                 ),
               },
+              ...buildDynamicTableColumns<RABItem>(
+                dynamicFormSchemas.procurement_rab_form,
+                (url, label) => setViewGallery({ urls: [url], index: 0, title: label })
+              ),
               {
                 key: 'actions',
                 header: 'Aksi Otorisasi & PO',
                 align: 'right',
                 render: row => (
                   <div className="flex items-center justify-end gap-1.5">
+                    {hasPermission('procurement', 'edit') && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditRAB(row)}
+                        className="p-1.5 text-blue-600 hover:text-blue-800 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                        title="Edit Item RAB"
+                      >
+                        <FileEdit className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
                     {/* Approve button for Chief / Finance */}
                     {row.status === 'Menunggu Persetujuan' && hasPermission('procurement', 'approve') && (
                       <button
@@ -1797,162 +1889,93 @@ export const ProcurementModule: React.FC = () => {
       {/* ========================================================================= */}
       <Modal
         isOpen={isRABModalOpen}
-        onClose={() => setIsRABModalOpen(false)}
+        onClose={() => {
+          setIsRABModalOpen(false);
+          setIsModalRabSchemaEdit(false);
+        }}
         title={selectedRAB ? 'Edit Item Rencana Anggaran Belanja (RAB)' : 'Tambah Item RAB Baru'}
         subtitle="Perhitungan otomatis: Total Anggaran = Volume × Harga Satuan"
         maxWidth="lg"
       >
         <form onSubmit={handleSaveRAB} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kategori RAB *
-              </label>
-              <select
-                value={rabForm.category}
-                onChange={e =>
-                  setRabForm({
-                    ...rabForm,
-                    category: e.target.value as RABCategory,
-                    budgetCode:
-                      e.target.value === 'RAB Bahan Pangan'
+          <DynamicFormEditToggleBar
+            formId="procurement_rab_form"
+            isEditing={isModalRabSchemaEdit}
+            onToggleEdit={() => setIsModalRabSchemaEdit(v => !v)}
+            compact
+          />
+          {isModalRabSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="procurement_rab_form"
+              onClose={() => setIsModalRabSchemaEdit(false)}
+            />
+          )}
+
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.procurement_rab_form}
+            values={{
+              ...rabForm,
+              ...(rabForm.customFields || {}),
+            }}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setRabForm(prev => {
+                  const next = { ...prev, [key]: value };
+                  if (key === 'category' && !selectedRAB) {
+                    next.budgetCode =
+                      value === 'RAB Bahan Pangan'
                         ? `RAB-BP-2026-11-00${rabList.length + 1}`
-                        : `RAB-OP-2026-11-00${rabList.length + 1}`,
-                  })
-                }
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                <option value="RAB Bahan Pangan">RAB Bahan Pangan</option>
-                <option value="RAB Operasional">RAB Operasional</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Kode Anggaran *
-              </label>
-              <input
-                type="text"
-                required
-                value={rabForm.budgetCode}
-                onChange={e => setRabForm({ ...rabForm, budgetCode: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Tanggal Perencanaan *
-              </label>
-              <input
-                type="date"
-                required
-                value={rabForm.planDate}
-                onChange={e => setRabForm({ ...rabForm, planDate: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Periode Anggaran *
-              </label>
-              <input
-                type="text"
-                required
-                value={rabForm.periodMonth}
-                onChange={e => setRabForm({ ...rabForm, periodMonth: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
+                        : `RAB-OP-2026-11-00${rabList.length + 1}`;
+                  }
+                  return next;
+                });
+              } else {
+                setRabForm(prev => ({
+                  ...prev,
+                  customFields: {
+                    ...(prev.customFields || {}),
+                    [key]: value,
+                  },
+                }));
+              }
+            }}
+            onPreviewPhoto={url =>
+              setViewGallery({ urls: [url], index: 0, title: rabForm.itemName || 'Lampiran RAB' })
+            }
+            onUploadError={msg => addToast('error', 'Upload Gagal', msg)}
+            afterFieldRender={field => {
+              if (field.key === 'unitPrice') {
+                return (
+                  <div className="md:col-span-2 bg-blue-50 dark:bg-blue-950/60 p-3 rounded-xl border border-blue-200 dark:border-blue-900 flex items-center justify-between text-xs">
+                    <div>
+                      <div className="text-[10px] uppercase font-bold text-blue-950 dark:text-sky-300">
+                        Kalkulasi Total Anggaran (Volume × Harga Satuan):
+                      </div>
+                      <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 font-mono mt-0.5">
+                        {formatNumber(rabForm.volume)} {rabForm.unit} × {formatRupiah(rabForm.unitPrice)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-black text-blue-900 dark:text-sky-400 font-mono">
+                        {formatRupiah(Number(rabForm.volume) * Number(rabForm.unitPrice))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            }}
+          />
 
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Nama Barang / Bahan / Keperluan Operasional *
+              Periode Anggaran *
             </label>
             <input
               type="text"
               required
-              placeholder="Contoh: Daging Ayam Broiler Fillet Segar"
-              value={rabForm.itemName}
-              onChange={e => setRabForm({ ...rabForm, itemName: e.target.value })}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Volume / Kuantitas *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={rabForm.volume}
-                onChange={e => setRabForm({ ...rabForm, volume: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Satuan *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="kg, liter, tabung, box"
-                value={rabForm.unit}
-                onChange={e => setRabForm({ ...rabForm, unit: e.target.value })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Harga Satuan (Rp) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={rabForm.unitPrice}
-                onChange={e => setRabForm({ ...rabForm, unitPrice: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-          </div>
-
-          {/* Realtime Formula Total Box */}
-          <div className="bg-blue-50 dark:bg-blue-950/60 p-3 rounded-xl border border-blue-200 dark:border-blue-900 flex items-center justify-between text-xs">
-            <div>
-              <div className="text-[10px] uppercase font-bold text-blue-950 dark:text-sky-300">
-                Kalkulasi Total Anggaran (Volume × Harga Satuan):
-              </div>
-              <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 font-mono mt-0.5">
-                {formatNumber(rabForm.volume)} {rabForm.unit} × {formatRupiah(rabForm.unitPrice)}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-lg font-black text-blue-900 dark:text-sky-400 font-mono">
-                {formatRupiah(Number(rabForm.volume) * Number(rabForm.unitPrice))}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Keterangan Alokasi Anggaran (Opsional)
-            </label>
-            <input
-              type="text"
-              placeholder="Contoh: Suplai harian 22 hari operasional 2.850 porsi MBG."
-              value={rabForm.notes}
-              onChange={e => setRabForm({ ...rabForm, notes: e.target.value })}
+              value={rabForm.periodMonth}
+              onChange={e => setRabForm({ ...rabForm, periodMonth: e.target.value })}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
             />
           </div>
@@ -1960,7 +1983,10 @@ export const ProcurementModule: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsRABModalOpen(false)}
+              onClick={() => {
+                setIsRABModalOpen(false);
+                setIsModalRabSchemaEdit(false);
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
             >
               Batal
