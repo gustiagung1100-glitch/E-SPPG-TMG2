@@ -110,3 +110,100 @@ export function isProtectedSuperAdminEmail(email?: string | null): boolean {
   const normalized = email.trim().toLowerCase();
   return (PROTECTED_SUPER_ADMIN_EMAILS as readonly string[]).includes(normalized);
 }
+
+const SESSION_TOKEN_SALT = 'E-SPPG-TMG2::GFBQSYXD::SESSION-SIG-V1';
+const SESSION_DURATION_DEFAULT_MS = 12 * 60 * 60 * 1000; // 12 jam
+const SESSION_DURATION_REMEMBER_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
+
+export interface StoredAuthSession {
+  authenticated: true;
+  uid: string;
+  email: string;
+  role: string;
+  rememberMe: boolean;
+  issuedAt: number;
+  expiresAt: number;
+  sessionToken: string;
+}
+
+function computeSessionSignature(
+  uid: string,
+  email: string,
+  role: string,
+  issuedAt: number,
+  expiresAt: number
+): string {
+  const normalizedEmail = email.trim().toLowerCase();
+  return sha256Hex(
+    `${SESSION_TOKEN_SALT}::${uid}::${normalizedEmail}::${role}::${issuedAt}::${expiresAt}`
+  );
+}
+
+export function createSignedAuthSession(params: {
+  uid: string;
+  email: string;
+  role: string;
+  rememberMe: boolean;
+}): StoredAuthSession {
+  const issuedAt = Date.now();
+  const ttl = params.rememberMe ? SESSION_DURATION_REMEMBER_MS : SESSION_DURATION_DEFAULT_MS;
+  const expiresAt = issuedAt + ttl;
+  const normalizedEmail = params.email.trim().toLowerCase();
+  return {
+    authenticated: true,
+    uid: params.uid,
+    email: normalizedEmail,
+    role: params.role,
+    rememberMe: Boolean(params.rememberMe),
+    issuedAt,
+    expiresAt,
+    sessionToken: computeSessionSignature(params.uid, normalizedEmail, params.role, issuedAt, expiresAt),
+  };
+}
+
+export function verifyStoredAuthSession(candidate: unknown): StoredAuthSession | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const obj = candidate as Record<string, unknown>;
+  if (obj.authenticated !== true) return null;
+  if (
+    typeof obj.uid !== 'string' ||
+    !obj.uid.trim() ||
+    typeof obj.email !== 'string' ||
+    !obj.email.trim() ||
+    typeof obj.role !== 'string' ||
+    !obj.role.trim() ||
+    typeof obj.issuedAt !== 'number' ||
+    typeof obj.expiresAt !== 'number' ||
+    typeof obj.sessionToken !== 'string'
+  ) {
+    return null;
+  }
+  if (!Number.isFinite(obj.issuedAt) || !Number.isFinite(obj.expiresAt)) return null;
+  if (obj.expiresAt <= obj.issuedAt || Date.now() >= obj.expiresAt) return null;
+
+  const expectedToken = computeSessionSignature(
+    obj.uid,
+    obj.email,
+    obj.role,
+    obj.issuedAt,
+    obj.expiresAt
+  );
+  if (obj.sessionToken.length !== expectedToken.length) return null;
+  let diff = 0;
+  for (let i = 0; i < expectedToken.length; i++) {
+    diff |= obj.sessionToken.charCodeAt(i) ^ expectedToken.charCodeAt(i);
+  }
+  if (diff !== 0) return null;
+
+  return {
+    authenticated: true,
+    uid: obj.uid,
+    email: obj.email.trim().toLowerCase(),
+    role: obj.role,
+    rememberMe: Boolean(obj.rememberMe),
+    issuedAt: obj.issuedAt,
+    expiresAt: obj.expiresAt,
+    sessionToken: obj.sessionToken,
+  };
+}
+

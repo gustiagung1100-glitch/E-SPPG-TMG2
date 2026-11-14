@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../../lib/store';
+import { canRoleAccessModule } from '../../lib/routeGuard';
 import { ModuleKey } from '../../types';
 import {
   LayoutDashboard,
@@ -215,7 +216,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
   ];
 
-  const sections = isSupplier ? supplierSections : standardSections;
+  const rawSections = isSupplier ? supplierSections : standardSections;
+  const sections = rawSections
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => canRoleAccessModule(currentUser.role, item.key)),
+    }))
+    .filter(section => section.items.length > 0);
 
   return (
     <>

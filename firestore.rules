@@ -51,7 +51,7 @@ service cloud.firestore {
     // -------------------------------------------------------------------------
     match /users/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isSignedIn();
+      allow list: if isAdmin();
       allow create: if isSignedIn() && isValidId(userId) && (
         request.auth.uid == userId || isAdmin()
       ) && isSameSppg();
@@ -74,7 +74,7 @@ service cloud.firestore {
 
     match /sppg_profiles/{profileId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isValidId(profileId) && (isAdmin() || request.auth.uid != null);
+      allow write: if isAdmin() && isValidId(profileId);
     }
 
     // -------------------------------------------------------------------------

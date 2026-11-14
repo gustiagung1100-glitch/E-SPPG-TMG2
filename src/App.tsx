@@ -8,13 +8,15 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './lib/store';
 import { ModuleKey } from './types';
+import { canRoleAccessModule, getDefaultModuleForRole } from './lib/routeGuard';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
 import { RoleSwitcher } from './components/auth/RoleSwitcher';
 import { FirebaseAuthModal } from './components/auth/FirebaseAuthModal';
-import { LoginPage } from './components/auth/LoginPage';
+import { AuthGuard } from './components/auth/AuthGuard';
+import { Forbidden403Page } from './components/auth/Forbidden403Page';
 
 // Module Components
 import { DashboardModule } from './components/modules/DashboardModule';
@@ -51,49 +53,31 @@ const moduleTitles: Record<ModuleKey, string> = {
   settings: 'Pengaturan SPPG & Hak Akses',
 };
 
-const MainContent: React.FC = () => {
-  const { currentUser } = useApp();
-  const [activeModule, setActiveModule] = useState<ModuleKey>(
-    currentUser.role === 'Supplier / Mitra Pangan' ? 'supplier_portal' : 'dashboard'
-  );
+interface MainContentProps {
+  activeModule: ModuleKey;
+  navigateToModule: (module: ModuleKey) => void;
+}
+
+const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModule }) => {
+  const { currentUser, canSwitchRole } = useApp();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isRoleSwitcherOpen, setIsRoleSwitcherOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  // Auto redirect if supplier switches role
-  React.useEffect(() => {
-    if (currentUser.role === 'Supplier / Mitra Pangan') {
-      if (activeModule !== 'supplier_portal' && activeModule !== 'settings') {
-        setActiveModule('supplier_portal');
-      }
-    }
-  }, [currentUser.role, activeModule]);
-
-  // Global custom event for fast cross-module navigation (e.g. from PLOG to Flyer Generator)
-  React.useEffect(() => {
-    const handleNavigate = (e: Event) => {
-      const customEvent = e as CustomEvent<ModuleKey>;
-      if (customEvent.detail) {
-        setActiveModule(customEvent.detail);
-      }
-    };
-    window.addEventListener('navigate-module', handleNavigate);
-    return () => window.removeEventListener('navigate-module', handleNavigate);
-  }, []);
-
   const renderModule = () => {
-    // Strict RBAC boundary: suppliers are restricted to supplier_portal and settings
-    if (currentUser.role === 'Supplier / Mitra Pangan') {
-      if (activeModule === 'settings') {
-        return <SettingsModule />;
-      }
-      return <SupplierPortalModule />;
+    // Defense-in-depth RBAC boundary check
+    if (!canRoleAccessModule(currentUser.role, activeModule)) {
+      return (
+        <Forbidden403Page
+          onBackToHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role))}
+        />
+      );
     }
 
     switch (activeModule) {
       case 'dashboard':
-        return <DashboardModule onNavigate={mod => setActiveModule(mod)} />;
+        return <DashboardModule onNavigate={mod => navigateToModule(mod)} />;
       case 'master_data':
         return <MasterDataModule />;
       case 'institutions':
@@ -119,11 +103,11 @@ const MainContent: React.FC = () => {
       case 'letters':
         return <LettersModule />;
       case 'reports':
-        return <ReportsModule onNavigate={mod => setActiveModule(mod)} />;
+        return <ReportsModule onNavigate={mod => navigateToModule(mod)} />;
       case 'settings':
         return <SettingsModule />;
       default:
-        return <DashboardModule onNavigate={mod => setActiveModule(mod)} />;
+        return <DashboardModule onNavigate={mod => navigateToModule(mod)} />;
     }
   };
 
@@ -133,7 +117,7 @@ const MainContent: React.FC = () => {
         {/* Left Sidebar */}
         <Sidebar
           activeModule={activeModule}
-          onSelectModule={mod => setActiveModule(mod)}
+          onSelectModule={mod => navigateToModule(mod)}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
           isMobileOpen={isMobileSidebarOpen}
@@ -155,7 +139,7 @@ const MainContent: React.FC = () => {
             <Breadcrumb
               activeModule={activeModule}
               activeModuleTitle={moduleTitles[activeModule]}
-              onNavigateHome={() => setActiveModule('dashboard')}
+              onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role))}
             />
 
             {/* Dynamic Module Component */}
@@ -179,10 +163,12 @@ const MainContent: React.FC = () => {
       </div>
 
       {/* Global Modals & Notifications */}
-      <RoleSwitcher
-        isOpen={isRoleSwitcherOpen}
-        onClose={() => setIsRoleSwitcherOpen(false)}
-      />
+      {canSwitchRole && (
+        <RoleSwitcher
+          isOpen={isRoleSwitcherOpen}
+          onClose={() => setIsRoleSwitcherOpen(false)}
+        />
+      )}
       <FirebaseAuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
@@ -192,10 +178,16 @@ const MainContent: React.FC = () => {
 };
 
 const AuthGate: React.FC = () => {
-  const { isAuthenticated } = useApp();
   return (
     <>
-      {isAuthenticated ? <MainContent /> : <LoginPage />}
+      <AuthGuard>
+        {({ activeModule, navigateToModule }) => (
+          <MainContent
+            activeModule={activeModule}
+            navigateToModule={navigateToModule}
+          />
+        )}
+      </AuthGuard>
       <ToastContainer />
     </>
   );
@@ -208,3 +200,4 @@ export default function App() {
     </AppProvider>
   );
 }
+

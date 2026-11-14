@@ -115,7 +115,17 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
     setAuthError(null);
 
     try {
+      const emailLower = email.trim().toLowerCase();
+      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+
       if (authMode === 'login') {
+        if (webEntry && !webEntry.isActive && !isSuperAdmin) {
+          throw new Error('Akun ini dinonaktifkan oleh Admin Utama SPPG.');
+        }
+        if (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
+          throw new Error(`Email ${email} belum didaftarkan pada whitelist akses login oleh Admin Utama.`);
+        }
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const user = cred.user;
 
@@ -135,6 +145,9 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         addToast('success', 'Login Berhasil', `Selamat datang kembali, ${user.email}`);
         onClose();
       } else if (authMode === 'register') {
+        if (!webAccessPolicy.allowSelfRegistration) {
+          throw new Error('Pendaftaran mandiri sedang dinonaktifkan oleh Admin Utama.');
+        }
         if (password.length < 6) {
           throw new Error('Password minimal harus 6 karakter.');
         }
@@ -352,31 +365,33 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
             </form>
 
             {/* Mode Switcher */}
-            <div className="text-center pt-2 border-t border-slate-100 text-xs text-slate-600">
-              {authMode === 'login' ? (
-                <span>
-                  Belum memiliki akun terdaftar?{' '}
-                  <button
-                    type="button"
-                    onClick={() => setAuthMode('register')}
-                    className="font-bold text-blue-700 hover:underline"
-                  >
-                    Daftar di sini
-                  </button>
-                </span>
-              ) : (
-                <span>
-                  Sudah memiliki akun?{' '}
-                  <button
-                    type="button"
-                    onClick={() => setAuthMode('login')}
-                    className="font-bold text-blue-700 hover:underline"
-                  >
-                    Masuk di sini
-                  </button>
-                </span>
-              )}
-            </div>
+            {webAccessPolicy.allowSelfRegistration && (
+              <div className="text-center pt-2 border-t border-slate-100 text-xs text-slate-600">
+                {authMode === 'login' ? (
+                  <span>
+                    Belum memiliki akun terdaftar?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('register')}
+                      className="font-bold text-blue-700 hover:underline"
+                    >
+                      Daftar di sini
+                    </button>
+                  </span>
+                ) : (
+                  <span>
+                    Sudah memiliki akun?{' '}
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('login')}
+                      className="font-bold text-blue-700 hover:underline"
+                    >
+                      Masuk di sini
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

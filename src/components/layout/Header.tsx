@@ -26,7 +26,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthModal, activeModuleTitle }) => {
   const {
     currentUser,
-    switchRole,
+    canSwitchRole,
     darkMode,
     toggleDarkMode,
     sppgConfig,
@@ -123,18 +123,28 @@ export const Header: React.FC<HeaderProps> = ({ onOpenRoleSwitcher, onOpenAuthMo
             </button>
           )}
 
-          {/* Quick Demo Role Switcher Button */}
-          <button
-            type="button"
-            onClick={onOpenRoleSwitcher}
-            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 bg-sky-50 hover:bg-sky-100/80 active:scale-95 dark:bg-sky-950/50 dark:hover:bg-sky-900/60 border border-sky-200/90 dark:border-sky-800/90 rounded-lg text-sky-900 dark:text-sky-300 text-xs font-semibold transition-all shadow-2xs"
-            title="Ganti peran pengguna simulasi"
-          >
-            <Shield className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
-            <span className="hidden md:inline">Ganti Peran:</span>
-            <span className="font-bold underline decoration-sky-400 underline-offset-2 truncate max-w-[120px]">{currentUser.role}</span>
-            <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
-          </button>
+          {/* Quick Role Switcher (Khusus Admin Utama) atau Lencana Peran Aktif */}
+          {canSwitchRole ? (
+            <button
+              type="button"
+              onClick={onOpenRoleSwitcher}
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 bg-sky-50 hover:bg-sky-100/80 active:scale-95 dark:bg-sky-950/50 dark:hover:bg-sky-900/60 border border-sky-200/90 dark:border-sky-800/90 rounded-lg text-sky-900 dark:text-sky-300 text-xs font-semibold transition-all shadow-2xs"
+              title="Simulasi ganti peran pengguna (Admin Utama)"
+            >
+              <Shield className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+              <span className="hidden md:inline">Ganti Peran:</span>
+              <span className="font-bold underline decoration-sky-400 underline-offset-2 truncate max-w-[120px]">{currentUser.role}</span>
+              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+            </button>
+          ) : (
+            <div
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200 text-xs font-semibold"
+              title={`Peran terautentikasi: ${currentUser.role}`}
+            >
+              <Shield className="w-3.5 h-3.5 text-[#164E91] dark:text-sky-400 shrink-0" />
+              <span className="truncate max-w-[140px] font-bold">{currentUser.role}</span>
+            </div>
+          )}
 
           {/* Dark Mode Toggle */}
           <button

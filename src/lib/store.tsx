@@ -49,7 +49,16 @@ import {
 import {
   hashLoginPassword,
   isProtectedSuperAdminEmail,
+  createSignedAuthSession,
+  verifyStoredAuthSession,
+  StoredAuthSession,
 } from './authCrypto';
+import {
+  AUTH_SESSION_STORAGE_KEY,
+  CURRENT_USER_STORAGE_KEY,
+  LOGIN_PATH,
+  canRoleAccessModule,
+} from './routeGuard';
 import {
   initialInstitutionsData,
   initialMasterBahanData,
@@ -93,6 +102,7 @@ interface AppContextType {
   setCurrentUser: (user: UserProfile) => void;
   isAuthenticated: boolean;
   authReady: boolean;
+  canSwitchRole: boolean;
   loginWithProfile: (user: UserProfile, rememberMe?: boolean) => void;
   logout: () => Promise<void>;
   switchRole: (role: RoleType) => void;
@@ -1308,46 +1318,156 @@ const initialKitchenProgress: KitchenProgress = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('esppg_current_user');
-    return saved ? JSON.parse(saved) : initialUsers[0];
-  });
+export const GUEST_UNAUTHENTICATED_USER: UserProfile = {
+  uid: 'guest-unauthenticated',
+  name: 'Pengguna Belum Masuk',
+  email: '',
+  role: 'Relawan Div. Cuci Ompreng',
+  isActive: false,
+};
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    try {
-      const localSess = localStorage.getItem('esppg_auth_session');
-      const tabSess = sessionStorage.getItem('esppg_auth_session');
-      const raw = localSess || tabSess;
-      if (!raw) return false;
-      const parsed = JSON.parse(raw);
-      return Boolean(parsed?.authenticated);
-    } catch {
-      return false;
+function clearStoredSessionStorage() {
+  localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+}
+
+function readStoredWebAccessUsers(): WebAccessUser[] {
+  try {
+    const saved = localStorage.getItem('esppg_web_access_users_v1');
+    if (!saved) return buildDefaultWebAccessUsers();
+    return mergeProtectedAdmins(JSON.parse(saved));
+  } catch {
+    return buildDefaultWebAccessUsers();
+  }
+}
+
+function readStoredWebAccessPolicy(): WebAccessPolicy {
+  try {
+    const saved = localStorage.getItem('esppg_web_access_policy_v1');
+    if (!saved) return DEFAULT_WEB_ACCESS_POLICY;
+    return { ...DEFAULT_WEB_ACCESS_POLICY, ...JSON.parse(saved) };
+  } catch {
+    return DEFAULT_WEB_ACCESS_POLICY;
+  }
+}
+
+function validateStoredSessionAgainstPolicy(
+  usersList: WebAccessUser[],
+  policy: WebAccessPolicy
+): { session: StoredAuthSession; user: UserProfile; isOriginAdmin: boolean } | null {
+  try {
+    const localSess = localStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    const tabSess = sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    const raw = localSess || tabSess;
+    if (!raw) return null;
+
+    const verified = verifyStoredAuthSession(JSON.parse(raw));
+    if (!verified) {
+      clearStoredSessionStorage();
+      return null;
     }
-  });
+
+    const emailLower = verified.email.toLowerCase();
+    const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+    const webEntry = usersList.find(u => u.email.trim().toLowerCase() === emailLower);
+
+    if (webEntry) {
+      if (!webEntry.isActive && !isSuperAdmin) {
+        clearStoredSessionStorage();
+        return null;
+      }
+      const effectiveRole: RoleType = isSuperAdmin ? 'Admin Utama' : webEntry.role;
+      let savedUser: UserProfile | null = null;
+      try {
+        const rawUser = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+        if (rawUser) savedUser = JSON.parse(rawUser);
+      } catch {
+        savedUser = null;
+      }
+      const isOriginAdmin = effectiveRole === 'Admin Utama' || isSuperAdmin;
+      const activeProfile: UserProfile =
+        isOriginAdmin && savedUser && savedUser.isActive
+          ? savedUser
+          : {
+              uid: verified.uid,
+              name: webEntry.name,
+              email: webEntry.email,
+              role: effectiveRole,
+              division: webEntry.division,
+              supplierId: webEntry.supplierId,
+              supplierName: webEntry.supplierName,
+              isActive: webEntry.isActive,
+            };
+      return { session: verified, user: activeProfile, isOriginAdmin };
+    }
+
+    if (policy.strictWhitelistOnly && !isSuperAdmin) {
+      clearStoredSessionStorage();
+      return null;
+    }
+
+    let savedUser: UserProfile | null = null;
+    try {
+      const rawUser = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+      if (rawUser) savedUser = JSON.parse(rawUser);
+    } catch {
+      savedUser = null;
+    }
+
+    const fallbackRole = (isSuperAdmin ? 'Admin Utama' : verified.role) as RoleType;
+    const isOriginAdmin = fallbackRole === 'Admin Utama' || isSuperAdmin;
+    const userProfile: UserProfile =
+      savedUser && savedUser.email?.toLowerCase() === emailLower && savedUser.isActive
+        ? savedUser
+        : {
+            uid: verified.uid,
+            name: verified.email.split('@')[0],
+            email: verified.email,
+            role: fallbackRole,
+            isActive: true,
+          };
+
+    return { session: verified, user: userProfile, isOriginAdmin };
+  } catch {
+    clearStoredSessionStorage();
+    return null;
+  }
+}
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => readStoredWebAccessUsers());
+
+  const [webAccessPolicy, setWebAccessPolicy] = useState<WebAccessPolicy>(() => readStoredWebAccessPolicy());
+
+  const initialVerifiedState = React.useMemo(
+    () => validateStoredSessionAgainstPolicy(webAccessUsers, webAccessPolicy),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() =>
+    initialVerifiedState ? initialVerifiedState.user : GUEST_UNAUTHENTICATED_USER
+  );
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
+    Boolean(initialVerifiedState)
+  );
+  const [isOriginAdminSession, setIsOriginAdminSession] = useState<boolean>(() =>
+    Boolean(initialVerifiedState?.isOriginAdmin)
+  );
   const [authReady, setAuthReady] = useState<boolean>(false);
   const explicitLogoutRef = React.useRef<boolean>(false);
+  const webAccessUsersRef = React.useRef<WebAccessUser[]>(webAccessUsers);
+  const webAccessPolicyRef = React.useRef<WebAccessPolicy>(webAccessPolicy);
 
-  const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => {
-    try {
-      const saved = localStorage.getItem('esppg_web_access_users_v1');
-      if (!saved) return buildDefaultWebAccessUsers();
-      return mergeProtectedAdmins(JSON.parse(saved));
-    } catch {
-      return buildDefaultWebAccessUsers();
-    }
-  });
+  useEffect(() => {
+    webAccessUsersRef.current = webAccessUsers;
+  }, [webAccessUsers]);
 
-  const [webAccessPolicy, setWebAccessPolicy] = useState<WebAccessPolicy>(() => {
-    try {
-      const saved = localStorage.getItem('esppg_web_access_policy_v1');
-      if (!saved) return DEFAULT_WEB_ACCESS_POLICY;
-      return { ...DEFAULT_WEB_ACCESS_POLICY, ...JSON.parse(saved) };
-    } catch {
-      return DEFAULT_WEB_ACCESS_POLICY;
-    }
-  });
+  useEffect(() => {
+    webAccessPolicyRef.current = webAccessPolicy;
+  }, [webAccessPolicy]);
 
   const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => {
     const saved = localStorage.getItem('esppg_role_permissions');
@@ -1520,10 +1640,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(true);
 
-  // Sync to local storage
+  // Sync currentUser only when authenticated; wipe if unauthenticated
   useEffect(() => {
-    localStorage.setItem('esppg_current_user', JSON.stringify(currentUser));
-  }, [currentUser]);
+    if (isAuthenticated && currentUser.isActive) {
+      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(currentUser));
+    } else if (!isAuthenticated) {
+      localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+    }
+  }, [currentUser, isAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem('esppg_role_permissions', JSON.stringify(rolePermissions));
@@ -1683,41 +1807,93 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDarkMode(prev => !prev);
   };
 
-  // Sync Firebase Auth active session on load
+  // Re-validate session & Firebase Auth on load and across tabs
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, fbUser => {
+    let settled = false;
+    const safetyTimer = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setAuthReady(true);
+      }
+    }, 1500);
+
+    const unsubscribe = onAuthStateChanged(auth, async fbUser => {
+      const latestUsers = webAccessUsersRef.current;
+      const latestPolicy = webAccessPolicyRef.current;
+
       if (fbUser && !explicitLogoutRef.current) {
         const emailLower = (fbUser.email || '').trim().toLowerCase();
-        const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+        const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+        const webEntry = latestUsers.find(u => u.email.toLowerCase() === emailLower);
         const matched = fbUser.email ? resolveUserByIdentifier(fbUser.email) : undefined;
+
+        const isBlocked =
+          (webEntry && !webEntry.isActive && !isSuperAdmin) ||
+          (!webEntry && latestPolicy.strictWhitelistOnly && !isSuperAdmin);
+
+        if (isBlocked) {
+          clearStoredSessionStorage();
+          setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+          setIsOriginAdminSession(false);
+          setIsAuthenticated(false);
+          try {
+            await signOut(auth);
+          } catch {
+            // Non-blocking
+          }
+          settled = true;
+          setAuthReady(true);
+          return;
+        }
+
+        let resolvedProfile: UserProfile;
         if (webEntry) {
-          setCurrentUser({
+          resolvedProfile = {
             uid: fbUser.uid,
             name: webEntry.name || fbUser.displayName || webEntry.email,
             email: webEntry.email,
-            role: webEntry.role,
+            role: isSuperAdmin ? 'Admin Utama' : webEntry.role,
             division: webEntry.division,
             supplierId: webEntry.supplierId,
             supplierName: webEntry.supplierName,
             isActive: webEntry.isActive,
-          });
+          };
         } else if (matched) {
-          setCurrentUser(prev =>
-            prev.email === matched.email ? prev : { ...matched, uid: fbUser.uid, name: fbUser.displayName || matched.name }
-          );
-        } else if (fbUser.email) {
-          setCurrentUser(prev => {
-            if (prev.email.toLowerCase() === fbUser.email!.toLowerCase()) return prev;
-            return {
-              uid: fbUser.uid,
-              name: fbUser.displayName || fbUser.email!.split('@')[0],
-              email: fbUser.email!,
-              role: isProtectedSuperAdminEmail(fbUser.email) ? 'Admin Utama' : 'Kepala SPPG',
-              isActive: true,
-            };
-          });
+          resolvedProfile = {
+            ...matched,
+            uid: fbUser.uid,
+            name: fbUser.displayName || matched.name,
+          };
+        } else {
+          resolvedProfile = {
+            uid: fbUser.uid,
+            name: fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : 'Petugas SPPG'),
+            email: fbUser.email || '',
+            role: isSuperAdmin ? 'Admin Utama' : 'Kepala SPPG',
+            isActive: true,
+          };
         }
+
+        const existingSession = validateStoredSessionAgainstPolicy(latestUsers, latestPolicy);
+        if (!existingSession || existingSession.session.email !== emailLower) {
+          const signed = createSignedAuthSession({
+            uid: resolvedProfile.uid,
+            email: resolvedProfile.email,
+            role: resolvedProfile.role,
+            rememberMe: true,
+          });
+          localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(signed));
+        }
+
+        const originAdmin = resolvedProfile.role === 'Admin Utama' || isSuperAdmin;
+        setIsOriginAdminSession(originAdmin);
+        setCurrentUser(prev =>
+          originAdmin && prev.isActive && prev.uid !== GUEST_UNAUTHENTICATED_USER.uid
+            ? prev
+            : resolvedProfile
+        );
         setIsAuthenticated(true);
+
         // Load persisted dynamic form schemas from Firestore if available
         getDoc(doc(db, 'app_settings', 'dynamic_form_schemas'))
           .then(snap => {
@@ -1731,30 +1907,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .catch(() => {
             // Keep localStorage schema fallback if offline
           });
+      } else {
+        // Not signed into Firebase Auth: verify signed local/session storage token
+        const verifiedManual = validateStoredSessionAgainstPolicy(latestUsers, latestPolicy);
+        if (verifiedManual) {
+          setCurrentUser(verifiedManual.user);
+          setIsOriginAdminSession(verifiedManual.isOriginAdmin);
+          setIsAuthenticated(true);
+        } else {
+          clearStoredSessionStorage();
+          setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+          setIsOriginAdminSession(false);
+          setIsAuthenticated(false);
+        }
       }
+
+      settled = true;
+      window.clearTimeout(safetyTimer);
       setAuthReady(true);
     });
-    return () => unsubscribe();
+
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === AUTH_SESSION_STORAGE_KEY || e.key === null) {
+        if (!auth.currentUser) {
+          const verified = validateStoredSessionAgainstPolicy(
+            webAccessUsersRef.current,
+            webAccessPolicyRef.current
+          );
+          if (!verified) {
+            clearStoredSessionStorage();
+            setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+            setIsOriginAdminSession(false);
+            setIsAuthenticated(false);
+          }
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageSync);
+
+    return () => {
+      window.clearTimeout(safetyTimer);
+      window.removeEventListener('storage', handleStorageSync);
+      unsubscribe();
+    };
   }, []);
+
+  // Re-validate session periodically or when whitelist/policy updates
+  useEffect(() => {
+    if (!authReady || !isAuthenticated) return;
+    if (auth.currentUser) {
+      const emailLower = (auth.currentUser.email || '').trim().toLowerCase();
+      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const isBlocked =
+        (webEntry && !webEntry.isActive && !isSuperAdmin) ||
+        (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin);
+      if (isBlocked) {
+        clearStoredSessionStorage();
+        setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+        setIsOriginAdminSession(false);
+        setIsAuthenticated(false);
+        signOut(auth).catch(() => {});
+      }
+      return;
+    }
+
+    const verified = validateStoredSessionAgainstPolicy(webAccessUsers, webAccessPolicy);
+    if (!verified) {
+      clearStoredSessionStorage();
+      setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+      setIsOriginAdminSession(false);
+      setIsAuthenticated(false);
+    }
+  }, [authReady, isAuthenticated, webAccessUsers, webAccessPolicy]);
 
   const loginWithProfile = (user: UserProfile, rememberMe: boolean = false) => {
     explicitLogoutRef.current = false;
+    const isSuperAdmin = user.role === 'Admin Utama' || isProtectedSuperAdminEmail(user.email);
     setCurrentUser(user);
+    setIsOriginAdminSession(isSuperAdmin);
     setIsAuthenticated(true);
-    const payload = JSON.stringify({
-      authenticated: true,
+    const signedSession = createSignedAuthSession({
       uid: user.uid,
       email: user.email,
+      role: user.role,
       rememberMe,
-      loggedInAt: new Date().toISOString(),
     });
+    const payload = JSON.stringify(signedSession);
     if (rememberMe) {
-      localStorage.setItem('esppg_auth_session', payload);
-      sessionStorage.removeItem('esppg_auth_session');
+      localStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+      sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
     } else {
-      sessionStorage.setItem('esppg_auth_session', payload);
-      localStorage.removeItem('esppg_auth_session');
+      sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+      localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
     }
+    localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+
     const loginAudit: AuditLog = {
       id: 'aud-' + Date.now(),
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -1770,9 +2018,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = async () => {
     explicitLogoutRef.current = true;
-    await logAudit('LOGOUT', 'auth', `Keluar dari sesi E-SPPG TMG2 (${currentUser.name})`);
-    localStorage.removeItem('esppg_auth_session');
-    sessionStorage.removeItem('esppg_auth_session');
+    const closingName = currentUser.name;
+    if (isAuthenticated && currentUser.uid !== GUEST_UNAUTHENTICATED_USER.uid) {
+      await logAudit('LOGOUT', 'auth', `Keluar dari sesi E-SPPG TMG2 (${closingName})`);
+    }
+    clearStoredSessionStorage();
     try {
       if (auth.currentUser) {
         await signOut(auth);
@@ -1780,12 +2030,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       // Non-blocking fallback
     }
+    setCurrentUser(GUEST_UNAUTHENTICATED_USER);
+    setIsOriginAdminSession(false);
     setIsAuthenticated(false);
+    if (typeof window !== 'undefined' && window.location.pathname !== LOGIN_PATH) {
+      window.history.replaceState(null, '', LOGIN_PATH);
+    }
     addToast('info', 'Keluar Sistem', 'Anda telah keluar dari sistem E-SPPG TMG2.');
   };
 
-  // Role Switcher helper
+  // Role Switcher helper (Hanya Admin Utama terautentikasi yang diizinkan simulasi peran)
   const switchRole = (role: RoleType) => {
+    if (!isAuthenticated || (!isOriginAdminSession && currentUser.role !== 'Admin Utama')) {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang berwenang melakukan simulasi ganti peran.');
+      return;
+    }
     const matchedUser = initialUsers.find(u => u.role === role) || {
       uid: 'user-' + Date.now(),
       name: `Pengguna (${role})`,
@@ -1794,7 +2053,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isActive: true,
     };
     setCurrentUser(matchedUser);
-    logAudit('LOGIN', 'auth', `Berganti peran aktif ke ${role}`);
+    logAudit('LOGIN', 'auth', `Simulasi ganti peran aktif ke ${role}`);
     addToast('info', 'Peran Diperbarui', `Sekarang Anda bertindak sebagai: ${role}`);
   };
 
@@ -2120,13 +2379,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Struktur Form Direset', `"${defaultSchema.title}" dikembalikan ke pengaturan default.`);
   };
 
-  // Permission Check
+  // Permission Check (Aligned strictly with Route-Level RBAC)
   const hasPermission = (module: ModuleKey, action: ActionPermission): boolean => {
+    if (!isAuthenticated || !currentUser.isActive) return false;
+    if (!canRoleAccessModule(currentUser.role, module)) return false;
     // Supplier role strict data isolation
     if (currentUser.role === 'Supplier / Mitra Pangan') {
       if (module === 'supplier_portal') return true;
       if (module === 'settings' && action === 'view') return true;
-      return false; // Strictly blocked from internal finance, beneficiaries, kitchen, inventory, other supplier POs, etc.
+      return false;
     }
     if (currentUser.role === 'Admin Utama') return true;
     const roleMap = rolePermissions[currentUser.role];
@@ -3222,6 +3483,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser,
         isAuthenticated,
         authReady,
+        canSwitchRole: isAuthenticated && (isOriginAdminSession || currentUser.role === 'Admin Utama'),
         loginWithProfile,
         logout,
         switchRole,
