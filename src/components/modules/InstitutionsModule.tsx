@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
 import {
   BASTDocumentSheet,
   resolveBastAutoFields,
@@ -63,6 +64,7 @@ import {
   ClipboardCheck,
   Users2,
   Download,
+  HeartPulse,
 } from 'lucide-react';
 
 type TabKey =
@@ -71,7 +73,8 @@ type TabKey =
   | 'riwayat_kuota'
   | 'rekap_harian'
   | 'rekap_mingguan_bulanan'
-  | 'rekap_lembaga';
+  | 'rekap_lembaga'
+  | 'data_gizi_anak';
 
 export const InstitutionsModule: React.FC = () => {
   const {
@@ -83,6 +86,7 @@ export const InstitutionsModule: React.FC = () => {
     beneficiaryAttendance,
     recordBeneficiaryAttendance,
     beneficiaryQuotaHistory,
+    beneficiaryRecords,
     masterVolunteers,
     distributionLogs,
     hasPermission,
@@ -93,7 +97,35 @@ export const InstitutionsModule: React.FC = () => {
   } = useApp();
 
   // Active Sub-Tab
-  const [activeTab, setActiveTab] = useState<TabKey>('data_lembaga');
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    try {
+      const target = sessionStorage.getItem('sppg_institutions_target_tab') as TabKey | null;
+      if (target) {
+        sessionStorage.removeItem('sppg_institutions_target_tab');
+        return target;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'data_lembaga';
+  });
+
+  useEffect(() => {
+    const labels: Record<TabKey, string> = {
+      data_lembaga: '1. Data Lembaga & Kuota',
+      presensi_harian: '2. Presensi Kehadiran Siswa',
+      riwayat_kuota: '3. Riwayat Perubahan Kuota',
+      rekap_harian: '4. Rekap Distribusi Harian',
+      rekap_mingguan_bulanan: '5. Rekap Mingguan & Bulanan',
+      rekap_lembaga: '6. Rekap per Lembaga',
+      data_gizi_anak: '7. Data Anak & Status Gizi WHO',
+    };
+    window.dispatchEvent(
+      new CustomEvent('sppg-subtab-change', {
+        detail: { module: 'institutions', title: labels[activeTab] },
+      })
+    );
+  }, [activeTab]);
   const [isEditingFormSchema, setIsEditingFormSchema] = useState(false);
   const [builderFormId, setBuilderFormId] = useState<DynamicFormId>('institution_form');
   const [isModalSchemaEdit, setIsModalSchemaEdit] = useState(false);
@@ -854,16 +886,18 @@ export const InstitutionsModule: React.FC = () => {
           { key: 'rekap_harian' as TabKey, label: '4. Rekap Distribusi Harian', icon: <Calendar className="w-4 h-4" /> },
           { key: 'rekap_mingguan_bulanan' as TabKey, label: '5. Rekap Mingguan & Bulanan', icon: <BarChart3 className="w-4 h-4" /> },
           { key: 'rekap_lembaga' as TabKey, label: '6. Rekap per Lembaga', icon: <Building className="w-4 h-4" /> },
+          { key: 'data_gizi_anak' as TabKey, label: '7. Data Anak & Status Gizi WHO', icon: <HeartPulse className="w-4 h-4" />, count: beneficiaryRecords.length },
         ].map(tab => {
           const isActive = activeTab === tab.key;
           return (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 ${
+              className={`min-h-[42px] flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 cursor-pointer ${
                 isActive
                   ? 'border-blue-900 dark:border-sky-400 text-blue-900 dark:text-sky-300 bg-blue-50/50 dark:bg-blue-950/40'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                  : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
               }`}
             >
               {tab.icon}
@@ -1791,6 +1825,11 @@ export const InstitutionsModule: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* TAB 7: DATA ANAK, ANTI-DUPLIKASI NIK & KALKULATOR Z-SCORE WHO/KEMENKES */}
+      {/* ========================================================================= */}
+      {activeTab === 'data_gizi_anak' && <BeneficiaryNutritionTab />}
 
       {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT LEMBAGA */}

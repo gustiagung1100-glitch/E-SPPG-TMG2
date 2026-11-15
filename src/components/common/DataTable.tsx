@@ -248,14 +248,18 @@ export function DataTable<T extends Record<string, any>>({
           </thead>
           <tbody className="divide-y divide-[#E2E8F0]/70 dark:divide-slate-800/70">
             {isLoading ? (
-              <tr>
-                <td colSpan={columns.length + 1} className="py-12 text-center">
-                  <div className="flex flex-col items-center justify-center">
-                    <div className="w-7 h-7 border-3 border-[#142B4A] dark:border-teal-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="mt-2 text-xs text-[#64748B]">Memuat data...</p>
-                  </div>
-                </td>
-              </tr>
+              Array.from({ length: 5 }).map((_, sIdx) => (
+                <tr key={`skel-${sIdx}`} aria-hidden="true">
+                  <td className="py-3.5 px-4 text-center">
+                    <div className="h-3.5 w-6 mx-auto rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  </td>
+                  {columns.map(col => (
+                    <td key={`${sIdx}-${col.key}`} className="py-3.5 px-4">
+                      <div className="h-4 w-full max-w-[160px] rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                    </td>
+                  ))}
+                </tr>
+              ))
             ) : paginatedData.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} className="py-12 text-center">

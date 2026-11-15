@@ -23,6 +23,8 @@ import {
   Trash2,
   ShieldAlert,
   Thermometer,
+  HeartPulse,
+  Activity,
 } from 'lucide-react';
 import { ModuleKey } from '../../types';
 
@@ -53,6 +55,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     sppgConfig,
     masterUnits,
     materialConversions,
+    beneficiaryRecords,
   } = useApp();
 
   const convertToKg = (qty: number, unit?: string, materialName?: string): number => {
@@ -128,6 +131,63 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
   const pendingQC = purchaseOrders.filter(
     p => p.status === 'Disetujui Kepala' && p.qcStatus === 'Belum QC'
   );
+
+  // ---------------------------------------------------------------------------
+  // 3. Statistik Gizi & Antropometri WHO/Kemenkes Real-Time (beneficiaryRecords)
+  // ---------------------------------------------------------------------------
+  const nutritionStats = useMemo(() => {
+    const total = beneficiaryRecords.length;
+    const normal = beneficiaryRecords.filter(r => r.primaryStatus === 'Normal').length;
+    const stunting = beneficiaryRecords.filter(r => r.isStunted).length;
+    const underweight = beneficiaryRecords.filter(r => r.isUnderweight).length;
+    const wasting = beneficiaryRecords.filter(r => r.isWasted).length;
+    const overweight = beneficiaryRecords.filter(r => r.primaryStatus === 'Gizi Lebih').length;
+
+    const byInstitutionMap = new Map<
+      string,
+      {
+        institutionName: string;
+        total: number;
+        normal: number;
+        stunting: number;
+        underweight: number;
+        wasting: number;
+      }
+    >();
+
+    for (const r of beneficiaryRecords) {
+      const existing = byInstitutionMap.get(r.institutionName) || {
+        institutionName: r.institutionName,
+        total: 0,
+        normal: 0,
+        stunting: 0,
+        underweight: 0,
+        wasting: 0,
+      };
+      existing.total += 1;
+      if (r.primaryStatus === 'Normal') existing.normal += 1;
+      if (r.isStunted) existing.stunting += 1;
+      if (r.isUnderweight) existing.underweight += 1;
+      if (r.isWasted) existing.wasting += 1;
+      byInstitutionMap.set(r.institutionName, existing);
+    }
+
+    const priorityCases = beneficiaryRecords
+      .filter(r => r.isWasted || r.isStunted || r.isUnderweight)
+      .slice(0, 6);
+
+    return {
+      total,
+      normal,
+      stunting,
+      underweight,
+      wasting,
+      overweight,
+      normalPct: total > 0 ? ((normal / total) * 100).toFixed(1) : '0.0',
+      byInstitution: Array.from(byInstitutionMap.values()),
+      priorityCases,
+    };
+  }, [beneficiaryRecords]);
 
   // ---------------------------------------------------------------------------
   // 3A. Data Food Waste Harian dari Tugas Divisi Cuci Ompreng (washingWasteRecords)
@@ -1177,6 +1237,228 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               className="w-full py-2.5 bg-[#F4F7FA] hover:bg-[#E2E8F0]/70 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#142B4A] dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <span>Kelola Data Tugas Divisi Persiapan</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 4: REKAPITULASI STATUS GIZI ANAK & Z-SCORE WHO/KEMENKES (REAL-TIME) */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-base font-bold text-[#1F2937] dark:text-white tracking-tight flex items-center gap-2">
+              <HeartPulse className="w-4 h-4 text-[#0F766E] dark:text-teal-400" />
+              <span>4. Pemantauan Status Gizi Anak & Antropometri WHO/Kemenkes (Real-Time)</span>
+            </h3>
+            <p className="text-xs text-[#64748B] dark:text-slate-400">
+              Diperbarui otomatis setiap kali kader atau ahli gizi menyimpan atau mengubah data anak pada Modul Penerima Manfaat.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                sessionStorage.setItem('sppg_institutions_target_tab', 'data_gizi_anak');
+              } catch {
+                // ignore
+              }
+              onNavigate('institutions');
+            }}
+            className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0F766E] hover:bg-[#0D625B] text-white text-xs font-bold shadow-xs transition cursor-pointer shrink-0"
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Input & Hitung Z-Score WHO</span>
+          </button>
+        </div>
+
+        {/* 4 Nutrition KPI Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 tabular-nums">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+            <div className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+              Total Anak Terpantau
+            </div>
+            <div className="text-2xl font-black text-[#142B4A] dark:text-white mt-1">
+              {formatNumber(nutritionStats.total)} Anak
+            </div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+              NIK 16-digit terverifikasi unik
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+            <div className="text-[11px] font-bold uppercase text-emerald-700 dark:text-emerald-400">
+              Gizi Normal (Ideal)
+            </div>
+            <div className="text-2xl font-black text-emerald-700 dark:text-emerald-400 mt-1">
+              {nutritionStats.normal} <span className="text-sm font-bold">({nutritionStats.normalPct}%)</span>
+            </div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+              Ambang batas -2 SD s.d. +2 SD
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+            <div className="text-[11px] font-bold uppercase text-amber-700 dark:text-amber-400">
+              Indikasi Stunting (TB/U)
+            </div>
+            <div className="text-2xl font-black text-amber-700 dark:text-amber-400 mt-1">
+              {nutritionStats.stunting} Kasus
+            </div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+              Skor TB/U (HAZ) &lt; -2 SD
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)]">
+            <div className="text-[11px] font-bold uppercase text-rose-700 dark:text-rose-400">
+              Underweight & Wasting
+            </div>
+            <div className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-1">
+              {nutritionStats.underweight} / {nutritionStats.wasting}
+            </div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+              Underweight (BB/U) • Wasting ({nutritionStats.wasting})
+            </div>
+          </div>
+        </div>
+
+        {/* Two-Column Breakdown Chart & Priority Table */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Chart Panel: Distribusi Status Gizi per Sekolah */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] space-y-4">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
+              <div>
+                <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
+                  Sebaran Status Gizi per Sekolah / Lembaga
+                </h4>
+                <p className="text-xs text-[#64748B] dark:text-slate-400">
+                  Proporsi anak Normal vs indikasi Stunting / Underweight / Wasting
+                </p>
+              </div>
+              <span className="text-[11px] font-mono font-bold text-[#0F766E] dark:text-teal-400">
+                WHO 2006/2007
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {nutritionStats.byInstitution.map(row => {
+                const normalPct = row.total > 0 ? (row.normal / row.total) * 100 : 0;
+                const issueCount = Math.max(0, row.total - row.normal);
+                const issuePct = row.total > 0 ? (issueCount / row.total) * 100 : 0;
+                return (
+                  <div key={row.institutionName} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs gap-2">
+                      <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
+                        {row.institutionName}
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300 shrink-0 tabular-nums">
+                        Normal: <strong>{row.normal}</strong>/{row.total} • Perlu Pantau: <strong>{issueCount}</strong>
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                      <div
+                        className="bg-emerald-600 h-full transition-all duration-300"
+                        style={{ width: `${normalPct}%` }}
+                        title={`Normal: ${row.normal}`}
+                      />
+                      <div
+                        className="bg-amber-500 h-full transition-all duration-300"
+                        style={{ width: `${issuePct}%` }}
+                        title={`Perlu Intervensi: ${issueCount}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Priority Follow-Up Table */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
+                <div>
+                  <h4 className="text-sm font-bold text-[#1F2937] dark:text-white">
+                    Daftar Prioritas Intervensi Gizi (Z-Score &lt; -2 SD)
+                  </h4>
+                  <p className="text-xs text-[#64748B] dark:text-slate-400">
+                    Pemantauan real-time anak dengan Stunting, Underweight, atau Wasting
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-bold text-rose-700 dark:text-rose-400">
+                  {nutritionStats.priorityCases.length} Prioritas
+                </span>
+              </div>
+
+              {nutritionStats.priorityCases.length === 0 ? (
+                <div className="py-8 text-center text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+                  Seluruh anak terpantau berada dalam status gizi Normal.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg">
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 font-bold">
+                      <tr>
+                        <th className="py-2 px-2.5">Nama Anak</th>
+                        <th className="py-2 px-2.5">Lembaga</th>
+                        <th className="py-2 px-2.5 text-right">TB/U</th>
+                        <th className="py-2 px-2.5 text-right">WHZ/IMT</th>
+                        <th className="py-2 px-2.5 text-right">Status WHO</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 tabular-nums">
+                      {nutritionStats.priorityCases.map(child => (
+                        <tr key={child.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                          <td className="py-2 px-2.5">
+                            <div className="font-bold text-slate-900 dark:text-white">{child.fullName}</div>
+                            <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                              {child.ageMonths} bln • {child.weightKg}kg/{child.heightCm}cm
+                            </div>
+                          </td>
+                          <td className="py-2 px-2.5 text-slate-700 dark:text-slate-300">
+                            {child.institutionName}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono font-bold text-amber-700 dark:text-amber-300">
+                            {child.haz.toFixed(2)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono font-bold text-rose-700 dark:text-rose-300">
+                            {child.whz.toFixed(2)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-bold">
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded-md text-[10px] ${
+                                child.primaryStatus === 'Wasting'
+                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300'
+                                  : child.primaryStatus === 'Stunting'
+                                  ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-300'
+                                  : 'bg-orange-100 text-orange-900 dark:bg-orange-950/70 dark:text-orange-300'
+                              }`}
+                            >
+                              {child.primaryStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('sppg_reports_target_key', 'status_gizi_who');
+                } catch {
+                  // ignore
+                }
+                onNavigate('reports');
+              }}
+              className="w-full min-h-[42px] py-2.5 bg-[#F4F7FA] hover:bg-[#E2E8F0]/70 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#142B4A] dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>Ekspor Laporan Dinamis Status Gizi (PDF/Excel)</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

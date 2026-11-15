@@ -43,8 +43,8 @@ interface HeaderSearchResult {
 const MODULE_SEARCH_INDEX: { module: ModuleKey; title: string; keywords: string }[] = [
   { module: 'dashboard', title: 'Dashboard Terpadu', keywords: 'beranda ringkasan statistik porsi grafik' },
   { module: 'master_data', title: 'Master Data Terpadu (A-E)', keywords: 'master bahan supplier relawan satuan konversi' },
-  { module: 'institutions', title: 'Modul Penerima Manfaat', keywords: 'sekolah lembaga paud sd smp sma pesantren pic absensi kuota' },
-  { module: 'menu', title: 'Perencanaan Menu & Gizi', keywords: 'menu harian akg kalori protein karbohidrat siklus' },
+  { module: 'institutions', title: 'Modul Penerima Manfaat', keywords: 'sekolah lembaga paud sd smp sma pesantren pic absensi kuota anak nik gizi zscore stunting underweight wasting' },
+  { module: 'menu', title: 'Perencanaan Menu & Gizi', keywords: 'menu harian akg kalori protein karbohidrat siklus kalkulator zscore who kemenkes antropometri' },
   { module: 'menu_flyer', title: 'Flyer Menu Otomatis', keywords: 'poster flyer infografis menu makanan' },
   { module: 'procurement', title: 'Modul PLOK (RAB, PO, QC)', keywords: 'belanja rab po purchase order quality control qc bahan' },
   { module: 'supplier_portal', title: 'Portal Mitra Supplier', keywords: 'supplier rekanan po pengiriman faktur surat jalan' },

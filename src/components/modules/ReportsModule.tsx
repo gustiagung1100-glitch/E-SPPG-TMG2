@@ -38,6 +38,12 @@ import {
   exportPortioningFoodTempPDF,
 } from '../common/PortioningFoodTempSheet';
 import {
+  PlogOrganolepticSheet,
+  PlogOrganolepticItemRow,
+  resolvePlogOrganolepticData,
+  exportPlogOrganolepticPDF,
+} from '../common/PlogOrganolepticSheet';
+import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
   getCustomTableFields,
@@ -72,9 +78,10 @@ import {
   DollarSign,
   PackageCheck,
   FileSignature,
+  Upload,
 } from 'lucide-react';
 
-// Definisi 19 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
+// Definisi 20 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
 export const REPORT_CONFIGS: ReportMetaConfig[] = [
   // 1. Distribusi & Lapangan
   {
@@ -171,13 +178,13 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'organoleptik_plog',
-    title: 'Organoleptik PLOG (Nutrisionis & Head Chef)',
+    title: 'Pemeriksaan Makanan & Organoleptik PLOG (Nutrisionis & Head Chef)',
     category: 'Gizi & Menu',
     codePrefix: 'ORGA-PLOG',
-    description: 'Uji organoleptik internal dapur sesaat sebelum makanan diporsikan ke dalam wadah ompreng.',
-    sourceModule: 'Pengolahan & PLOG (cookingId, menuId)',
+    description: 'Kombinasi uji organoleptik internal PLOG (Visual, Aroma, Rasa, Tekstur, Suhu) dan formulir pemeriksaan Menu Basah & Menu Kering retensi 2x24 jam.',
+    sourceModule: 'Pengolahan, Pemorsian & PLOG (menuId, cookingId, portioningId)',
     defaultOrientation: 'portrait',
-    approverRole: 'Head Chef & Nutrisionis',
+    approverRole: 'Pengawas Gizi & Kepala SPPG',
   },
 
   // 3. Dapur & Keamanan Pangan
@@ -275,6 +282,16 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
     defaultOrientation: 'landscape',
     approverRole: 'Pengawas Keuangan & Kepala SPPG',
   },
+  {
+    key: 'status_gizi_who',
+    title: 'Rekap Status Gizi & Antropometri Penerima Manfaat (WHO/Kemenkes)',
+    category: 'Gizi & Menu',
+    codePrefix: 'ZSCORE-WHO',
+    description: 'Laporan dinamis status gizi (Normal, Stunting, Underweight, Wasting), Z-Score BB/U, TB/U, BB/TB & IMT/U serta NIK terverifikasi.',
+    sourceModule: 'Antropometri & Kalkulator Z-Score WHO (beneficiaryRecords)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Ahli Gizi (Pengawas Gizi) & Kepala SPPG',
+  },
 ];
 
 interface ReportsModuleProps {
@@ -288,6 +305,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     masterSuppliers,
     masterVolunteers,
     beneficiaryAttendance,
+    beneficiaryRecords,
     menuItems,
     inventory,
     purchaseOrders,
@@ -311,7 +329,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   } = useApp();
 
   // Selected State
-  const [activeReportKey, setActiveReportKey] = useState<OfficialReportKey>('bast_distribusi');
+  const [activeReportKey, setActiveReportKey] = useState<OfficialReportKey>(() => {
+    try {
+      const target = sessionStorage.getItem('sppg_reports_target_key') as OfficialReportKey | null;
+      if (target && REPORT_CONFIGS.some(r => r.key === target)) {
+        sessionStorage.removeItem('sppg_reports_target_key');
+        return target;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'bast_distribusi';
+  });
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [periodType, setPeriodType] = useState<'harian' | 'mingguan' | 'bulanan' | 'periode'>('harian');
   const [selectedDate, setSelectedDate] = useState<string>('2026-11-08');
@@ -335,6 +364,21 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [bastSingleInstId, setBastSingleInstId] = useState<string>('');
   const [bastReceiveTimeOverride, setBastReceiveTimeOverride] = useState<string>('');
   const [bastReturnTimeOverride, setBastReturnTimeOverride] = useState<string>('');
+
+  // Organoleptik PLOG + Pemeriksaan Makanan (Menu Basah & Menu Kering) controls
+  const [plogBlankMode, setPlogBlankMode] = useState<boolean>(false);
+  const [showPlogEditor, setShowPlogEditor] = useState<boolean>(false);
+  const [plogPreparedDateOverride, setPlogPreparedDateOverride] = useState<string>('');
+  const [plogAfterDateOverride, setPlogAfterDateOverride] = useState<string>('');
+  const [plogOfficerOverride, setPlogOfficerOverride] = useState<string>('');
+  const [plogChefOverride, setPlogChefOverride] = useState<string>('');
+  const [plogKepalaOverride, setPlogKepalaOverride] = useState<string>('');
+  const [plogNipOverride, setPlogNipOverride] = useState<string>('');
+  const [plogNotesOverride, setPlogNotesOverride] = useState<string | undefined>(undefined);
+  const [plogCustomWetRows, setPlogCustomWetRows] = useState<PlogOrganolepticItemRow[] | null>(null);
+  const [plogCustomDryRows, setPlogCustomDryRows] = useState<PlogOrganolepticItemRow[] | null>(null);
+  const [plogWetPhotoOverride, setPlogWetPhotoOverride] = useState<string | undefined>(undefined);
+  const [plogDryPhotoOverride, setPlogDryPhotoOverride] = useState<string | undefined>(undefined);
 
   // Active Report Metadata
   const currentConfig = useMemo(() => {
@@ -398,6 +442,54 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     orgaKesimpulanOverride,
     orgaMengetahuiOverride,
     orgaCustomRows,
+  ]);
+
+  // Auto-resolved Kombinasi Pemeriksaan Makanan + Organoleptik PLOG (Menu Basah & Menu Kering)
+  const plogOrganolepticData = useMemo(() => {
+    const matchedDateMenu =
+      menuItems.find(m => m.date === selectedDate) || todayMenu;
+    return resolvePlogOrganolepticData({
+      menu: matchedDateMenu,
+      cookingRecords,
+      portioningRecords,
+      masterVolunteers,
+      sppgConfig,
+      date: selectedDate,
+      blankMode: plogBlankMode,
+      overrides: {
+        samplePreparedDateLabel: plogPreparedDateOverride || undefined,
+        sampleAfter2x24DateLabel: plogAfterDateOverride || undefined,
+        officerName: plogOfficerOverride || undefined,
+        headChefName: plogChefOverride || undefined,
+        kepalaSppgName: plogKepalaOverride || undefined,
+        kepalaSppgNip: plogNipOverride || undefined,
+        wetRows: plogCustomWetRows || undefined,
+        dryRows: plogCustomDryRows || undefined,
+        wetPhotoUrl: plogWetPhotoOverride,
+        dryPhotoUrl: plogDryPhotoOverride,
+        notes: plogNotesOverride,
+      },
+    });
+  }, [
+    menuItems,
+    todayMenu,
+    cookingRecords,
+    portioningRecords,
+    masterVolunteers,
+    sppgConfig,
+    selectedDate,
+    plogBlankMode,
+    plogPreparedDateOverride,
+    plogAfterDateOverride,
+    plogOfficerOverride,
+    plogChefOverride,
+    plogKepalaOverride,
+    plogNipOverride,
+    plogCustomWetRows,
+    plogCustomDryRows,
+    plogWetPhotoOverride,
+    plogDryPhotoOverride,
+    plogNotesOverride,
   ]);
 
   // Auto-resolved Pemantauan Suhu Makanan Pengolahan & CCP (Divisi Pengolahan + Master Menu + Master Relawan)
@@ -977,34 +1069,82 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 10. Organoleptik PLOG
+      // 10. Pemeriksaan Makanan & Organoleptik PLOG (Kombinasi PLOG + Surat Pemeriksaan Makanan)
       case 'organoleptik_plog': {
-        headers = ['No', 'Komponen Hidangan', 'Penilai (Chef & Nutrisionis)', 'Warna & Visual', 'Aroma Masakan', 'Rasa & Bumbu', 'Tekstur & Matang', 'Suhu Uji', 'Keputusan'];
-        rows = [
-          [1, 'Nasi Putih', 'Head Chef Bambang', 'Putih Bersih Pulen', 'Harum Alami Nasi', 'Netral Gurih', 'Empuk Tidak Lembek', '78.5°C', 'Lolos Edar'],
-          [2, 'Ayam Fillet Madu', 'Nutrisionis Siti N.', 'Cokelat Karamel Kilap', 'Wangi Bawang & Madu', 'Manis Gurih Meresap', 'Empuk Sempurna', '82.0°C', 'Lolos Edar'],
-          [3, 'Tempe Mendoan', 'Head Chef Bambang', 'Kuning Keemasan', 'Harum Ketumbar Daun Bawang', 'Gurih Pas', 'Crispy Luar Lembut', '80.0°C', 'Lolos Edar'],
-          [4, 'Sop Sayur Kaldu', 'Nutrisionis Siti N.', 'Kuah Bening Keemasan', 'Harum Seledri & Merica', 'Segar Kaldu Ayam', 'Wortel & Buncis Crunch', '84.5°C', 'Lolos Edar'],
+        headers = [
+          'Kelompok',
+          'No',
+          'Menu',
+          'Uji Organoleptik PLOG (Visual, Aroma, Rasa & Tekstur)',
+          'Suhu',
+          'Baik',
+          'Tidak Baik',
+          'Ket.',
+        ];
+        const activeWet = plogOrganolepticData.wetRows.filter(r => r.menuName.trim() !== '');
+        const activeDry = plogOrganolepticData.dryRows.filter(r => r.menuName.trim() !== '');
+        const combinedRows = [
+          ...activeWet.map(r => ({ group: 'Menu Basah', row: r })),
+          ...activeDry.map(r => ({ group: 'Menu Kering', row: r })),
         ];
 
-        excelData = rows.map(r => ({
-          'Komponen': r[1],
-          'Penilai': r[2],
-          'Visual': r[3],
-          'Aroma': r[4],
-          'Rasa': r[5],
-          'Tekstur': r[6],
-          'Suhu': r[7],
-          'Keputusan': r[8],
+        rows = combinedRows.map(({ group, row }) => [
+          group,
+          row.no,
+          row.menuName,
+          row.organolepticDetail || '-',
+          row.temperature || '-',
+          row.outcome === 'baik' ? '✓' : '',
+          row.outcome === 'tidak_baik' ? '✓' : '',
+          row.ket || '-',
+        ]);
+
+        excelData = combinedRows.map(({ group, row }) => ({
+          'Kelompok Menu': group,
+          'No': row.no,
+          'Menu': row.menuName,
+          'Uji Organoleptik PLOG': row.organolepticDetail || '-',
+          'Suhu Uji': row.temperature || '-',
+          'Hasil Uji Baik': row.outcome === 'baik' ? 'Ya' : '-',
+          'Hasil Uji Tidak Baik': row.outcome === 'tidak_baik' ? 'Ya' : '-',
+          'Keterangan': row.ket || '-',
+          'Sampel Disiapkan': plogOrganolepticData.samplePreparedDateLabel,
+          'Setelah 2x24 Jam': plogOrganolepticData.sampleAfter2x24DateLabel,
+          'Pengawas Gizi': plogOrganolepticData.officerName,
+          'Head Chef': plogOrganolepticData.headChefName,
         }));
 
+        const baikCount = combinedRows.filter(c => c.row.outcome === 'baik').length;
+        const totalEvaluated = combinedRows.length;
         metrics = [
-          { label: 'Status Uji Cita Rasa', value: '100% Lolos', color: 'text-emerald-700' },
-          { label: 'Rata-rata Suhu Matang', value: '81.2°C', color: 'text-amber-700' },
-          { label: 'Penilai', value: 'Chef & Gizi', color: 'text-blue-700' },
-          { label: 'Standar Kelayakan', value: 'Higienis BGN', color: 'text-purple-700' },
+          {
+            label: 'Hasil Uji Organoleptik',
+            value: totalEvaluated > 0 ? `${baikCount}/${totalEvaluated} Baik` : 'Blanko Siap Isi',
+            sublabel: `${activeWet.length} Menu Basah • ${activeDry.length} Menu Kering`,
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Sampel Disiapkan',
+            value: plogOrganolepticData.samplePreparedDateLabel,
+            sublabel: `2x24 Jam: ${plogOrganolepticData.sampleAfter2x24DateLabel}`,
+            color: 'text-blue-700',
+          },
+          {
+            label: 'Petugas Pengawas Gizi',
+            value: plogOrganolepticData.officerName,
+            sublabel: `Chef: ${plogOrganolepticData.headChefName}`,
+            color: 'text-purple-700',
+          },
+          {
+            label: 'Foto Sampel Ompreng',
+            value: plogOrganolepticData.wetPhotoUrl ? 'Terlampir' : 'Belum Ada Foto',
+            sublabel: `Kode Menu: ${plogOrganolepticData.menuCode}`,
+            color: 'text-amber-700',
+          },
         ];
-        notes = 'Hasil organoleptik internal dapur disetujui penuh sebelum perintah pemorsian ompreng dijalankan.';
+        notes =
+          plogOrganolepticData.notes ||
+          'Formulir Pemeriksaan Makanan & Uji Organoleptik PLOG mencakup Menu Basah, Menu Kering, dokumentasi gambar, serta periode retensi sampel 2 x 24 jam.';
         break;
       }
 
@@ -1732,6 +1872,91 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         notes = 'Laporan disinkronkan secara otomatis dari Buku Kas Petty Cash operasional SPPG.';
         break;
       }
+
+      // 20b. Laporan Dinamis Status Gizi & Antropometri WHO/Kemenkes
+      case 'status_gizi_who': {
+        headers = [
+          'No',
+          'NIK (16 Digit)',
+          'Nama Anak',
+          'L/P',
+          'Usia',
+          'Lembaga / Kelas',
+          'BB (kg)',
+          'TB (cm)',
+          'Z-Score TB/U',
+          'Z-Score BB/U',
+          'Z-Score BB/TB atau IMT/U',
+          'Status WHO',
+        ];
+        let records = [...beneficiaryRecords];
+        if (selectedInstitutionId && selectedInstitutionId !== 'ALL') {
+          records = records.filter(r => r.institutionId === selectedInstitutionId);
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          records = records.filter(
+            r =>
+              r.fullName.toLowerCase().includes(kw) ||
+              r.nik.toLowerCase().includes(kw) ||
+              r.institutionName.toLowerCase().includes(kw) ||
+              r.primaryStatus.toLowerCase().includes(kw)
+          );
+        }
+
+        rows = records.map((r, idx) => [
+          idx + 1,
+          r.nik,
+          r.fullName,
+          r.gender,
+          `${r.ageMonths} bln`,
+          `${r.institutionName} (${r.classOrGroup})`,
+          r.weightKg.toFixed(1),
+          r.heightCm.toFixed(1),
+          r.haz.toFixed(2),
+          r.waz !== null ? r.waz.toFixed(2) : '-',
+          `${r.whz.toFixed(2)} (${r.whzIndexLabel})`,
+          r.primaryStatus,
+        ]);
+
+        excelData = records.map((r, idx) => ({
+          No: idx + 1,
+          NIK: r.nik,
+          'Nama Anak': r.fullName,
+          'Jenis Kelamin': r.gender === 'L' ? 'Laki-laki' : 'Perempuan',
+          'Usia (Bulan)': r.ageMonths,
+          Lembaga: r.institutionName,
+          Kelas: r.classOrGroup,
+          'Tanggal Ukur': r.measurementDate,
+          'Berat Badan (kg)': r.weightKg,
+          'Tinggi Badan (cm)': r.heightCm,
+          'Z-Score TB/U (HAZ)': r.haz,
+          'Z-Score BB/U (WAZ)': r.waz ?? '-',
+          'Z-Score BB/TB atau IMT/U': r.whz,
+          'Indeks WHZ/BAZ': r.whzIndexLabel,
+          'Status WHO': r.primaryStatus,
+          Rekomendasi: r.recommendation,
+        }));
+
+        const total = records.length;
+        const normalCount = records.filter(r => r.primaryStatus === 'Normal').length;
+        const stuntCount = records.filter(r => r.isStunted).length;
+        const wasteUnderCount = records.filter(r => r.isWasted || r.isUnderweight).length;
+
+        metrics = [
+          { label: 'Total Anak Terdata', value: `${total} Anak`, color: 'text-blue-700' },
+          {
+            label: 'Status Gizi Normal',
+            value: `${normalCount} (${total ? ((normalCount / total) * 100).toFixed(1) : '0.0'}%)`,
+            color: 'text-emerald-700',
+          },
+          { label: 'Indikasi Stunting (TB/U)', value: `${stuntCount} Kasus`, color: 'text-amber-700' },
+          { label: 'Underweight / Wasting', value: `${wasteUnderCount} Kasus`, color: 'text-rose-700' },
+        ];
+        notes =
+          'Laporan disinkronkan secara real-time dengan Kalkulator Antropometri WHO 2006/2007 (Permenkes RI No. 2/2020) dan validasi NIK 16-digit anti-duplikasi.';
+        break;
+      }
     }
 
     return {
@@ -1766,6 +1991,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     qualityControlRecords,
     inventory,
     institutions,
+    beneficiaryRecords,
     pettyCashOpeningBalance,
     pettyCashTransactions,
     washingWasteRecords,
@@ -1798,6 +2024,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     }
     if (activeReportKey === 'organoleptik_penerima') {
       await exportOrganolepticChecklistPDF(organolepticData);
+      return;
+    }
+    if (activeReportKey === 'organoleptik_plog') {
+      await exportPlogOrganolepticPDF(plogOrganolepticData);
       return;
     }
     if (activeReportKey === 'suhu_makanan_pengolahan') {
@@ -1841,9 +2071,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; BAST, Checklist Organoleptik, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
+      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; BAST, Checklist Organoleptik, Organoleptik PLOG, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
       {activeReportKey !== 'bast_distribusi' &&
         activeReportKey !== 'organoleptik_penerima' &&
+        activeReportKey !== 'organoleptik_plog' &&
         activeReportKey !== 'suhu_makanan_pengolahan' &&
         activeReportKey !== 'suhu_makanan_pemorsian' && (
         <div className="hidden print:block mb-6">
@@ -2475,6 +2706,439 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <OrganolepticChecklistSheet data={organolepticData} />
               </div>
             </div>
+          ) : activeReportKey === 'organoleptik_plog' ? (
+            <div className="space-y-4">
+              {/* Control Bar Kombinasi Pemeriksaan Makanan & Organoleptik PLOG (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Format Kombinasi: Organoleptik PLOG + Pemeriksaan Makanan (Menu Basah &amp; Menu Kering)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Komponen menu, suhu masak, penilai Pengawas Gizi &amp; Head Chef, foto ompreng pemorsian, dan tanggal retensi 2x24 jam terisi otomatis dan dapat disesuaikan sebelum cetak/PDF.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlogBlankMode(v => !v);
+                        setPlogCustomWetRows(null);
+                        setPlogCustomDryRows(null);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                        plogBlankMode
+                          ? 'bg-amber-600 text-white border-amber-700'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {plogBlankMode ? 'Mode Blanko Kosong (Aktif)' : 'Mode Blanko Siap Tulis'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlogEditor(v => !v)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-900 text-white hover:bg-blue-800 transition cursor-pointer"
+                    >
+                      {showPlogEditor ? 'Tutup Editor Menu & Uji' : 'Edit Menu, Foto & Hasil Uji'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Tanggal Sampel Makanan Disiapkan
+                    </label>
+                    <input
+                      type="text"
+                      value={plogPreparedDateOverride || plogOrganolepticData.samplePreparedDateLabel}
+                      onChange={e => setPlogPreparedDateOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Tanggal Sampel Setelah 2 x 24 Jam
+                    </label>
+                    <input
+                      type="text"
+                      value={plogAfterDateOverride || plogOrganolepticData.sampleAfter2x24DateLabel}
+                      onChange={e => setPlogAfterDateOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Nama Petugas / Pengawas Gizi
+                    </label>
+                    <input
+                      type="text"
+                      value={plogOfficerOverride || plogOrganolepticData.officerName}
+                      onChange={e => setPlogOfficerOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Penilai Dapur (Head Chef PLOG)
+                    </label>
+                    <input
+                      type="text"
+                      value={plogChefOverride || plogOrganolepticData.headChefName}
+                      onChange={e => setPlogChefOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Diperiksa oleh (Kepala SPPG)
+                    </label>
+                    <input
+                      type="text"
+                      value={plogKepalaOverride || plogOrganolepticData.kepalaSppgName}
+                      onChange={e => setPlogKepalaOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      NIP Kepala SPPG (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={plogNipOverride}
+                      onChange={e => setPlogNipOverride(e.target.value)}
+                      placeholder="Contoh: 20020918 202621 2 004"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                {/* Upload Foto Menu Basah & Menu Kering */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+                  <div className="flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                    <div>
+                      <span className="font-bold text-slate-700 block">Foto Sampel Menu Basah (Ompreng)</span>
+                      <span className="text-[11px] text-slate-500">
+                        {plogOrganolepticData.wetPhotoUrl ? 'Foto aktif terpasang di kolom Gambar' : 'Belum ada foto'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold cursor-pointer border border-slate-300">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                setPlogWetPhotoOverride(reader.result);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      {plogWetPhotoOverride !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => setPlogWetPhotoOverride(undefined)}
+                          className="px-2 py-1.5 rounded-lg text-[11px] text-rose-700 hover:bg-rose-50 font-semibold"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg">
+                    <div>
+                      <span className="font-bold text-slate-700 block">Foto Sampel Menu Kering (Opsional)</span>
+                      <span className="text-[11px] text-slate-500">
+                        {plogOrganolepticData.dryPhotoUrl ? 'Foto Menu Kering terpasang' : 'Kosong (seperti blanko standar)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold cursor-pointer border border-slate-300">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                setPlogDryPhotoOverride(reader.result);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      {plogDryPhotoOverride && (
+                        <button
+                          type="button"
+                          onClick={() => setPlogDryPhotoOverride(undefined)}
+                          className="px-2 py-1.5 rounded-lg text-[11px] text-rose-700 hover:bg-rose-50 font-semibold"
+                        >
+                          Hapus
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {showPlogEditor && (
+                  <div className="pt-3 border-t border-slate-200 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700">
+                        Editor Baris Menu Basah &amp; Menu Kering + Penilaian Organoleptik PLOG
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPlogCustomWetRows(null);
+                          setPlogCustomDryRows(null);
+                          setPlogNotesOverride(undefined);
+                        }}
+                        className="text-[11px] font-semibold text-blue-700 hover:underline cursor-pointer"
+                      >
+                        Reset ke Data Menu Otomatis
+                      </button>
+                    </div>
+
+                    {/* Menu Basah Editor */}
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-bold uppercase text-slate-700">1. Menu Basah (Baris 1–7)</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border border-slate-200 bg-white">
+                          <thead>
+                            <tr className="bg-slate-100 text-slate-700 font-semibold">
+                              <th className="p-1.5 border border-slate-200 w-9">No</th>
+                              <th className="p-1.5 border border-slate-200 text-left">Nama Menu</th>
+                              <th className="p-1.5 border border-slate-200 text-left">Visual, Aroma, Rasa &amp; Tekstur (PLOG)</th>
+                              <th className="p-1.5 border border-slate-200 w-20">Suhu</th>
+                              <th className="p-1.5 border border-slate-200 w-28">Hasil Uji</th>
+                              <th className="p-1.5 border border-slate-200">Ket.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {plogOrganolepticData.wetRows.map((row, idx) => (
+                              <tr key={`edit-wet-${row.no}`}>
+                                <td className="p-1 border border-slate-200 text-center font-medium">{row.no}</td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.menuName}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.wetRows.map((item, i) =>
+                                        i === idx ? { ...item, menuName: e.target.value } : item
+                                      );
+                                      setPlogCustomWetRows(next);
+                                    }}
+                                    placeholder="Nama hidangan..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.organolepticDetail}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.wetRows.map((item, i) =>
+                                        i === idx ? { ...item, organolepticDetail: e.target.value } : item
+                                      );
+                                      setPlogCustomWetRows(next);
+                                    }}
+                                    placeholder="Warna, aroma, rasa, tekstur..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.temperature}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.wetRows.map((item, i) =>
+                                        i === idx ? { ...item, temperature: e.target.value } : item
+                                      );
+                                      setPlogCustomWetRows(next);
+                                    }}
+                                    placeholder="78.5°C"
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs text-center"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <select
+                                    value={row.outcome}
+                                    onChange={e => {
+                                      const val = e.target.value as 'baik' | 'tidak_baik' | '';
+                                      const next = plogOrganolepticData.wetRows.map((item, i) =>
+                                        i === idx ? { ...item, outcome: val } : item
+                                      );
+                                      setPlogCustomWetRows(next);
+                                    }}
+                                    className="w-full px-1.5 py-1 border border-slate-200 rounded text-xs"
+                                  >
+                                    <option value="">(Kosong)</option>
+                                    <option value="baik">✓ Baik</option>
+                                    <option value="tidak_baik">✓ Tidak Baik</option>
+                                  </select>
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.ket}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.wetRows.map((item, i) =>
+                                        i === idx ? { ...item, ket: e.target.value } : item
+                                      );
+                                      setPlogCustomWetRows(next);
+                                    }}
+                                    placeholder="Keterangan..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Menu Kering Editor */}
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-bold uppercase text-slate-700">2. Menu Kering (Baris 1–7)</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border border-slate-200 bg-white">
+                          <thead>
+                            <tr className="bg-slate-100 text-slate-700 font-semibold">
+                              <th className="p-1.5 border border-slate-200 w-9">No</th>
+                              <th className="p-1.5 border border-slate-200 text-left">Nama Menu Kering</th>
+                              <th className="p-1.5 border border-slate-200 text-left">Visual, Aroma, Rasa &amp; Kemasan</th>
+                              <th className="p-1.5 border border-slate-200 w-20">Suhu</th>
+                              <th className="p-1.5 border border-slate-200 w-28">Hasil Uji</th>
+                              <th className="p-1.5 border border-slate-200">Ket.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {plogOrganolepticData.dryRows.map((row, idx) => (
+                              <tr key={`edit-dry-${row.no}`}>
+                                <td className="p-1 border border-slate-200 text-center font-medium">{row.no}</td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.menuName}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.dryRows.map((item, i) =>
+                                        i === idx ? { ...item, menuName: e.target.value } : item
+                                      );
+                                      setPlogCustomDryRows(next);
+                                    }}
+                                    placeholder="Susu UHT / Biskuit / Snack..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.organolepticDetail}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.dryRows.map((item, i) =>
+                                        i === idx ? { ...item, organolepticDetail: e.target.value } : item
+                                      );
+                                      setPlogCustomDryRows(next);
+                                    }}
+                                    placeholder="Kemasan, aroma, rasa..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.temperature}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.dryRows.map((item, i) =>
+                                        i === idx ? { ...item, temperature: e.target.value } : item
+                                      );
+                                      setPlogCustomDryRows(next);
+                                    }}
+                                    placeholder="24.0°C"
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs text-center"
+                                  />
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <select
+                                    value={row.outcome}
+                                    onChange={e => {
+                                      const val = e.target.value as 'baik' | 'tidak_baik' | '';
+                                      const next = plogOrganolepticData.dryRows.map((item, i) =>
+                                        i === idx ? { ...item, outcome: val } : item
+                                      );
+                                      setPlogCustomDryRows(next);
+                                    }}
+                                    className="w-full px-1.5 py-1 border border-slate-200 rounded text-xs"
+                                  >
+                                    <option value="">(Kosong)</option>
+                                    <option value="baik">✓ Baik</option>
+                                    <option value="tidak_baik">✓ Tidak Baik</option>
+                                  </select>
+                                </td>
+                                <td className="p-1 border border-slate-200">
+                                  <input
+                                    type="text"
+                                    value={row.ket}
+                                    onChange={e => {
+                                      const next = plogOrganolepticData.dryRows.map((item, i) =>
+                                        i === idx ? { ...item, ket: e.target.value } : item
+                                      );
+                                      setPlogCustomDryRows(next);
+                                    }}
+                                    placeholder="Keterangan..."
+                                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  />
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Catatan Surat Editor */}
+                    <div className="text-xs">
+                      <label className="block font-semibold text-slate-600 mb-1">
+                        Catatan Pemeriksaan (Kosongkan untuk mencetak garis tulis manual)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={plogNotesOverride !== undefined ? plogNotesOverride : plogOrganolepticData.notes}
+                        onChange={e => setPlogNotesOverride(e.target.value)}
+                        className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi Kombinasi PEMERIKSAAN MAKANAN & ORGANOLEPTIK PLOG */}
+              <div className="max-w-4xl mx-auto">
+                <PlogOrganolepticSheet
+                  data={plogOrganolepticData}
+                  onPreviewPhoto={setPreviewPhoto}
+                />
+              </div>
+            </div>
           ) : activeReportKey === 'suhu_makanan_pengolahan' ? (
             <div className="space-y-4">
               {/* Control & Info Bar Integrasi Divisi Pengolahan + Master Menu + Master Relawan (Tersembunyi saat Cetak) */}
@@ -2825,6 +3489,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               ) : activeReportKey === 'organoleptik_penerima' ? (
                 <OrganolepticChecklistSheet
                   data={organolepticData}
+                  className="max-w-4xl w-full border-slate-300 shadow-md"
+                />
+              ) : activeReportKey === 'organoleptik_plog' ? (
+                <PlogOrganolepticSheet
+                  data={plogOrganolepticData}
+                  onPreviewPhoto={setPreviewPhoto}
                   className="max-w-4xl w-full border-slate-300 shadow-md"
                 />
               ) : activeReportKey === 'suhu_makanan_pengolahan' ? (

@@ -23,6 +23,7 @@ import {
   MaterialDimensionConversion,
   BeneficiaryAttendanceLog,
   BeneficiaryQuotaHistory,
+  BeneficiaryNutritionRecord,
   PreparationInspectionRecord,
   CookingInspectionRecord,
   PortioningInspectionRecord,
@@ -95,8 +96,10 @@ import {
   defaultRABItems,
   defaultQualityControlRecords,
 } from './plokData';
+import { initialBeneficiaryNutritionRecords } from './beneficiaryNutritionData';
+import { calculateWHOZScore, validateNikFormat, normalizeNik } from './whoZScore';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, doc, getDoc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 export interface ToastMessage {
@@ -191,6 +194,41 @@ interface AppContextType {
   recordBeneficiaryAttendance: (log: Omit<BeneficiaryAttendanceLog, 'id' | 'presentSmall' | 'presentLarge' | 'actualPortions' | 'totalRegistered' | 'totalAbsent'>) => { success: boolean; error?: string };
   updateBeneficiaryAttendance: (id: string, log: Partial<BeneficiaryAttendanceLog>) => Promise<void>;
   beneficiaryQuotaHistory: BeneficiaryQuotaHistory[];
+
+  // 7b. Data Anak, Antropometri & Status Gizi WHO/Kemenkes (Anti-Duplikasi NIK)
+  beneficiaryRecords: BeneficiaryNutritionRecord[];
+  isDataHydrating: boolean;
+  checkDuplicateNik: (nik: string, excludeId?: string) => BeneficiaryNutritionRecord | undefined;
+  addBeneficiaryRecord: (input: {
+    nik: string;
+    fullName: string;
+    gender: 'L' | 'P';
+    birthDate?: string;
+    ageMonths: number;
+    institutionId: string;
+    classOrGroup: string;
+    measurementDate: string;
+    weightKg: number;
+    heightCm: number;
+    notes?: string;
+  }) => Promise<{ ok: boolean; error?: string; record?: BeneficiaryNutritionRecord }>;
+  updateBeneficiaryRecord: (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      gender: 'L' | 'P';
+      birthDate: string;
+      ageMonths: number;
+      institutionId: string;
+      classOrGroup: string;
+      measurementDate: string;
+      weightKg: number;
+      heightCm: number;
+      notes: string;
+    }>
+  ) => Promise<{ ok: boolean; error?: string; record?: BeneficiaryNutritionRecord }>;
+  deleteBeneficiaryRecord: (id: string) => Promise<void>;
 
   // Operasional Lainnya
   menuItems: MenuItem[];
@@ -1686,6 +1724,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : initialQuotaHistoryData;
   });
 
+  const [beneficiaryRecords, setBeneficiaryRecords] = useState<BeneficiaryNutritionRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_beneficiary_records_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return initialBeneficiaryNutritionRecords;
+    } catch {
+      return initialBeneficiaryNutritionRecords;
+    }
+  });
+  const [isDataHydrating, setIsDataHydrating] = useState<boolean>(true);
+
   // Existing Operational States
   const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
     const saved = localStorage.getItem('esppg_menu_items');
@@ -1915,6 +1967,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem('esppg_quota_history', JSON.stringify(beneficiaryQuotaHistory));
   }, [beneficiaryQuotaHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_beneficiary_records_v1', JSON.stringify(beneficiaryRecords));
+  }, [beneficiaryRecords]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsDataHydrating(false), 320);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('esppg_menu_items', JSON.stringify(menuItems));
@@ -2226,6 +2287,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch {
           // Ignore
         }
+      } else if (e.key === 'esppg_beneficiary_records_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setBeneficiaryRecords(parsed);
+        } catch {
+          // Ignore
+        }
       } else if (e.key === 'esppg_distribution_deliveries' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -2370,6 +2438,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
     return () => unsubSnapshot();
+  }, [authReady, isAuthenticated]);
+
+  // Real-time Firestore listener for Beneficiary Nutrition & Anthropometry (beneficiary_nutrition_records)
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !auth.currentUser) return;
+    const nutritionQuery = query(
+      collection(db, 'beneficiary_nutrition_records'),
+      where('sppgId', '==', 'GFBQSYXD')
+    );
+    const unsubNutrition = onSnapshot(
+      nutritionQuery,
+      snapshot => {
+        if (snapshot.empty) return;
+        const cloudRecords: BeneficiaryNutritionRecord[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as BeneficiaryNutritionRecord & { sppgId?: string };
+          if (data && data.nik && data.fullName) {
+            cloudRecords.push({
+              ...data,
+              id: data.id || docSnap.id,
+            });
+          }
+        });
+        if (cloudRecords.length === 0) return;
+        setBeneficiaryRecords(prev => {
+          const byId = new Map<string, BeneficiaryNutritionRecord>();
+          prev.forEach(item => byId.set(item.id, item));
+          cloudRecords.forEach(cloud => byId.set(cloud.id, cloud));
+          return Array.from(byId.values());
+        });
+      },
+      err => {
+        console.warn('Firestore nutrition listener running in local fallback:', err?.message || err);
+      }
+    );
+    return () => unsubNutrition();
   }, [authReady, isAuthenticated]);
 
   // Re-validate session periodically or when whitelist/policy updates
@@ -3390,6 +3494,235 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     await logAudit('UPDATE', 'institutions', `Memperbarui log presensi penerima manfaat ID: ${id}`);
     addToast('success', 'Presensi Dimutakhirkan', 'Data kehadiran dan porsi pengiriman aktual diperbarui.');
+  };
+
+  // 7b. Beneficiary Nutrition & WHO Z-Score Records (Strict NIK Anti-Duplicate)
+  const checkDuplicateNik = (nik: string, excludeId?: string): BeneficiaryNutritionRecord | undefined => {
+    const clean = normalizeNik(nik);
+    if (!clean) return undefined;
+    return beneficiaryRecords.find(r => r.nik === clean && r.id !== excludeId);
+  };
+
+  const addBeneficiaryRecord = async (input: {
+    nik: string;
+    fullName: string;
+    gender: 'L' | 'P';
+    birthDate?: string;
+    ageMonths: number;
+    institutionId: string;
+    classOrGroup: string;
+    measurementDate: string;
+    weightKg: number;
+    heightCm: number;
+    notes?: string;
+  }): Promise<{ ok: boolean; error?: string; record?: BeneficiaryNutritionRecord }> => {
+    const nikCheck = validateNikFormat(input.nik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateNik(nikCheck.cleanNik);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah terdaftar atas nama ${duplicate.fullName} (${duplicate.institutionName}). Duplikasi NIK diblokir oleh sistem.`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const cleanName = input.fullName.trim();
+    if (!cleanName) {
+      const msg = 'Nama lengkap penerima gizi wajib diisi.';
+      addToast('error', 'Validasi Gagal', msg);
+      return { ok: false, error: msg };
+    }
+
+    const inst = institutions.find(i => i.id === input.institutionId);
+    const z = calculateWHOZScore({
+      ageMonths: input.ageMonths,
+      gender: input.gender,
+      weightKg: input.weightKg,
+      heightCm: input.heightCm,
+    });
+
+    const newRecord: BeneficiaryNutritionRecord = {
+      id: `bn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      nik: nikCheck.cleanNik,
+      fullName: cleanName,
+      gender: input.gender,
+      birthDate: input.birthDate || undefined,
+      ageMonths: z.ageMonths,
+      institutionId: input.institutionId,
+      institutionName: inst?.name || 'Lembaga SPPG',
+      classOrGroup: input.classOrGroup.trim() || '-',
+      measurementDate: input.measurementDate,
+      weightKg: z.weightKg,
+      heightCm: z.heightCm,
+      bmi: z.bmi,
+      waz: z.waz,
+      haz: z.haz,
+      whz: z.whz,
+      whzIndexLabel: z.whzIndexLabel,
+      wazCategory: z.wazCategory,
+      hazCategory: z.hazCategory,
+      whzCategory: z.whzCategory,
+      isStunted: z.isStunted,
+      isUnderweight: z.isUnderweight,
+      isWasted: z.isWasted,
+      isOverweight: z.isOverweight,
+      primaryStatus: z.primaryStatus,
+      severityLevel: z.severityLevel,
+      recommendation: z.recommendation,
+      notes: input.notes?.trim() || '',
+      recordedBy: currentUser.name,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setBeneficiaryRecords(prev => [newRecord, ...prev]);
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'beneficiary_nutrition_records', newRecord.id), {
+          ...newRecord,
+          sppgId: 'GFBQSYXD',
+        });
+      } catch (err) {
+        console.warn('Firestore write fallback for beneficiary_nutrition_records:', err);
+      }
+    }
+
+    await logAudit(
+      'CREATE',
+      'institutions',
+      `Menambah data anak/gizi ${newRecord.fullName} (NIK: ${newRecord.nik}) • Status WHO: ${newRecord.primaryStatus} (HAZ ${newRecord.haz}, WHZ ${newRecord.whz})`
+    );
+    addToast(
+      'success',
+      'Data Gizi Anak Tersimpan',
+      `${newRecord.fullName} tercatat dengan status WHO: ${newRecord.primaryStatus}. Statistik Dashboard diperbarui.`
+    );
+    return { ok: true, record: newRecord };
+  };
+
+  const updateBeneficiaryRecord = async (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      gender: 'L' | 'P';
+      birthDate: string;
+      ageMonths: number;
+      institutionId: string;
+      classOrGroup: string;
+      measurementDate: string;
+      weightKg: number;
+      heightCm: number;
+      notes: string;
+    }>
+  ): Promise<{ ok: boolean; error?: string; record?: BeneficiaryNutritionRecord }> => {
+    const existing = beneficiaryRecords.find(r => r.id === id);
+    if (!existing) {
+      return { ok: false, error: 'Data penerima manfaat tidak ditemukan.' };
+    }
+
+    const candidateNik = updates.nik !== undefined ? updates.nik : existing.nik;
+    const nikCheck = validateNikFormat(candidateNik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateNik(nikCheck.cleanNik, id);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah digunakan oleh ${duplicate.fullName} (${duplicate.institutionName}).`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const nextGender = updates.gender ?? existing.gender;
+    const nextAgeMonths = updates.ageMonths !== undefined ? Number(updates.ageMonths) : existing.ageMonths;
+    const nextWeightKg = updates.weightKg !== undefined ? Number(updates.weightKg) : existing.weightKg;
+    const nextHeightCm = updates.heightCm !== undefined ? Number(updates.heightCm) : existing.heightCm;
+    const nextInstId = updates.institutionId ?? existing.institutionId;
+    const inst = institutions.find(i => i.id === nextInstId);
+
+    const z = calculateWHOZScore({
+      ageMonths: nextAgeMonths,
+      gender: nextGender,
+      weightKg: nextWeightKg,
+      heightCm: nextHeightCm,
+    });
+
+    const updatedRecord: BeneficiaryNutritionRecord = {
+      ...existing,
+      ...updates,
+      nik: nikCheck.cleanNik,
+      fullName: updates.fullName !== undefined ? updates.fullName.trim() : existing.fullName,
+      gender: nextGender,
+      ageMonths: z.ageMonths,
+      institutionId: nextInstId,
+      institutionName: inst?.name || existing.institutionName,
+      classOrGroup: updates.classOrGroup !== undefined ? updates.classOrGroup.trim() : existing.classOrGroup,
+      weightKg: z.weightKg,
+      heightCm: z.heightCm,
+      bmi: z.bmi,
+      waz: z.waz,
+      haz: z.haz,
+      whz: z.whz,
+      whzIndexLabel: z.whzIndexLabel,
+      wazCategory: z.wazCategory,
+      hazCategory: z.hazCategory,
+      whzCategory: z.whzCategory,
+      isStunted: z.isStunted,
+      isUnderweight: z.isUnderweight,
+      isWasted: z.isWasted,
+      isOverweight: z.isOverweight,
+      primaryStatus: z.primaryStatus,
+      severityLevel: z.severityLevel,
+      recommendation: z.recommendation,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setBeneficiaryRecords(prev => prev.map(r => (r.id === id ? updatedRecord : r)));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'beneficiary_nutrition_records', id),
+          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn('Firestore update fallback for beneficiary_nutrition_records:', err);
+      }
+    }
+
+    await logAudit(
+      'UPDATE',
+      'institutions',
+      `Memperbarui data gizi ${updatedRecord.fullName} (NIK: ${updatedRecord.nik}) -> Status WHO: ${updatedRecord.primaryStatus}`
+    );
+    addToast(
+      'success',
+      'Data Gizi Diperbarui',
+      `Z-Score & status gizi ${updatedRecord.fullName} (${updatedRecord.primaryStatus}) berhasil dihitung ulang.`
+    );
+    return { ok: true, record: updatedRecord };
+  };
+
+  const deleteBeneficiaryRecord = async (id: string) => {
+    const target = beneficiaryRecords.find(r => r.id === id);
+    setBeneficiaryRecords(prev => prev.filter(r => r.id !== id));
+
+    if (auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, 'beneficiary_nutrition_records', id));
+      } catch (err) {
+        console.warn('Firestore delete fallback for beneficiary_nutrition_records:', err);
+      }
+    }
+
+    await logAudit('DELETE', 'institutions', `Menghapus data antropometri anak: ${target?.fullName || id}`);
+    addToast('info', 'Data Dihapus', `Data penerima gizi ${target?.fullName || ''} telah dihapus.`);
   };
 
   // Menu Items CRUD & Approval
@@ -4426,6 +4759,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordBeneficiaryAttendance,
         updateBeneficiaryAttendance,
         beneficiaryQuotaHistory,
+        beneficiaryRecords,
+        isDataHydrating,
+        checkDuplicateNik,
+        addBeneficiaryRecord,
+        updateBeneficiaryRecord,
+        deleteBeneficiaryRecord,
         menuItems,
         addMenuItem,
         updateMenuItem,

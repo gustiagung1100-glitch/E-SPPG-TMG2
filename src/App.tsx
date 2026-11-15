@@ -13,6 +13,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
+import { DashboardSkeleton, ModuleSkeleton } from './components/common/SkeletonLoader';
 import { AuthGuard } from './components/auth/AuthGuard';
 import { Forbidden403Page } from './components/auth/Forbidden403Page';
 
@@ -61,7 +62,8 @@ interface MainContentProps {
 }
 
 const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModule }) => {
-  const { currentUser, roleModuleAccess } = useApp();
+  const { currentUser, roleModuleAccess, isDataHydrating } = useApp();
+  const [activeSubTabTitle, setActiveSubTabTitle] = useState<string | undefined>(undefined);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem('esppg_sidebar_collapsed') === 'true';
@@ -77,6 +79,22 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
     }
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  React.useEffect(() => {
+    setActiveSubTabTitle(undefined);
+  }, [activeModule]);
+
+  React.useEffect(() => {
+    const handleSubTabChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ module?: ModuleKey; title?: string }>).detail;
+      if (!detail) return;
+      if (!detail.module || detail.module === activeModule) {
+        setActiveSubTabTitle(detail.title || undefined);
+      }
+    };
+    window.addEventListener('sppg-subtab-change', handleSubTabChange);
+    return () => window.removeEventListener('sppg-subtab-change', handleSubTabChange);
+  }, [activeModule]);
 
   const handleToggleSidebar = React.useCallback(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
@@ -197,11 +215,18 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
             <Breadcrumb
               activeModule={activeModule}
               activeModuleTitle={moduleTitles[activeModule]}
+              subItemTitle={activeSubTabTitle}
               onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role, roleModuleAccess))}
             />
 
-            {/* Dynamic Module Component */}
-            {renderModule()}
+            {/* Dynamic Module Component with Smooth Page Transition & Skeleton Loading */}
+            <div key={activeModule} className="page-transition-enter">
+              {isDataHydrating ? (
+                activeModule === 'dashboard' ? <DashboardSkeleton /> : <ModuleSkeleton />
+              ) : (
+                renderModule()
+              )}
+            </div>
           </main>
 
           {/* Clean ERP Footer */}

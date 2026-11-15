@@ -267,6 +267,39 @@ export interface BeneficiaryQuotaHistory {
   updatedBy: string;
 }
 
+export interface BeneficiaryNutritionRecord {
+  id: string;
+  nik: string;
+  fullName: string;
+  gender: 'L' | 'P';
+  birthDate?: string;
+  ageMonths: number;
+  institutionId: string;
+  institutionName: string;
+  classOrGroup: string;
+  measurementDate: string;
+  weightKg: number;
+  heightCm: number;
+  bmi: number;
+  waz: number | null;
+  haz: number;
+  whz: number;
+  whzIndexLabel: 'BB/TB' | 'IMT/U';
+  wazCategory: string;
+  hazCategory: string;
+  whzCategory: string;
+  isStunted: boolean;
+  isUnderweight: boolean;
+  isWasted: boolean;
+  isOverweight: boolean;
+  primaryStatus: 'Normal' | 'Stunting' | 'Underweight' | 'Wasting' | 'Gizi Lebih';
+  severityLevel: 'Aman' | 'Sedang' | 'Berat' | 'Risiko Lebih';
+  recommendation: string;
+  notes?: string;
+  recordedBy: string;
+  updatedAt: string;
+}
+
 export interface MenuItem {
   id: string;
   date: string;
@@ -1019,7 +1052,8 @@ export type OfficialReportKey =
   | 'food_waste'
   | 'keuangan'
   | 'kartu_stok'
-  | 'rekap_distribusi';
+  | 'rekap_distribusi'
+  | 'status_gizi_who';
 
 export interface ReportMetaConfig {
   key: OfficialReportKey;

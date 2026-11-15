@@ -95,6 +95,18 @@ service cloud.firestore {
       allow write: if isSignedIn() && isValidId(recordId) && isSameSppg();
     }
 
+    match /beneficiary_nutrition_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(recordId)
+        && isSameSppg()
+        && incoming().nik is string
+        && incoming().nik.matches('^[0-9]{16}$')
+        && incoming().fullName is string
+        && incoming().fullName.size() > 0;
+      allow delete: if isSignedIn() && isExistingSameSppg();
+    }
+
     // -------------------------------------------------------------------------
     // 8-9. Volunteers & Suppliers
     // -------------------------------------------------------------------------

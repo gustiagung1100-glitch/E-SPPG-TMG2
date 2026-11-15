@@ -106,6 +106,27 @@
       },
       "required": ["id", "sppgId", "date", "institutionId", "actualTotal", "status"]
     },
+    "BeneficiaryNutritionRecord": {
+      "title": "BeneficiaryNutritionRecord",
+      "description": "Individual child anthropometry, 16-digit NIK, and automated WHO Z-Score nutrition record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "sppgId": { "type": "string", "maxLength": 64 },
+        "nik": { "type": "string", "maxLength": 16 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "gender": { "type": "string", "maxLength": 2 },
+        "ageMonths": { "type": "number" },
+        "institutionId": { "type": "string", "maxLength": 64 },
+        "weightKg": { "type": "number" },
+        "heightCm": { "type": "number" },
+        "haz": { "type": "number" },
+        "whz": { "type": "number" },
+        "primaryStatus": { "type": "string", "maxLength": 30 },
+        "measurementDate": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "sppgId", "nik", "fullName", "gender", "ageMonths", "institutionId", "weightKg", "heightCm", "primaryStatus"]
+    },
     "Volunteer": {
       "title": "Volunteer",
       "description": "Kitchen and field volunteer personnel",
@@ -596,6 +617,10 @@
     "/beneficiary_daily_records/{recordId}": {
       "schema": { "$ref": "#/entities/BeneficiaryDailyRecord" },
       "description": "7. Daily attendance and portion delivery records"
+    },
+    "/beneficiary_nutrition_records/{recordId}": {
+      "schema": { "$ref": "#/entities/BeneficiaryNutritionRecord" },
+      "description": "7b. Individual beneficiary anthropometry, NIK, and WHO Z-Score assessments"
     },
     "/volunteers/{volunteerId}": {
       "schema": { "$ref": "#/entities/Volunteer" },

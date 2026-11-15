@@ -5,6 +5,7 @@ import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -78,6 +79,7 @@ import {
   ChevronLeft,
   X,
   Star,
+  HeartPulse,
 } from 'lucide-react';
 
 type SubModuleTab =
@@ -104,9 +106,24 @@ export const NutritionMenuModule: React.FC = () => {
 
   const [isEditingMenuForm, setIsEditingMenuForm] = useState(false);
   const [isModalMenuSchemaEdit, setIsModalMenuSchemaEdit] = useState(false);
+  const [isZScoreModalOpen, setIsZScoreModalOpen] = useState(false);
 
   // Active Sub-module Tab
   const [activeTab, setActiveTab] = useState<SubModuleTab>('menu_bahan');
+
+  useEffect(() => {
+    const labels: Record<SubModuleTab, string> = {
+      menu_bahan: 'Menu & Kebutuhan Bahan (BDD)',
+      kandungan_gizi: 'Evaluasi Kandungan Gizi (TKPI)',
+      food_cost: 'Analisis Food Cost & Pagu BGN',
+      jobdesk_divisi: 'Jobdesk Divisi & SOP',
+    };
+    window.dispatchEvent(
+      new CustomEvent('sppg-subtab-change', {
+        detail: { module: 'menu', title: labels[activeTab] },
+      })
+    );
+  }, [activeTab]);
 
   // Selected Active Menu for PLOG details (default: first menu)
   const [selectedMenuId, setSelectedMenuId] = useState<string>(menuItems[0]?.id || 'menu-1');
@@ -963,6 +980,15 @@ export const NutritionMenuModule: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setIsZScoreModalOpen(true)}
+            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 bg-[#0F766E] hover:bg-[#0D625B] text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+          >
+            <HeartPulse className="w-4 h-4" />
+            <span>Kalkulator Z-Score WHO</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setNewMenuForm(prev => ({
                 ...prev,
@@ -971,7 +997,7 @@ export const NutritionMenuModule: React.FC = () => {
               setIsModalMenuSchemaEdit(false);
               setIsCreateMenuModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Menu Baru</span>
@@ -2777,6 +2803,17 @@ export const NutritionMenuModule: React.FC = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* QUICK WHO / KEMENKES Z-SCORE CALCULATOR MODAL */}
+      <Modal
+        isOpen={isZScoreModalOpen}
+        onClose={() => setIsZScoreModalOpen(false)}
+        title="Kalkulator Status Gizi & Z-Score WHO / Kemenkes"
+        subtitle="Simulasi antropometri cepat (BB/U, TB/U, BB/TB & IMT/U) standar Permenkes RI No. 2 Tahun 2020"
+        maxWidth="4xl"
+      >
+        <BeneficiaryNutritionTab compactCalculatorOnly />
       </Modal>
     </div>
   );
