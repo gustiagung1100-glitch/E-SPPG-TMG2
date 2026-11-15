@@ -512,9 +512,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
 
   finance_tx_form: {
     formId: 'finance_tx_form',
-    title: 'Form Catat Transaksi Kas & Keuangan',
-    description: 'Form pencatatan Buku Kas Umum (BKU) Pemasukan dan Pengeluaran operasional SPPG.',
-    moduleKey: 'finance',
+    title: 'Form Catat Transaksi Kas Petty Cash',
+    description: 'Form pencatatan Pemasukan dan Pengeluaran Kas Petty Cash operasional SPPG.',
+    moduleKey: 'petty_cash',
     version: 1,
     updatedAt: BASE_UPDATED_AT,
     fields: [

@@ -395,16 +395,12 @@ function drawBgnSealFallback(doc: jsPDF, x: number, y: number, size: number) {
   doc.text('BGN RI', cx, cy + 1.5, { align: 'center' });
 }
 
-export async function exportBastDocumentPDF(data: BASTSheetData) {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+function renderBastPageOnDoc(doc: jsPDF, data: BASTSheetData, logoDataUrl: string | null) {
   const pageWidth = 210;
   const left = 16;
   const right = pageWidth - 16;
   const centerX = 113;
 
-  const logoDataUrl = await loadImageAsDataUrl(
-    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
-  );
   const formattedPortions = new Intl.NumberFormat('id-ID').format(data.totalPortions || 0);
   const returnTimeDisplay = data.returnTime && data.returnTime.trim() !== '' ? data.returnTime : '........';
 
@@ -540,7 +536,33 @@ export async function exportBastDocumentPDF(data: BASTSheetData) {
     right - left
   );
   doc.text(noteLines, left, yInst + 30);
+}
 
+export async function exportBastDocumentPDF(data: BASTSheetData) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const logoDataUrl = await loadImageAsDataUrl(
+    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
+  );
+  renderBastPageOnDoc(doc, data, logoDataUrl);
   const safeInst = data.institutionName.replace(/[^a-zA-Z0-9]+/g, '_');
   doc.save(`BAST_${safeInst}_${data.date}.pdf`);
 }
+
+export async function exportBatchBastDocumentsPDF(list: BASTSheetData[], dateLabel?: string) {
+  if (list.length === 0) return;
+  if (list.length === 1) {
+    await exportBastDocumentPDF(list[0]);
+    return;
+  }
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const logoDataUrl = await loadImageAsDataUrl(
+    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
+  );
+  list.forEach((item, idx) => {
+    if (idx > 0) doc.addPage();
+    renderBastPageOnDoc(doc, item, logoDataUrl);
+  });
+  const suffix = dateLabel || list[0]?.date || new Date().toISOString().slice(0, 10);
+  doc.save(`BAST_Harian_Semua_Lembaga_${suffix}.pdf`);
+}
+

@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { toPng } from 'html-to-image';
 import { SPPGConfig } from '../types';
 
 export const formatRupiah = (val: number): string => {
@@ -408,9 +409,326 @@ export async function exportTableToPDF(options: {
   doc.save(`${fileName}_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
+export interface TriggerPrintOptions {
+  targetSelector?: string;
+  fileName?: string;
+  title?: string;
+  orientation?: 'portrait' | 'landscape';
+}
+
+function dispatchPrintToast(
+  type: 'info' | 'success' | 'warning' | 'error',
+  title: string,
+  message: string
+) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('sppg-toast', {
+      detail: { type, title, message },
+    })
+  );
+}
+
+function findBestPrintableElement(explicitSelector?: string): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+
+  const candidates: Array<string | null> = [
+    explicitSelector || null,
+    '[data-print-modal="true"] .bast-print-sheet',
+    '[data-print-modal="true"] [data-print-modal-body="true"]',
+    '[data-print-modal="true"] .print-area',
+    '[data-print-modal="true"]',
+    '.bast-print-sheet',
+    '.flyer-print-target',
+    '.print-area',
+    'main',
+  ];
+
+  for (const selector of candidates) {
+    if (!selector) continue;
+    const el = document.querySelector(selector);
+    if (el instanceof HTMLElement && el.offsetHeight > 0) {
+      return el;
+    }
+  }
+  return document.body;
+}
+
+async function generatePrintablePDFFallback(
+  targetEl: HTMLElement,
+  fileNameBase: string,
+  title: string,
+  orientation: 'portrait' | 'landscape' = 'portrait'
+) {
+  const safeSlug = fileNameBase
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'Dokumen_SPPG';
+
+  const scaleWrapper = targetEl.closest('.flyer-print-scale-wrapper') as HTMLElement | null;
+  const prevTransform = scaleWrapper ? scaleWrapper.style.transform : '';
+  if (scaleWrapper) {
+    scaleWrapper.style.transform = 'none';
+  }
+
+  try {
+    const dataUrl = await toPng(targetEl, {
+      quality: 0.96,
+      pixelRatio: 2,
+      backgroundColor: '#ffffff',
+      cacheBust: true,
+      skipFonts: true,
+      filter: node => {
+        if (!(node instanceof HTMLElement)) return true;
+        if (
+          node.classList.contains('no-print') ||
+          node.classList.contains('print:hidden') ||
+          node.classList.contains('toast-container') ||
+          node.tagName === 'ASIDE' ||
+          node.tagName === 'HEADER' ||
+          node.tagName === 'FOOTER' ||
+          (node.tagName === 'BUTTON' && !node.classList.contains('print-keep'))
+        ) {
+          return false;
+        }
+        return true;
+      },
+    });
+
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('Gagal memuat gambar pratinjau cetak'));
+      img.src = dataUrl;
+    });
+
+    const pdf = new jsPDF({
+      orientation,
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const contentWidth = pageWidth - margin * 2;
+    const contentHeight = pageHeight - margin * 2;
+    const renderedTotalHeight = (img.height * contentWidth) / Math.max(1, img.width);
+
+    if (renderedTotalHeight <= contentHeight) {
+      pdf.addImage(dataUrl, 'PNG', margin, margin, contentWidth, renderedTotalHeight);
+    } else {
+      const pxPerMm = img.width / contentWidth;
+      const sliceHeightPx = Math.max(100, Math.floor(contentHeight * pxPerMm));
+      let offsetY = 0;
+      let pageIndex = 0;
+
+      while (offsetY < img.height) {
+        const currentSlicePx = Math.min(sliceHeightPx, img.height - offsetY);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = img.width;
+        sliceCanvas.height = currentSlicePx;
+        const ctx = sliceCanvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+          ctx.drawImage(
+            img,
+            0,
+            offsetY,
+            img.width,
+            currentSlicePx,
+            0,
+            0,
+            img.width,
+            currentSlicePx
+          );
+          if (pageIndex > 0) pdf.addPage();
+          const sliceHeightMm = currentSlicePx / pxPerMm;
+          pdf.addImage(
+            sliceCanvas.toDataURL('image/png'),
+            'PNG',
+            margin,
+            margin,
+            contentWidth,
+            sliceHeightMm
+          );
+        }
+        offsetY += currentSlicePx;
+        pageIndex += 1;
+      }
+    }
+
+    pdf.save(`${safeSlug}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    dispatchPrintToast(
+      'info',
+      'Dokumen Siap Cetak Diunduh (PDF)',
+      `Browser/iframe membatasi dialog cetak langsung. "${title}" otomatis disimpan ke PDF siap cetak.`
+    );
+  } catch {
+    // Fallback terakhir berbasis teks terstruktur bila ada elemen gambar eksternal terblokir CORS
+    const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
+    pdf.setFontSize(13);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(title, 14, 18);
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    const lines = pdf.splitTextToSize(
+      (targetEl.innerText || 'Dokumen SPPG').replace(/\n{3,}/g, '\n\n'),
+      pdf.internal.pageSize.getWidth() - 28
+    );
+    let y = 26;
+    for (const line of lines) {
+      if (y > pdf.internal.pageSize.getHeight() - 16) {
+        pdf.addPage();
+        y = 16;
+      }
+      pdf.text(line, 14, y);
+      y += 4.5;
+    }
+    pdf.save(`${safeSlug}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    dispatchPrintToast(
+      'info',
+      'Dokumen Siap Cetak Diunduh (PDF)',
+      `"${title}" berhasil disiapkan sebagai dokumen PDF siap cetak.`
+    );
+  } finally {
+    if (scaleWrapper) {
+      scaleWrapper.style.transform = prevTransform;
+    }
+  }
+}
+
 /**
- * Trigger browser print
+ * Trigger browser print cleanly, with automatic multi-page PDF fallback when
+ * native window.print() is blocked inside sandboxed iframe previews.
  */
-export function triggerPrint() {
-  window.print();
+export function triggerPrint(optionsOrEvent?: TriggerPrintOptions | unknown) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  const isOptions =
+    optionsOrEvent &&
+    typeof optionsOrEvent === 'object' &&
+    !('nativeEvent' in (optionsOrEvent as Record<string, unknown>)) &&
+    !('preventDefault' in (optionsOrEvent as Record<string, unknown>));
+
+  const opts: TriggerPrintOptions = isOptions
+    ? (optionsOrEvent as TriggerPrintOptions)
+    : {};
+
+  const targetEl = findBestPrintableElement(opts.targetSelector);
+  const rawHeading =
+    opts.title ||
+    targetEl?.querySelector('h1, h2, h3')?.textContent?.trim() ||
+    document.title ||
+    'Dokumen_Cetak_SPPG';
+
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+
+  let beforePrintFired = false;
+  const onBeforePrint = () => {
+    beforePrintFired = true;
+    document.documentElement.setAttribute('data-printing', 'true');
+  };
+  const onAfterPrint = () => {
+    document.documentElement.removeAttribute('data-printing');
+    window.removeEventListener('beforeprint', onBeforePrint);
+    window.removeEventListener('afterprint', onAfterPrint);
+  };
+
+  window.addEventListener('beforeprint', onBeforePrint, { once: true });
+  window.addEventListener('afterprint', onAfterPrint, { once: true });
+
+  try {
+    window.focus();
+    window.print();
+  } catch {
+    beforePrintFired = false;
+  }
+
+  window.setTimeout(() => {
+    window.removeEventListener('beforeprint', onBeforePrint);
+    if (!beforePrintFired) {
+      document.documentElement.removeAttribute('data-printing');
+      window.removeEventListener('afterprint', onAfterPrint);
+      if (targetEl) {
+        void generatePrintablePDFFallback(
+          targetEl,
+          opts.fileName || `Cetak_${rawHeading}`,
+          rawHeading,
+          opts.orientation || 'portrait'
+        );
+      } else {
+        dispatchPrintToast(
+          'warning',
+          'Dialog Cetak Dibatasi Browser',
+          'Gunakan tombol Unduh PDF atau Ctrl+P untuk mencetak dokumen.'
+        );
+      }
+    }
+  }, 380);
+}
+
+/**
+ * Download editable Word / Google Docs-compatible (.doc) file without popups/window.open
+ */
+export function exportTextDocumentToWord(options: {
+  title: string;
+  subtitle?: string;
+  docNumber?: string;
+  body: string;
+  sppgConfig: SPPGConfig;
+  fileName: string;
+}) {
+  const { title, subtitle, docNumber, body, sppgConfig, fileName } = options;
+  const safeHtmlBody = body
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>');
+
+  const htmlDoc = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="id">
+<head>
+<meta charset="utf-8" />
+<title>${title}</title>
+<style>
+  body { font-family: 'Times New Roman', serif; font-size: 11pt; color: #111827; margin: 20mm; line-height: 1.5; }
+  .kop { text-align: center; border-bottom: 3px double #0f172a; padding-bottom: 10px; margin-bottom: 16px; }
+  .kop h1 { margin: 0; font-size: 13pt; text-transform: uppercase; }
+  .kop h2 { margin: 2px 0; font-size: 12pt; text-transform: uppercase; color: #1e3a8a; }
+  .kop p { margin: 2px 0; font-size: 9pt; color: #475569; }
+  .meta { text-align: center; margin-bottom: 16px; }
+  .meta strong { font-size: 12pt; text-transform: uppercase; display: block; }
+  .meta span { font-size: 10pt; color: #475569; }
+  .content { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 10.5pt; text-align: justify; }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <h1>${sppgConfig.foundationName}</h1>
+    <h2>${sppgConfig.sppgName}</h2>
+    <p>ID SPPG: ${sppgConfig.sppgId} | ${sppgConfig.programName}</p>
+    <p>${sppgConfig.address} • Telp: ${sppgConfig.phone} • Email: ${sppgConfig.email}</p>
+  </div>
+  <div class="meta">
+    <strong>${title}</strong>
+    ${subtitle ? `<span>${subtitle}</span><br/>` : ''}
+    ${docNumber ? `<span>Nomor: ${docNumber}</span>` : ''}
+  </div>
+  <div class="content">${safeHtmlBody}</div>
+</body>
+</html>`;
+
+  const blob = new Blob(['\ufeff', htmlDoc], { type: 'application/msword;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.doc`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

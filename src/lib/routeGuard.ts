@@ -98,11 +98,25 @@ export const ALL_MODULES_META: readonly ModuleMetaInfo[] = [
     description: 'Jadwal pengiriman armada, BAST sekolah, ompreng kembali & BBM.',
   },
   {
-    key: 'finance',
-    label: 'Keuangan, RAB & Kas',
-    shortLabel: 'Keuangan & Kas',
+    key: 'pic_incentives',
+    label: 'Insentif PIC Lembaga',
+    shortLabel: 'Insentif PIC',
     category: 'Akuntansi & SDM',
-    description: 'Arus kas masuk/keluar, realisasi anggaran & bukti transaksi.',
+    description: 'Perhitungan insentif PIC sekolah terhubung real-time dengan data harian penerima manfaat.',
+  },
+  {
+    key: 'volunteer_incentives',
+    label: 'Insentif Relawan',
+    shortLabel: 'Insentif Relawan',
+    category: 'Akuntansi & SDM',
+    description: 'Perhitungan insentif relawan dapur terhubung langsung dengan data absensi & pengganti.',
+  },
+  {
+    key: 'petty_cash',
+    label: 'Kas Petty Cash',
+    shortLabel: 'Petty Cash',
+    category: 'Akuntansi & SDM',
+    description: 'Buku kas kecil dengan perhitungan Saldo Awal, Pemasukan, Pengeluaran, dan Saldo Akhir.',
   },
   {
     key: 'volunteers',
@@ -161,7 +175,9 @@ export const MODULE_PATHS: Record<ModuleKey, string> = {
   inventory: '/gudang',
   production: '/produksi',
   distribution: '/distribusi',
-  finance: '/keuangan',
+  pic_incentives: '/insentif-pic',
+  volunteer_incentives: '/insentif-relawan',
+  petty_cash: '/petty-cash',
   volunteers: '/relawan',
   letters: '/persuratan',
   reports: '/laporan',
@@ -186,8 +202,13 @@ const PATH_TO_MODULE: Record<string, ModuleKey> = {
   '/production': 'production',
   '/distribusi': 'distribution',
   '/distribution': 'distribution',
-  '/keuangan': 'finance',
-  '/finance': 'finance',
+  '/insentif-pic': 'pic_incentives',
+  '/pic-incentives': 'pic_incentives',
+  '/insentif-relawan': 'volunteer_incentives',
+  '/volunteer-incentives': 'volunteer_incentives',
+  '/petty-cash': 'petty_cash',
+  '/keuangan': 'petty_cash',
+  '/finance': 'petty_cash',
   '/relawan': 'volunteers',
   '/volunteers': 'volunteers',
   '/persuratan': 'letters',
@@ -212,7 +233,9 @@ export const ROLE_ALLOWED_MODULES: Record<RoleType, readonly ModuleKey[]> = {
     'inventory',
     'production',
     'distribution',
-    'finance',
+    'pic_incentives',
+    'volunteer_incentives',
+    'petty_cash',
     'volunteers',
     'letters',
     'reports',
@@ -229,7 +252,9 @@ export const ROLE_ALLOWED_MODULES: Record<RoleType, readonly ModuleKey[]> = {
     'inventory',
     'production',
     'distribution',
-    'finance',
+    'pic_incentives',
+    'volunteer_incentives',
+    'petty_cash',
     'volunteers',
     'letters',
     'reports',
@@ -248,7 +273,9 @@ export const ROLE_ALLOWED_MODULES: Record<RoleType, readonly ModuleKey[]> = {
   'Pengawas Keuangan': [
     'dashboard',
     'procurement',
-    'finance',
+    'pic_incentives',
+    'volunteer_incentives',
+    'petty_cash',
     'letters',
     'reports',
   ],
@@ -350,6 +377,16 @@ export function sanitizeRoleModuleAccess(raw: unknown): RoleModuleAccessMap {
       const seen = new Set<ModuleKey>();
       const cleaned: ModuleKey[] = [];
       for (const item of candidate) {
+        if (item === 'finance') {
+          const migrated: ModuleKey[] = ['pic_incentives', 'volunteer_incentives', 'petty_cash'];
+          for (const m of migrated) {
+            if (!seen.has(m)) {
+              seen.add(m);
+              cleaned.push(m);
+            }
+          }
+          continue;
+        }
         if (typeof item === 'string' && VALID_MODULE_KEYS.has(item as ModuleKey)) {
           const mod = item as ModuleKey;
           if (!seen.has(mod)) {

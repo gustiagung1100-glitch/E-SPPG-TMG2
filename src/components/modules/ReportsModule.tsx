@@ -13,7 +13,14 @@ import {
   TableImageCell,
 } from '../../lib/exportUtils';
 import { OfficialReportKey, ReportMetaConfig, ModuleKey } from '../../types';
-import { generateBastNumber } from '../common/BASTDocumentSheet';
+import {
+  BASTDocumentSheet,
+  BASTSheetData,
+  generateBastNumber,
+  resolveBastAutoFields,
+  exportBastDocumentPDF,
+  exportBatchBastDocumentsPDF,
+} from '../common/BASTDocumentSheet';
 import {
   OrganolepticChecklistSheet,
   OrganolepticFoodRow,
@@ -285,7 +292,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     inventory,
     purchaseOrders,
     distributionLogs,
-    financialTransactions,
+    pettyCashOpeningBalance,
+    pettyCashTransactions,
     volunteerAttendance,
     prepRecords,
     cookingRecords,
@@ -321,6 +329,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [orgaMengetahuiOverride, setOrgaMengetahuiOverride] = useState<string>('');
   const [orgaCustomRows, setOrgaCustomRows] = useState<OrganolepticFoodRow[] | null>(null);
   const [showOrgaEditor, setShowOrgaEditor] = useState<boolean>(false);
+
+  // BAST Harian format controls (mirip Log Armada & BAST Digital)
+  const [bastShowAllInstitutions, setBastShowAllInstitutions] = useState<boolean>(false);
+  const [bastSingleInstId, setBastSingleInstId] = useState<string>('');
+  const [bastReceiveTimeOverride, setBastReceiveTimeOverride] = useState<string>('');
+  const [bastReturnTimeOverride, setBastReturnTimeOverride] = useState<string>('');
 
   // Active Report Metadata
   const currentConfig = useMemo(() => {
@@ -425,6 +439,123 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     endDate,
     periodType,
   ]);
+
+  // Auto-resolved BAST Harian Sheets matching Log Armada & BAST Digital format
+  const bastSheetsList = useMemo<BASTSheetData[]>(() => {
+    const activeInstitutions =
+      selectedInstitutionId !== 'ALL'
+        ? institutions.filter(i => i.id === selectedInstitutionId)
+        : institutions.filter(i => i.isActive);
+
+    const kw = searchKeyword.trim().toLowerCase();
+    const filteredInsts = kw
+      ? activeInstitutions.filter(
+          i =>
+            i.name.toLowerCase().includes(kw) ||
+            (i.picName || '').toLowerCase().includes(kw) ||
+            i.id.toLowerCase().includes(kw)
+        )
+      : activeInstitutions;
+
+    return filteredInsts.map((inst, idx) => {
+      const instIndex = institutions.findIndex(i => i.id === inst.id);
+      const seqNum = 192 + (instIndex >= 0 ? instIndex : idx);
+
+      const matchedDelivery = distributionDeliveries.find(
+        d => d.institutionId === inst.id && d.date === selectedDate
+      );
+      const matchedDist =
+        distributionLogs.find(d => d.institutionId === inst.id && d.date === selectedDate) ||
+        distributionLogs.find(d => d.institutionId === inst.id);
+      const matchedReturn = omprengReturns.find(
+        r => r.institutionId === inst.id && r.date === selectedDate
+      );
+      const matchedAtt = beneficiaryAttendance.find(
+        a => a.institutionId === inst.id && a.date === selectedDate
+      );
+
+      const totalPortionsResolved = matchedAtt
+        ? matchedAtt.actualPortions
+        : matchedDelivery
+        ? matchedDelivery.totalPortions
+        : matchedDist
+        ? matchedDist.totalPortions
+        : inst.totalPortions;
+
+      const receiveTimeResolved =
+        bastReceiveTimeOverride.trim() ||
+        (matchedDelivery?.arrivalTime && matchedDelivery.arrivalTime !== '-'
+          ? matchedDelivery.arrivalTime
+          : matchedDist?.arrivalTime && matchedDist.arrivalTime !== '-'
+          ? matchedDist.arrivalTime
+          : matchedDist?.departureTime);
+
+      const returnTimeResolved =
+        bastReturnTimeOverride.trim() ||
+        (matchedReturn?.arrivalTime && matchedReturn.arrivalTime !== '-'
+          ? matchedReturn.arrivalTime
+          : '');
+
+      return resolveBastAutoFields({
+        institutions,
+        beneficiaryAttendance,
+        masterVolunteers,
+        distributionLogs,
+        sppgConfig,
+        institutionId: inst.id,
+        institutionName: inst.name,
+        date: selectedDate,
+        bastNumber:
+          matchedDelivery?.bastNumber ||
+          matchedDist?.bastNumber ||
+          generateBastNumber(seqNum, selectedDate),
+        totalPortions: totalPortionsResolved,
+        picName: matchedDelivery?.picName || matchedDist?.receivedBy || undefined,
+        distributorName: matchedDelivery?.driverName || matchedDist?.driverName,
+        receiveTime: receiveTimeResolved,
+        returnTime: returnTimeResolved,
+      });
+    });
+  }, [
+    institutions,
+    selectedInstitutionId,
+    searchKeyword,
+    distributionDeliveries,
+    distributionLogs,
+    omprengReturns,
+    beneficiaryAttendance,
+    masterVolunteers,
+    sppgConfig,
+    selectedDate,
+    bastReceiveTimeOverride,
+    bastReturnTimeOverride,
+  ]);
+
+  const activeBastSingleSheet = useMemo<BASTSheetData | null>(() => {
+    if (bastSheetsList.length === 0) return null;
+    if (selectedInstitutionId !== 'ALL') {
+      const foundByGlobal = institutions.find(i => i.id === selectedInstitutionId);
+      if (foundByGlobal) {
+        const match = bastSheetsList.find(s => s.institutionName === foundByGlobal.name);
+        if (match) return match;
+      }
+    }
+    if (bastSingleInstId) {
+      const foundByLocal = institutions.find(i => i.id === bastSingleInstId);
+      if (foundByLocal) {
+        const match = bastSheetsList.find(s => s.institutionName === foundByLocal.name);
+        if (match) return match;
+      }
+    }
+    return bastSheetsList[0];
+  }, [bastSheetsList, selectedInstitutionId, bastSingleInstId, institutions]);
+
+  const bastVisibleSheets = useMemo<BASTSheetData[]>(() => {
+    if (bastShowAllInstitutions && selectedInstitutionId === 'ALL') {
+      return bastSheetsList;
+    }
+    return activeBastSingleSheet ? [activeBastSingleSheet] : [];
+  }, [bastShowAllInstitutions, selectedInstitutionId, bastSheetsList, activeBastSingleSheet]);
 
   // Generate Document Register Number
   const documentRegisterNumber = useMemo(() => {
@@ -1542,24 +1673,28 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 20. Laporan Keuangan
+      // 20. Laporan Kas Petty Cash Operasional SPPG
       case 'keuangan': {
-        headers = ['No', 'Tanggal', 'No. Bukti Kas', 'Jenis Transaksi', 'Kategori Anggaran', 'Uraian Transaksi', 'Penerima / Sumber', 'Jumlah (Rp)', 'Status'];
-        let txs = financialTransactions;
+        headers = ['No', 'Tanggal', 'No. Voucher', 'Jenis Mutasi', 'Kategori Kas', 'Uraian Transaksi', 'Pihak Terkait', 'Jumlah (Rp)', 'Petugas'];
+        let txs = [...pettyCashTransactions].sort((a, b) => a.date.localeCompare(b.date));
         if (searchKeyword) {
-          txs = txs.filter(t => t.description.toLowerCase().includes(searchKeyword.toLowerCase()) || t.proofNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+          txs = txs.filter(
+            t =>
+              t.description.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+              t.voucherNumber.toLowerCase().includes(searchKeyword.toLowerCase())
+          );
         }
 
         const baseRows = txs.map((t, idx) => [
           idx + 1,
           formatIndonesianDate(t.date),
-          t.proofNumber,
+          t.voucherNumber,
           t.type,
           t.category,
           t.description,
-          t.sourceOrRecipient,
+          t.counterparty,
           formatRupiah(t.amount),
-          t.approvalStatus,
+          t.recordedBy,
         ]);
 
         const txSchema = dynamicFormSchemas.finance_tx_form;
@@ -1571,15 +1706,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           appendDynamicExcelFields(
             txSchema,
             {
-              'No': idx + 1,
-              'Tanggal': t.date,
-              'Nomor Bukti': t.proofNumber,
-              'Jenis': t.type,
-              'Kategori': t.category,
-              'Deskripsi': t.description,
-              'Penerima': t.sourceOrRecipient,
-              'Nominal': t.amount,
-              'Status': t.approvalStatus,
+              No: idx + 1,
+              Tanggal: t.date,
+              No_Voucher: t.voucherNumber,
+              Jenis: t.type,
+              Kategori: t.category,
+              Uraian: t.description,
+              Pihak_Terkait: t.counterparty,
+              Nominal: t.amount,
+              Petugas: t.recordedBy,
             },
             t
           )
@@ -1587,13 +1722,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
         const totalIn = txs.filter(t => t.type === 'Pemasukan').reduce((acc, t) => acc + t.amount, 0);
         const totalOut = txs.filter(t => t.type === 'Pengeluaran').reduce((acc, t) => acc + t.amount, 0);
+        const endingBalance = pettyCashOpeningBalance + totalIn - totalOut;
         metrics = [
-          { label: 'Total Pemasukan Kas', value: formatRupiah(totalIn), color: 'text-emerald-700' },
-          { label: 'Total Pengeluaran Kas', value: formatRupiah(totalOut), color: 'text-rose-700' },
-          { label: 'Saldo Kas Akhir', value: formatRupiah(totalIn - totalOut), color: 'text-blue-700' },
-          { label: 'Verifikasi Akuntansi', value: '100% Sesuai Bukti', color: 'text-slate-700' },
+          { label: 'Saldo Awal Petty Cash', value: formatRupiah(pettyCashOpeningBalance), color: 'text-slate-700' },
+          { label: 'Total Pemasukan (+)', value: formatRupiah(totalIn), color: 'text-emerald-700' },
+          { label: 'Total Pengeluaran (-)', value: formatRupiah(totalOut), color: 'text-rose-700' },
+          { label: 'Saldo Akhir Petty Cash', value: formatRupiah(endingBalance), color: 'text-blue-700' },
         ];
-        notes = 'Seluruh pengeluaran kas didukung kuitansi bermeterai, faktur supplier, dan berita acara pembayaran sah.';
+        notes = 'Laporan disinkronkan secara otomatis dari Buku Kas Petty Cash operasional SPPG.';
         break;
       }
     }
@@ -1630,7 +1766,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     qualityControlRecords,
     inventory,
     institutions,
-    financialTransactions,
+    pettyCashOpeningBalance,
+    pettyCashTransactions,
     washingWasteRecords,
     sppgConfig,
     dynamicFormSchemas,
@@ -1651,6 +1788,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   // Handle Export PDF
   const handleExportPDF = async () => {
+    if (activeReportKey === 'bast_distribusi') {
+      if (bastVisibleSheets.length <= 1 && activeBastSingleSheet) {
+        await exportBastDocumentPDF(activeBastSingleSheet);
+      } else {
+        await exportBatchBastDocumentsPDF(bastVisibleSheets, selectedDate);
+      }
+      return;
+    }
     if (activeReportKey === 'organoleptik_penerima') {
       await exportOrganolepticChecklistPDF(organolepticData);
       return;
@@ -1696,8 +1841,9 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; Checklist Organoleptik, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
-      {activeReportKey !== 'organoleptik_penerima' &&
+      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; BAST, Checklist Organoleptik, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
+      {activeReportKey !== 'bast_distribusi' &&
+        activeReportKey !== 'organoleptik_penerima' &&
         activeReportKey !== 'suhu_makanan_pengolahan' &&
         activeReportKey !== 'suhu_makanan_pemorsian' && (
         <div className="hidden print:block mb-6">
@@ -1935,7 +2081,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       </div>
 
       {/* DOCUMENT PREVIEW CARD (WYSIWYG TAMPILAN RESMI PEMERINTAH) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden print:border-none print:shadow-none print:rounded-none">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden print:overflow-visible print:border-none print:shadow-none print:rounded-none">
         {/* Document Header Status Bar */}
         <div className="print:hidden bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-blue-900/50">
           <div className="flex items-center gap-3">
@@ -1991,7 +2137,125 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
         {/* Paper Document Representation */}
         <div className="p-6 md:p-8 bg-white space-y-6 print:p-0 print:space-y-0">
-          {activeReportKey === 'organoleptik_penerima' ? (
+          {activeReportKey === 'bast_distribusi' ? (
+            <div className="space-y-5">
+              {/* Control Bar Khusus Surat BAST Harian (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Format Surat Resmi BAST Harian — Terintegrasi Log Armada &amp; BAST Digital
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Otomatis memuat Berita Acara Penerimaan Paket Makanan &amp; Berita Acara Penyerahan Alat Makan (ompreng) sesuai Master Lembaga, Presensi Harian, dan Tim Distribusi.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedInstitutionId === 'ALL' && bastSheetsList.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setBastShowAllInstitutions(v => !v)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                          bastShowAllInstitutions
+                            ? 'bg-blue-900 text-white border-blue-950'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        {bastShowAllInstitutions
+                          ? `Menampilkan Semua (${bastSheetsList.length} Lembar BAST)`
+                          : `Tampilkan Semua Lembaga (${bastSheetsList.length})`}
+                      </button>
+                    )}
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate('distribution')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                      >
+                        <span>Buka Log Armada &amp; BAST Digital</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Pilih Lembaga Sasaran BAST
+                    </label>
+                    <select
+                      value={
+                        selectedInstitutionId !== 'ALL'
+                          ? selectedInstitutionId
+                          : bastSingleInstId || institutions[0]?.id || ''
+                      }
+                      disabled={bastShowAllInstitutions && selectedInstitutionId === 'ALL'}
+                      onChange={e => {
+                        setBastSingleInstId(e.target.value);
+                        setBastShowAllInstitutions(false);
+                      }}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium disabled:opacity-60"
+                    >
+                      {institutions
+                        .filter(i => i.isActive)
+                        .map(inst => (
+                          <option key={inst.id} value={inst.id}>
+                            {inst.name} — PIC: {inst.picName || inst.contactPerson}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Jam Penerimaan Paket Makanan (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={bastReceiveTimeOverride}
+                      onChange={e => setBastReceiveTimeOverride(e.target.value)}
+                      placeholder="Otomatis dari Log Pengiriman (mis. 09:05)"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Jam Penyerahan Alat Makan (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={bastReturnTimeOverride}
+                      onChange={e => setBastReturnTimeOverride(e.target.value)}
+                      placeholder="Kosongkan untuk ........ WIB"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Lembar Surat Resmi BASTDocumentSheet (Identik dengan Sub Modul Log Armada & BAST Digital) */}
+              {bastVisibleSheets.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-300 rounded-xl">
+                  Tidak ada data lembaga penerima yang cocok dengan filter pencarian.
+                </div>
+              ) : (
+                <div className="space-y-8 print:space-y-0">
+                  {bastVisibleSheets.map((sheet, idx) => (
+                    <div
+                      key={`${sheet.institutionName}-${idx}`}
+                      className={`max-w-4xl mx-auto ${
+                        idx < bastVisibleSheets.length - 1 ? 'print:break-after-page' : ''
+                      }`}
+                    >
+                      <BASTDocumentSheet data={sheet} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : activeReportKey === 'organoleptik_penerima' ? (
             <div className="space-y-4">
               {/* Control Bar Khusus Checklist Uji Organoleptik (Tersembunyi saat Cetak) */}
               <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
@@ -2497,10 +2761,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
       {/* FULLSCREEN PREVIEW MODAL */}
       {isPreviewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200">
+        <div
+          data-print-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150 print:static print:inset-auto print:bg-white print:p-0 print:block print:overflow-visible"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 print:max-w-full print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none print:block">
             {/* Modal Header */}
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 print:hidden">
               <div className="flex items-center gap-3">
                 <FileCheck className="w-5 h-5 text-amber-400" />
                 <div>
@@ -2541,8 +2808,21 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             </div>
 
             {/* Modal Body: Scaled paper sheet */}
-            <div className="p-6 overflow-y-auto bg-slate-100 flex justify-center">
-              {activeReportKey === 'organoleptik_penerima' ? (
+            <div
+              data-print-modal-body="true"
+              className="p-6 overflow-y-auto bg-slate-100 flex justify-center print:p-0 print:overflow-visible print:bg-white print:block"
+            >
+              {activeReportKey === 'bast_distribusi' ? (
+                <div className="max-w-4xl w-full space-y-6">
+                  {bastVisibleSheets.map((sheet, idx) => (
+                    <BASTDocumentSheet
+                      key={`modal-${sheet.institutionName}-${idx}`}
+                      data={sheet}
+                      className="border-slate-300 shadow-md"
+                    />
+                  ))}
+                </div>
+              ) : activeReportKey === 'organoleptik_penerima' ? (
                 <OrganolepticChecklistSheet
                   data={organolepticData}
                   className="max-w-4xl w-full border-slate-300 shadow-md"

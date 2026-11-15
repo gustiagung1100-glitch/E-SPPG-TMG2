@@ -41,7 +41,10 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-slate-950/70 backdrop-blur-xs transition-opacity duration-200 print:static print:inset-auto print:bg-white print:p-0 print:overflow-visible print:block">
+    <div
+      data-print-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-slate-950/70 backdrop-blur-xs transition-opacity duration-200 print:static print:inset-auto print:bg-white print:p-0 print:overflow-visible print:block"
+    >
       <div
         className="fixed inset-0 print:hidden"
         onClick={onClose}
@@ -63,6 +66,7 @@ export const Modal: React.FC<ModalProps> = ({
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 text-[#64748B] hover:text-[#1F2937] dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition shrink-0"
             aria-label="Tutup modal"
@@ -72,7 +76,10 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-5 sm:p-6 max-h-[calc(85vh-7rem)] overflow-y-auto scrollbar-thin print:p-0 print:max-h-none print:overflow-visible">
+        <div
+          data-print-modal-body="true"
+          className="p-5 sm:p-6 max-h-[calc(85vh-7rem)] overflow-y-auto scrollbar-thin print:p-0 print:max-h-none print:overflow-visible"
+        >
           {children}
         </div>
       </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
@@ -8,7 +8,7 @@ import {
   generateBastNumber,
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
-import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint } from '../../lib/exportUtils';
+import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
 import { DistributionDeliveryRecord, DistributionLog, DynamicFormId, OmprengReturnRecord } from '../../types';
 import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
 import {
@@ -38,6 +38,13 @@ import {
   X,
   ClipboardCheck,
   Building2,
+  UserCheck,
+  Radio,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const DistributionModule: React.FC = () => {
@@ -80,8 +87,102 @@ export const DistributionModule: React.FC = () => {
   const [isReturnFormOpen, setIsReturnFormOpen] = useState(false);
   const [editingReturnId, setEditingReturnId] = useState<string | null>(null);
 
+  // Realtime Daily Student Attendance Sync States
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const latestAttendanceDate = useMemo(() => {
+    if (beneficiaryAttendance.some(a => a.date === todayIso)) return todayIso;
+    const dates = [...new Set(beneficiaryAttendance.map(a => a.date))].sort().reverse();
+    return dates[0] || todayIso;
+  }, [beneficiaryAttendance, todayIso]);
+
+  const [selectedSyncDate, setSelectedSyncDate] = useState<string>(() => latestAttendanceDate);
+  const [showAttendanceBreakdown, setShowAttendanceBreakdown] = useState<boolean>(true);
+  const [filterBySyncDate, setFilterBySyncDate] = useState<boolean>(false);
+
+  // Realtime helper: resolve exact portions for any institution & date from Sub-modul Presensi Kehadiran Siswa
+  const resolveDailyPortions = useCallback(
+    (institutionId: string, date: string, fallbackSmall?: number, fallbackLarge?: number) => {
+      const inst = institutions.find(i => i.id === institutionId);
+      const att = beneficiaryAttendance.find(a => a.institutionId === institutionId && a.date === date);
+      if (att) {
+        const rate = att.totalRegistered > 0
+          ? ((att.actualPortions / att.totalRegistered) * 100).toFixed(1)
+          : '100.0';
+        return {
+          smallPortions: att.presentSmall,
+          largePortions: att.presentLarge,
+          totalPortions: att.actualPortions,
+          registeredSmall: att.registeredSmall,
+          registeredLarge: att.registeredLarge,
+          totalRegistered: att.totalRegistered,
+          absentSmall: att.absentSmall,
+          absentLarge: att.absentLarge,
+          totalAbsent: att.totalAbsent,
+          attendanceRate: rate,
+          isSyncedFromAttendance: true,
+          attendanceRecord: att,
+        };
+      }
+      const baseSmall = inst?.smallPortions ?? fallbackSmall ?? 0;
+      const baseLarge = inst?.largePortions ?? fallbackLarge ?? 0;
+      const baseTotal = baseSmall + baseLarge;
+      return {
+        smallPortions: baseSmall,
+        largePortions: baseLarge,
+        totalPortions: baseTotal,
+        registeredSmall: baseSmall,
+        registeredLarge: baseLarge,
+        totalRegistered: baseTotal,
+        absentSmall: 0,
+        absentLarge: 0,
+        totalAbsent: 0,
+        attendanceRate: '100.0',
+        isSyncedFromAttendance: false,
+        attendanceRecord: null,
+      };
+    },
+    [beneficiaryAttendance, institutions]
+  );
+
+  // Daily Attendance Sync Rows for selectedSyncDate
+  const syncDateRows = useMemo(() => {
+    return institutions.map(inst => {
+      const resolved = resolveDailyPortions(inst.id, selectedSyncDate);
+      const existingDelivery = distributionDeliveries.find(
+        d => d.institutionId === inst.id && d.date === selectedSyncDate
+      );
+      return {
+        institution: inst,
+        ...resolved,
+        existingDelivery,
+      };
+    });
+  }, [institutions, resolveDailyPortions, selectedSyncDate, distributionDeliveries]);
+
+  const syncDateSummary = useMemo(() => {
+    const syncedCount = syncDateRows.filter(r => r.isSyncedFromAttendance).length;
+    const totalRegistered = syncDateRows.reduce((s, r) => s + r.totalRegistered, 0);
+    const totalAbsent = syncDateRows.reduce((s, r) => s + r.totalAbsent, 0);
+    const actualSmall = syncDateRows.reduce((s, r) => s + r.smallPortions, 0);
+    const actualLarge = syncDateRows.reduce((s, r) => s + r.largePortions, 0);
+    const actualTotal = actualSmall + actualLarge;
+    const deliveredCount = syncDateRows.filter(r => Boolean(r.existingDelivery)).length;
+    const rate = totalRegistered > 0 ? ((actualTotal / totalRegistered) * 100).toFixed(1) : '100.0';
+    return {
+      syncedCount,
+      totalInstitutions: syncDateRows.length,
+      totalRegistered,
+      totalAbsent,
+      actualSmall,
+      actualLarge,
+      actualTotal,
+      deliveredCount,
+      rate,
+    };
+  }, [syncDateRows]);
+
   const [deliveryForm, setDeliveryForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: latestAttendanceDate,
     institutionId: institutions[0]?.id || '',
     departureTime: '08:15 WIB',
     arrivalTime: '08:35 WIB',
@@ -96,32 +197,38 @@ export const DistributionModule: React.FC = () => {
     notes: 'Boks termal tersegel rapi, uji organoleptik PIC disetujui, dan serah terima selesai di lokasi.',
   });
 
-  const [returnForm, setReturnForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    institutionId: institutions[0]?.id || '',
-    smallPortions: institutions[0]?.smallPortions || 0,
-    largePortions: institutions[0]?.largePortions || 0,
-    departureTime: '12:30 WIB',
-    arrivalTime: '13:05 WIB',
-    driverName: 'Agus Santoso',
-    vehicleNumber: 'N 8921 RA',
-    receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
-    conditionStatus: 'Lengkap & Utuh' as OmprengReturnRecord['conditionStatus'],
-    returnHandoverPhoto: '',
-    locationPhoto: '',
-    activityPhoto: '',
-    notes: 'Seluruh ompreng stainless kembali utuh dan siap disterilisasi.',
+  const [returnForm, setReturnForm] = useState(() => {
+    const defInstId = institutions[0]?.id || '';
+    const resolved = resolveDailyPortions(defInstId, latestAttendanceDate);
+    return {
+      date: latestAttendanceDate,
+      institutionId: defInstId,
+      smallPortions: resolved.smallPortions,
+      largePortions: resolved.largePortions,
+      departureTime: '12:30 WIB',
+      arrivalTime: '13:05 WIB',
+      driverName: 'Agus Santoso',
+      vehicleNumber: 'N 8921 RA',
+      receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      conditionStatus: 'Lengkap & Utuh' as OmprengReturnRecord['conditionStatus'],
+      returnHandoverPhoto: '',
+      locationPhoto: '',
+      activityPhoto: '',
+      notes: 'Seluruh ompreng stainless kembali utuh dan siap disterilisasi.',
+    };
   });
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
     processFacilityImageUpload(e, callback, msg => addToast('error', 'Upload Foto Gagal', msg));
   };
 
-  const openNewDeliveryModal = () => {
-    const defaultInst = institutions[0];
+  const openNewDeliveryModal = (presetInstitutionId?: string, presetDate?: string) => {
+    const targetInstId = presetInstitutionId || institutions[0]?.id || '';
+    const defaultInst = institutions.find(i => i.id === targetInstId) || institutions[0];
+    const targetDate = presetDate || selectedSyncDate || todayIso;
     setEditingDeliveryId(null);
     setDeliveryForm({
-      date: new Date().toISOString().slice(0, 10),
+      date: targetDate,
       institutionId: defaultInst?.id || '',
       departureTime: '08:15 WIB',
       arrivalTime: '08:35 WIB',
@@ -162,14 +269,22 @@ export const DistributionModule: React.FC = () => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === deliveryForm.institutionId) || institutions[0];
     if (!inst) return;
+    const synced = resolveDailyPortions(inst.id, deliveryForm.date, inst.smallPortions, inst.largePortions);
+
     if (editingDeliveryId) {
       await updateDistributionDelivery(editingDeliveryId, {
         date: deliveryForm.date,
         institutionId: inst.id,
         institutionName: inst.name,
-        smallPortions: inst.smallPortions,
-        largePortions: inst.largePortions,
-        totalPortions: inst.totalPortions,
+        smallPortions: synced.smallPortions,
+        largePortions: synced.largePortions,
+        totalPortions: synced.totalPortions,
+        registeredSmall: synced.registeredSmall,
+        registeredLarge: synced.registeredLarge,
+        absentSmall: synced.absentSmall,
+        absentLarge: synced.absentLarge,
+        attendanceLogId: synced.attendanceRecord?.id,
+        portionSource: synced.isSyncedFromAttendance ? 'presensi_realtime' : 'kuota_terdaftar',
         departureTime: deliveryForm.departureTime,
         arrivalTime: deliveryForm.arrivalTime,
         driverName: deliveryForm.driverName,
@@ -188,9 +303,15 @@ export const DistributionModule: React.FC = () => {
         date: deliveryForm.date,
         institutionId: inst.id,
         institutionName: inst.name,
-        smallPortions: inst.smallPortions,
-        largePortions: inst.largePortions,
-        totalPortions: inst.totalPortions,
+        smallPortions: synced.smallPortions,
+        largePortions: synced.largePortions,
+        totalPortions: synced.totalPortions,
+        registeredSmall: synced.registeredSmall,
+        registeredLarge: synced.registeredLarge,
+        absentSmall: synced.absentSmall,
+        absentLarge: synced.absentLarge,
+        attendanceLogId: synced.attendanceRecord?.id,
+        portionSource: synced.isSyncedFromAttendance ? 'presensi_realtime' : 'kuota_terdaftar',
         departureTime: deliveryForm.departureTime,
         arrivalTime: deliveryForm.arrivalTime,
         driverName: deliveryForm.driverName,
@@ -211,12 +332,14 @@ export const DistributionModule: React.FC = () => {
 
   const openNewReturnModal = () => {
     const defaultInst = institutions[0];
+    const targetDate = selectedSyncDate || todayIso;
+    const synced = defaultInst ? resolveDailyPortions(defaultInst.id, targetDate) : null;
     setEditingReturnId(null);
     setReturnForm({
-      date: new Date().toISOString().slice(0, 10),
+      date: targetDate,
       institutionId: defaultInst?.id || '',
-      smallPortions: defaultInst?.smallPortions || 0,
-      largePortions: defaultInst?.largePortions || 0,
+      smallPortions: synced?.smallPortions ?? defaultInst?.smallPortions ?? 0,
+      largePortions: synced?.largePortions ?? defaultInst?.largePortions ?? 0,
       departureTime: '12:30 WIB',
       arrivalTime: '13:05 WIB',
       driverName: 'Agus Santoso',
@@ -312,6 +435,7 @@ export const DistributionModule: React.FC = () => {
   const [reportCustomFields, setReportCustomFields] = useState<Record<string, any>>({});
 
   // Create Form State
+  const [dispatchDate, setDispatchDate] = useState(latestAttendanceDate);
   const [institutionId, setInstitutionId] = useState(institutions[0]?.id || '');
   const [vehicleNumber, setVehicleNumber] = useState('N 8921 RA (Armada 1)');
   const [driverName, setDriverName] = useState('Agus Santoso');
@@ -397,20 +521,29 @@ export const DistributionModule: React.FC = () => {
     }
 
     const inst = institutions.find(i => i.id === institutionId) || institutions[0];
+    const synced = resolveDailyPortions(inst.id, dispatchDate, inst.smallPortions, inst.largePortions);
     await addDistributionLog({
-      date: new Date().toISOString().slice(0, 10),
+      date: dispatchDate,
       institutionId: inst.id,
       institutionName: inst.name,
-      smallPortions: inst.smallPortions,
-      largePortions: inst.largePortions,
-      totalPortions: inst.totalPortions,
+      smallPortions: synced.smallPortions,
+      largePortions: synced.largePortions,
+      totalPortions: synced.totalPortions,
+      registeredSmall: synced.registeredSmall,
+      registeredLarge: synced.registeredLarge,
+      absentSmall: synced.absentSmall,
+      absentLarge: synced.absentLarge,
+      attendanceLogId: synced.attendanceRecord?.id,
+      portionSource: synced.isSyncedFromAttendance ? 'presensi_realtime' : 'kuota_terdaftar',
       vehicleNumber,
       driverName,
       departureTime,
       arrivalTime: '-',
       foodTempAtDispatch: dispatchTemp,
       status: 'Dalam Perjalanan',
-      notes: 'Boks termal tersegel rapi.',
+      notes: synced.isSyncedFromAttendance
+        ? `Boks termal tersegel rapi. Porsi tersinkron realtime dari Presensi Siswa (${synced.attendanceRate}% hadir, tidak hadir ${synced.totalAbsent} siswa).`
+        : 'Boks termal tersegel rapi.',
       customFields: dispatchCustomFields,
     });
     setDispatchCustomFields(
@@ -419,7 +552,42 @@ export const DistributionModule: React.FC = () => {
     setIsCreateOpen(false);
   };
 
-  // Export handlers (Auto-synced with custom fields from both distribution forms)
+  // Realtime-resolved views of deliveries & fleet logs
+  const syncedDistributionDeliveries = useMemo(() => {
+    const list = distributionDeliveries.map(d => {
+      const resolved = resolveDailyPortions(d.institutionId, d.date, d.smallPortions, d.largePortions);
+      return {
+        ...d,
+        smallPortions: resolved.smallPortions,
+        largePortions: resolved.largePortions,
+        totalPortions: resolved.totalPortions,
+        _resolvedAttendance: resolved,
+      };
+    });
+    if (filterBySyncDate) {
+      return list.filter(d => d.date === selectedSyncDate);
+    }
+    return list;
+  }, [distributionDeliveries, resolveDailyPortions, filterBySyncDate, selectedSyncDate]);
+
+  const syncedDistributionLogs = useMemo(() => {
+    const list = distributionLogs.map(log => {
+      const resolved = resolveDailyPortions(log.institutionId, log.date, log.smallPortions, log.largePortions);
+      return {
+        ...log,
+        smallPortions: resolved.smallPortions,
+        largePortions: resolved.largePortions,
+        totalPortions: resolved.totalPortions,
+        _resolvedAttendance: resolved,
+      };
+    });
+    if (filterBySyncDate) {
+      return list.filter(l => l.date === selectedSyncDate);
+    }
+    return list;
+  }, [distributionLogs, resolveDailyPortions, filterBySyncDate, selectedSyncDate]);
+
+  // Export handlers (Auto-synced with custom fields from both distribution forms + live attendance portions)
   const mergedDistCustomSchema = {
     ...dynamicFormSchemas.distribution_report_form,
     fields: [
@@ -429,10 +597,10 @@ export const DistributionModule: React.FC = () => {
   };
 
   const handleExportPDF = () => {
-    const baseHeaders = ['Sekolah Sasaran', 'Porsi', 'Armada & Supir', 'Jam Berangkat / Tiba', 'Suhu (°C)', 'Penerima', 'Status'];
-    const baseRows = distributionLogs.map(d => [
-      d.institutionName,
-      `${formatNumber(d.totalPortions)} (${d.smallPortions}K / ${d.largePortions}B)`,
+    const baseHeaders = ['Sekolah Sasaran', 'Porsi Aktual (Presensi)', 'Armada & Supir', 'Jam Berangkat / Tiba', 'Suhu (°C)', 'Penerima', 'Status'];
+    const baseRows = syncedDistributionLogs.map(d => [
+      `${d.institutionName} (${d.date})`,
+      `${formatNumber(d.totalPortions)} (${d.smallPortions}K / ${d.largePortions}B)${d._resolvedAttendance.isSyncedFromAttendance ? ` • Hadir ${d._resolvedAttendance.attendanceRate}%` : ''}`,
       `${d.vehicleNumber} - ${d.driverName}`,
       `${d.departureTime} / ${d.arrivalTime}`,
       `${d.foodTempAtDispatch}°C -> ${d.foodTempAtArrival || '-'}°C`,
@@ -443,7 +611,7 @@ export const DistributionModule: React.FC = () => {
       mergedDistCustomSchema,
       baseHeaders,
       baseRows,
-      distributionLogs
+      syncedDistributionLogs
     );
     exportTableToPDF({
       title: 'Laporan Rekapitulasi Distribusi & Pengiriman MBG',
@@ -458,12 +626,15 @@ export const DistributionModule: React.FC = () => {
   };
 
   const handleExportExcel = () => {
-    const dataToExport = distributionLogs.map(d =>
+    const dataToExport = syncedDistributionLogs.map(d =>
       appendDynamicExcelFields(
         mergedDistCustomSchema,
         {
           'Tanggal': d.date,
           'Nama Sekolah': d.institutionName,
+          'Sumber Data Porsi': d._resolvedAttendance.isSyncedFromAttendance ? 'Presensi Siswa Realtime' : 'Kuota Terdaftar',
+          'Siswa Terdaftar': d._resolvedAttendance.totalRegistered,
+          'Tidak Hadir': d._resolvedAttendance.totalAbsent,
           'Porsi Kecil': d.smallPortions,
           'Porsi Besar': d.largePortions,
           'Total Porsi': d.totalPortions,
@@ -484,20 +655,35 @@ export const DistributionModule: React.FC = () => {
     exportToExcel(dataToExport, 'Distribusi_MBG_SPPG_TMG2', 'Data Distribusi');
   };
 
-  const columns: Column<DistributionLog>[] = [
+  const columns: Column<DistributionLog & { _resolvedAttendance?: ReturnType<typeof resolveDailyPortions> }>[] = [
     {
       key: 'institutionName',
       header: 'Lembaga Sekolah Sasaran',
-      render: row => (
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white">
-            {row.institutionName}
+      render: row => {
+        const attInfo = row._resolvedAttendance || resolveDailyPortions(row.institutionId, row.date, row.smallPortions, row.largePortions);
+        return (
+          <div>
+            <div className="font-bold text-slate-900 dark:text-white">
+              {row.institutionName}
+            </div>
+            <div className="text-[11px] text-slate-500 font-mono">
+              {formatNumber(row.totalPortions)} Porsi ({row.smallPortions} Kecil / {row.largePortions} Besar)
+            </div>
+            <div className="mt-0.5">
+              {attInfo.isSyncedFromAttendance ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold">
+                  <UserCheck className="w-3 h-3" />
+                  Presensi Realtime: {attInfo.attendanceRate}% hadir (-{attInfo.totalAbsent} absen)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px]">
+                  Kuota Terdaftar ({row.date})
+                </span>
+              )}
+            </div>
           </div>
-          <div className="text-[11px] text-slate-500 font-mono">
-            {formatNumber(row.totalPortions)} Porsi ({row.smallPortions} Kecil / {row.largePortions} Besar)
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'vehicle',
@@ -615,7 +801,7 @@ export const DistributionModule: React.FC = () => {
             <>
               <button
                 type="button"
-                onClick={openNewDeliveryModal}
+                onClick={() => openNewDeliveryModal()}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition"
               >
                 <Plus className="w-4 h-4" />
@@ -632,6 +818,7 @@ export const DistributionModule: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
+                  setDispatchDate(selectedSyncDate || todayIso);
                   setDispatchCustomFields(
                     getInitialCustomFieldValues(dynamicFormSchemas.distribution_dispatch_form)
                   );
@@ -648,6 +835,187 @@ export const DistributionModule: React.FC = () => {
         </div>
       </div>
 
+      {/* ===================================================================== */}
+      {/* PANEL INTEGRASI REALTIME SUB-MODUL PRESENSI KEHADIRAN SISWA HARIAN    */}
+      {/* ===================================================================== */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 overflow-hidden shadow-xs">
+        <div className="p-4 bg-gradient-to-r from-emerald-50 via-sky-50/60 to-white dark:from-emerald-950/30 dark:via-slate-900 dark:to-slate-900 border-b border-emerald-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-600 text-white">
+                <Radio className="w-3 h-3 animate-pulse" />
+                <span>REALTIME SYNC AKTIF</span>
+              </span>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <UserCheck className="w-4 h-4 text-emerald-600" />
+                <span>Integrasi Presensi Kehadiran Siswa Harian → Kebutuhan Pengiriman</span>
+              </h3>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Jumlah porsi pengiriman otomatis mengikuti data kehadiran aktual siswa (Terdaftar − Tidak Hadir) dari Sub-modul Presensi Kehadiran Siswa secara realtime pada tanggal terpilih.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
+              <Calendar className="w-3.5 h-3.5 text-sky-600" />
+              <input
+                type="date"
+                value={selectedSyncDate}
+                onChange={e => setSelectedSyncDate(e.target.value)}
+                className="text-xs font-bold bg-transparent text-slate-800 dark:text-slate-100 focus:outline-none"
+              />
+            </div>
+            {selectedSyncDate !== todayIso && (
+              <button
+                type="button"
+                onClick={() => setSelectedSyncDate(todayIso)}
+                className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-sky-100 hover:bg-sky-200 dark:bg-sky-950 dark:text-sky-300 text-sky-900 transition"
+              >
+                Hari Ini ({todayIso})
+              </button>
+            )}
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filterBySyncDate}
+                onChange={e => setFilterBySyncDate(e.target.checked)}
+                className="rounded border-slate-300 text-emerald-600"
+              />
+              <span>Filter Tabel Tanggal Ini</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowAttendanceBreakdown(v => !v)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition"
+            >
+              {showAttendanceBreakdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              <span>{showAttendanceBreakdown ? 'Sembunyikan Rincian' : 'Rincian Per Sekolah'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Realtime Summary Strip for Selected Date */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-slate-50/70 dark:bg-slate-950/40 border-b border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="text-[10px] font-bold uppercase text-slate-500">Presensi Masuk ({formatIndonesianDate(selectedSyncDate)})</div>
+            <div className="text-lg font-black text-emerald-600 mt-0.5 tabular-nums">
+              {syncDateSummary.syncedCount} / {syncDateSummary.totalInstitutions} Lembaga
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {syncDateSummary.deliveredCount} lembaga tercatat dikirim
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="text-[10px] font-bold uppercase text-slate-500">Siswa Terdaftar</div>
+            <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+              {formatNumber(syncDateSummary.totalRegistered)} Siswa
+            </div>
+            <div className="text-[11px] text-slate-500">Kuota induk seluruh lembaga</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="text-[10px] font-bold uppercase text-slate-500">Tidak Hadir (Presensi)</div>
+            <div className="text-lg font-black text-rose-600 mt-0.5 tabular-nums">
+              -{formatNumber(syncDateSummary.totalAbsent)} Siswa
+            </div>
+            <div className="text-[11px] text-rose-600/80">Otomatis dikurangi dari porsi kirim</div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-emerald-200 dark:border-emerald-900/60">
+            <div className="text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400">Porsi Aktual Siap Kirim</div>
+            <div className="text-lg font-black text-blue-900 dark:text-sky-400 mt-0.5 tabular-nums">
+              {formatNumber(syncDateSummary.actualTotal)} Porsi ({syncDateSummary.rate}%)
+            </div>
+            <div className="text-[11px] text-slate-500 font-mono">
+              Kecil: {formatNumber(syncDateSummary.actualSmall)} | Besar: {formatNumber(syncDateSummary.actualLarge)}
+            </div>
+          </div>
+        </div>
+
+        {/* Collapsible Per-Institution Realtime Sync Table */}
+        {showAttendanceBreakdown && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 dark:bg-slate-800/60 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="px-4 py-2.5">Sekolah &amp; Rute</th>
+                  <th className="px-3 py-2.5 text-right">Terdaftar</th>
+                  <th className="px-3 py-2.5 text-right">Tidak Hadir</th>
+                  <th className="px-3 py-2.5 text-right">Porsi Kirim Aktual (K / B / Total)</th>
+                  <th className="px-3 py-2.5">Status Presensi Realtime</th>
+                  <th className="px-4 py-2.5 text-right">Aksi Cepat</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {syncDateRows.map(row => (
+                  <tr key={row.institution.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition">
+                    <td className="px-4 py-2.5">
+                      <div className="font-bold text-slate-900 dark:text-white">{row.institution.name}</div>
+                      <div className="text-[10px] text-slate-500">{row.institution.deliveryRoute} • Urutan #{row.institution.deliveryOrder}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-600 dark:text-slate-400">
+                      {formatNumber(row.totalRegistered)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-600">
+                      {row.totalAbsent > 0 ? `-${row.totalAbsent}` : '0'}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono">
+                      <span className="font-black text-blue-900 dark:text-sky-400">{formatNumber(row.totalPortions)} Boks</span>
+                      <div className="text-[10px] text-slate-500">
+                        K: {row.smallPortions} | B: {row.largePortions} ({row.attendanceRate}%)
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {row.isSyncedFromAttendance ? (
+                        <div>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Tersinkron Presensi
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[160px]">
+                            PIC: {row.attendanceRecord?.recordedBy}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                          <AlertTriangle className="w-3 h-3" />
+                          Belum Presensi (Kuota Penuh)
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {row.existingDelivery ? (
+                        <button
+                          type="button"
+                          onClick={() => openEditDeliveryModal(row.existingDelivery!)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold border border-emerald-200 dark:border-emerald-800 transition"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>Sudah Dikirim</span>
+                        </button>
+                      ) : (
+                        hasPermission('distribution', 'create') && (
+                          <button
+                            type="button"
+                            onClick={() => openNewDeliveryModal(row.institution.id, selectedSyncDate)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 text-white text-[11px] font-bold transition"
+                          >
+                            <Truck className="w-3 h-3" />
+                            <span>Kirim ({row.totalPortions})</span>
+                          </button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Sub-Navigation Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
         <button
@@ -662,7 +1030,7 @@ export const DistributionModule: React.FC = () => {
           <ClipboardCheck className="w-4 h-4" />
           <span>Pengiriman &amp; Bukti Foto (Organoleptik, Serah Terima, Lokasi)</span>
           <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {distributionDeliveries.length}
+            {syncedDistributionDeliveries.length}
           </span>
         </button>
 
@@ -694,7 +1062,7 @@ export const DistributionModule: React.FC = () => {
           <FileCheck className="w-4 h-4" />
           <span>Log Armada &amp; BAST Digital</span>
           <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {distributionLogs.length}
+            {syncedDistributionLogs.length}
           </span>
         </button>
       </div>
@@ -704,9 +1072,9 @@ export const DistributionModule: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="text-xs text-slate-500 uppercase font-bold">Total Pengiriman Tercatat</div>
           <div className="text-2xl font-black text-blue-900 dark:text-sky-400 mt-1 tabular-nums">
-            {distributionDeliveries.length} Rute
+            {syncedDistributionDeliveries.length} Rute
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Terhubung BAST &amp; Organoleptik</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Terhubung Presensi &amp; BAST</div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -722,7 +1090,7 @@ export const DistributionModule: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="text-xs text-slate-500 uppercase font-bold">Kelengkapan 3 Foto Kirim</div>
           <div className="text-2xl font-black text-sky-600 mt-1 tabular-nums">
-            {distributionDeliveries.filter(d => d.picOrganolepticPhoto && d.handoverPhoto && d.locationPhoto).length}/{distributionDeliveries.length}
+            {syncedDistributionDeliveries.filter(d => d.picOrganolepticPhoto && d.handoverPhoto && d.locationPhoto).length}/{syncedDistributionDeliveries.length}
           </div>
           <div className="text-[11px] text-sky-600 font-semibold mt-0.5">Organoleptik, Serah Terima, Lokasi</div>
         </div>
@@ -730,9 +1098,11 @@ export const DistributionModule: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="text-xs text-slate-500 uppercase font-bold">Total Ompreng Terkirim</div>
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 tabular-nums">
-            {formatNumber(distributionDeliveries.reduce((s, d) => s + d.totalPortions, 0))} Boks
+            {formatNumber(syncedDistributionDeliveries.reduce((s, d) => s + d.totalPortions, 0))} Boks
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Siap Audit Harian</div>
+          <div className="text-[11px] text-emerald-600 font-semibold mt-0.5">
+            Sesuai Presensi Kehadiran Siswa
+          </div>
         </div>
       </div>
 
@@ -746,13 +1116,13 @@ export const DistributionModule: React.FC = () => {
                 <span>Daftar Pengiriman Makanan MBG &amp; Dokumentasi 3 Foto Lapangan</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Mencakup Foto Uji Organoleptik, Foto Serah Terima, dan Foto Lokasi untuk setiap sekolah penerima manfaat.
+                Porsi pengiriman tersinkron realtime dengan presensi kehadiran siswa harian, disertai Foto Uji Organoleptik, Serah Terima, dan Lokasi.
               </p>
             </div>
             {hasPermission('distribution', 'create') && (
               <button
                 type="button"
-                onClick={openNewDeliveryModal}
+                onClick={() => openNewDeliveryModal()}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -762,98 +1132,125 @@ export const DistributionModule: React.FC = () => {
           </div>
 
           <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {distributionDeliveries.map(d => (
-              <div key={d.id} className="p-4 sm:p-5 hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition">
-                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-base text-slate-900 dark:text-white">{d.institutionName}</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                        {d.status}
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {d.bastNumber}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400">{d.date}</span>
-                    </div>
+            {syncedDistributionDeliveries.map(d => {
+              const att = d._resolvedAttendance;
+              return (
+                <div key={d.id} className="p-4 sm:p-5 hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition">
+                  <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-base text-slate-900 dark:text-white">{d.institutionName}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          {d.status}
+                        </span>
+                        {att.isSyncedFromAttendance ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                            <UserCheck className="w-3 h-3" />
+                            Realtime Presensi ({att.attendanceRate}% hadir • -{att.totalAbsent} absen)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                            Kuota Terdaftar (Belum ada presensi {d.date})
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                          {d.bastNumber}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">{d.date}</span>
+                      </div>
 
-                    <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 flex-wrap">
-                      <span>Porsi Kecil: <strong>{d.smallPortions}</strong></span>
-                      <span>•</span>
-                      <span>Porsi Besar: <strong>{d.largePortions}</strong></span>
-                      <span>•</span>
-                      <span className="font-bold text-blue-900 dark:text-sky-400">Total: {d.totalPortions} Boks</span>
-                      <span>•</span>
-                      <span>Armada: <strong>{d.vehicleNumber}</strong> ({d.driverName})</span>
-                    </div>
+                      <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 flex-wrap">
+                        <span>Porsi Kecil: <strong>{d.smallPortions}</strong></span>
+                        <span>•</span>
+                        <span>Porsi Besar: <strong>{d.largePortions}</strong></span>
+                        <span>•</span>
+                        <span className="font-bold text-blue-900 dark:text-sky-400">Total Kirim Aktual: {d.totalPortions} Boks</span>
+                        {att.isSyncedFromAttendance && (
+                          <>
+                            <span>•</span>
+                            <span className="text-slate-500">
+                              Terdaftar {att.totalRegistered} (Absen K:{att.absentSmall}/B:{att.absentLarge})
+                            </span>
+                          </>
+                        )}
+                        <span>•</span>
+                        <span>Armada: <strong>{d.vehicleNumber}</strong> ({d.driverName})</span>
+                      </div>
 
-                    <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        Berangkat: {d.departureTime} → Tiba: {d.arrivalTime}
-                      </span>
-                      <span>•</span>
-                      <span>Penerima: <strong>{d.picName}</strong></span>
-                    </div>
+                      <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          Berangkat: {d.departureTime} → Tiba: {d.arrivalTime}
+                        </span>
+                        <span>•</span>
+                        <span>Penerima: <strong>{d.picName}</strong></span>
+                        {att.attendanceRecord?.recordedBy && (
+                          <>
+                            <span>•</span>
+                            <span>Pencatat Presensi: <strong>{att.attendanceRecord.recordedBy}</strong></span>
+                          </>
+                        )}
+                      </div>
 
-                    <p className="text-xs text-slate-600 dark:text-slate-300 italic pt-1">
-                      "{d.notes}"
-                    </p>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 italic pt-1">
+                        "{d.notes}"
+                      </p>
 
-                    <div className="pt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDeliveryForBast(d)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-900 dark:text-sky-300 text-[11px] font-bold border border-blue-200 dark:border-blue-800 transition"
-                      >
-                        <FileCheck className="w-3.5 h-3.5" />
-                        <span>Lihat / Cetak BAST</span>
-                      </button>
-                      {hasPermission('distribution', 'edit') && (
+                      <div className="pt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => openEditDeliveryModal(d)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition"
+                          onClick={() => setSelectedDeliveryForBast(d)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-900 dark:text-sky-300 text-[11px] font-bold border border-blue-200 dark:border-blue-800 transition"
                         >
-                          <Camera className="w-3.5 h-3.5" />
-                          <span>Edit / Upload Foto</span>
+                          <FileCheck className="w-3.5 h-3.5" />
+                          <span>Lihat / Cetak BAST</span>
                         </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 3 Required Photo Slots + Optional Activity */}
-                  <div className="grid grid-cols-3 gap-2.5 shrink-0">
-                    {[
-                      { label: 'Uji Organoleptik', url: d.picOrganolepticPhoto },
-                      { label: 'Serah Terima', url: d.handoverPhoto },
-                      { label: 'Foto Lokasi', url: d.locationPhoto },
-                    ].map(ph => (
-                      <div key={ph.label} className="text-center w-20">
-                        {ph.url ? (
-                          <img
-                            src={ph.url}
-                            alt={ph.label}
-                            onClick={() => setViewPhotoUrl(ph.url || null)}
-                            className="w-20 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
-                          />
-                        ) : (
+                        {hasPermission('distribution', 'edit') && (
                           <button
                             type="button"
                             onClick={() => openEditDeliveryModal(d)}
-                            className="w-20 h-16 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-[10px] text-slate-400 hover:border-blue-500 hover:text-blue-600 transition"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold transition"
                           >
-                            <Upload className="w-3.5 h-3.5 mb-0.5" />
-                            <span>Upload</span>
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Edit / Upload Foto</span>
                           </button>
                         )}
-                        <span className="text-[10px] font-medium text-slate-500 block mt-1 leading-tight">{ph.label}</span>
                       </div>
-                    ))}
+                    </div>
+
+                    {/* 3 Required Photo Slots + Optional Activity */}
+                    <div className="grid grid-cols-3 gap-2.5 shrink-0">
+                      {[
+                        { label: 'Uji Organoleptik', url: d.picOrganolepticPhoto },
+                        { label: 'Serah Terima', url: d.handoverPhoto },
+                        { label: 'Foto Lokasi', url: d.locationPhoto },
+                      ].map(ph => (
+                        <div key={ph.label} className="text-center w-20">
+                          {ph.url ? (
+                            <img
+                              src={ph.url}
+                              alt={ph.label}
+                              onClick={() => setViewPhotoUrl(ph.url || null)}
+                              className="w-20 h-16 object-cover rounded-lg cursor-pointer hover:opacity-80 transition border border-slate-200 dark:border-slate-700"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openEditDeliveryModal(d)}
+                              className="w-20 h-16 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-[10px] text-slate-400 hover:border-blue-500 hover:text-blue-600 transition"
+                            >
+                              <Upload className="w-3.5 h-3.5 mb-0.5" />
+                              <span>Upload</span>
+                            </button>
+                          )}
+                          <span className="text-[10px] font-medium text-slate-500 block mt-1 leading-tight">{ph.label}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -998,8 +1395,8 @@ export const DistributionModule: React.FC = () => {
           {/* Distribution Data Table */}
           <DataTable
             title="Daftar Log Pengiriman & Surat Jalan Armada SPPG"
-            subtitle="Riwayat keberangkatan armada, suhu wadah, dan tanda terima sekolah"
-            data={distributionLogs}
+            subtitle="Riwayat keberangkatan armada, porsi aktual tersinkron presensi siswa, suhu wadah, dan tanda terima sekolah"
+            data={syncedDistributionLogs}
             columns={columns}
             keyExtractor={item => item.id}
             searchPlaceholder="Cari sekolah, nomor kendaraan, atau supir..."
@@ -1016,7 +1413,7 @@ export const DistributionModule: React.FC = () => {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         title="Catat Keberangkatan Armada Distribusi"
-        subtitle="Pemberangkatan kloter pengiriman makanan siap saji ke sekolah"
+        subtitle="Pemberangkatan kloter pengiriman makanan siap saji ke sekolah (otomatis tersinkron presensi siswa)"
         maxWidth="2xl"
       >
         <form onSubmit={handleCreateDispatch} className="space-y-4">
@@ -1033,6 +1430,51 @@ export const DistributionModule: React.FC = () => {
             />
           )}
 
+          {/* Tanggal & Realtime Attendance Preview for Dispatch */}
+          {(() => {
+            const dispatchSync = resolveDailyPortions(institutionId, dispatchDate);
+            return (
+              <div className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/70 bg-emerald-50/70 dark:bg-emerald-950/30 space-y-2 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300">
+                    <UserCheck className="w-4 h-4" />
+                    <span>Sinkronisasi Porsi dari Presensi Siswa Harian</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Tanggal Kirim:</span>
+                    <input
+                      type="date"
+                      value={dispatchDate}
+                      onChange={e => setDispatchDate(e.target.value)}
+                      className="px-2 py-1 text-xs rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 font-bold"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] text-slate-500">Terdaftar</div>
+                    <div className="font-mono font-bold text-slate-800 dark:text-slate-100">{dispatchSync.totalRegistered} Siswa</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] text-slate-500">Tidak Hadir</div>
+                    <div className="font-mono font-bold text-rose-600">-{dispatchSync.totalAbsent} Siswa</div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700">
+                    <div className="text-[10px] text-emerald-700 dark:text-emerald-400">Porsi Aktual Armada</div>
+                    <div className="font-mono font-black text-blue-900 dark:text-sky-400">
+                      {dispatchSync.totalPortions} Boks ({dispatchSync.smallPortions}K / {dispatchSync.largePortions}B)
+                    </div>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                  {dispatchSync.isSyncedFromAttendance
+                    ? `Sumber: Presensi Siswa (${dispatchSync.attendanceRate}% hadir • Dicatat oleh ${dispatchSync.attendanceRecord?.recordedBy})`
+                    : `Presensi tanggal ${dispatchDate} belum diinput — menggunakan kuota terdaftar penuh sementara.`}
+                </div>
+              </div>
+            );
+          })()}
+
           <DynamicFormRenderer
             schema={dynamicFormSchemas.distribution_dispatch_form}
             values={{
@@ -1044,10 +1486,13 @@ export const DistributionModule: React.FC = () => {
               ...dispatchCustomFields,
             }}
             dynamicOptions={{
-              institutionId: institutions.map(inst => ({
-                value: inst.id,
-                label: `${inst.name} (${formatNumber(inst.totalPortions)} porsi)`,
-              })),
+              institutionId: institutions.map(inst => {
+                const synced = resolveDailyPortions(inst.id, dispatchDate, inst.smallPortions, inst.largePortions);
+                return {
+                  value: inst.id,
+                  label: `${inst.name} (${formatNumber(synced.totalPortions)} porsi${synced.isSyncedFromAttendance ? ' • Presensi Realtime' : ' • Kuota'})`,
+                };
+              }),
             }}
             onChange={(key, value, field) => {
               if (!field.isSystem) {
@@ -1283,14 +1728,72 @@ export const DistributionModule: React.FC = () => {
                 }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
               >
-                {institutions.map(inst => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.name} ({inst.totalPortions} Porsi • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
-                  </option>
-                ))}
+                {institutions.map(inst => {
+                  const synced = resolveDailyPortions(inst.id, deliveryForm.date, inst.smallPortions, inst.largePortions);
+                  return (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name} ({synced.totalPortions} Porsi • K: {synced.smallPortions}, B: {synced.largePortions}
+                      {synced.isSyncedFromAttendance ? ' • Presensi Realtime' : ' • Kuota'})
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
+
+          {/* Realtime Attendance Sync Info Card inside Delivery Modal */}
+          {(() => {
+            const modalSync = resolveDailyPortions(deliveryForm.institutionId, deliveryForm.date);
+            return (
+              <div className={`p-3 rounded-xl border text-xs space-y-2 ${
+                modalSync.isSyncedFromAttendance
+                  ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+                  : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+              }`}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="font-bold flex items-center gap-1.5 text-slate-900 dark:text-white">
+                    <UserCheck className={`w-4 h-4 ${modalSync.isSyncedFromAttendance ? 'text-emerald-600' : 'text-amber-600'}`} />
+                    <span>Data Presensi Kehadiran Siswa Harian ({deliveryForm.date})</span>
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    modalSync.isSyncedFromAttendance
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200'
+                  }`}>
+                    {modalSync.isSyncedFromAttendance
+                      ? `Realtime Presensi • ${modalSync.attendanceRate}% Hadir`
+                      : 'Belum Ada Input Presensi (Pakai Kuota Terdaftar)'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[10px] text-slate-500">Terdaftar</div>
+                    <div className="font-mono font-bold text-slate-800 dark:text-slate-100">
+                      {modalSync.totalRegistered} (K:{modalSync.registeredSmall} / B:{modalSync.registeredLarge})
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[10px] text-slate-500">Tidak Hadir</div>
+                    <div className="font-mono font-bold text-rose-600">
+                      -{modalSync.totalAbsent} (K:{modalSync.absentSmall} / B:{modalSync.absentLarge})
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-700">
+                    <div className="text-[10px] text-emerald-700 dark:text-emerald-400">Porsi Kirim Aktual</div>
+                    <div className="font-mono font-black text-blue-900 dark:text-sky-400">
+                      {modalSync.totalPortions} Boks (K:{modalSync.smallPortions} / B:{modalSync.largePortions})
+                    </div>
+                  </div>
+                </div>
+                {modalSync.attendanceRecord && (
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Pencatat: <strong>{modalSync.attendanceRecord.recordedBy}</strong>
+                    {modalSync.attendanceRecord.notes ? ` • "${modalSync.attendanceRecord.notes}"` : ''}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -1461,7 +1964,16 @@ export const DistributionModule: React.FC = () => {
                 type="date"
                 required
                 value={returnForm.date}
-                onChange={e => setReturnForm(f => ({ ...f, date: e.target.value }))}
+                onChange={e => {
+                  const nextDate = e.target.value;
+                  const synced = resolveDailyPortions(returnForm.institutionId, nextDate);
+                  setReturnForm(f => ({
+                    ...f,
+                    date: nextDate,
+                    smallPortions: synced.smallPortions,
+                    largePortions: synced.largePortions,
+                  }));
+                }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
               />
             </div>
@@ -1471,21 +1983,26 @@ export const DistributionModule: React.FC = () => {
                 required
                 value={returnForm.institutionId}
                 onChange={e => {
-                  const inst = institutions.find(i => i.id === e.target.value);
+                  const nextInstId = e.target.value;
+                  const synced = resolveDailyPortions(nextInstId, returnForm.date);
                   setReturnForm(f => ({
                     ...f,
-                    institutionId: e.target.value,
-                    smallPortions: inst?.smallPortions || 0,
-                    largePortions: inst?.largePortions || 0,
+                    institutionId: nextInstId,
+                    smallPortions: synced.smallPortions,
+                    largePortions: synced.largePortions,
                   }));
                 }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
               >
-                {institutions.map(inst => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.name} ({inst.totalPortions} Ompreng • Kecil: {inst.smallPortions}, Besar: {inst.largePortions})
-                  </option>
-                ))}
+                {institutions.map(inst => {
+                  const synced = resolveDailyPortions(inst.id, returnForm.date, inst.smallPortions, inst.largePortions);
+                  return (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.name} ({synced.totalPortions} Ompreng • Kecil: {synced.smallPortions}, Besar: {synced.largePortions}
+                      {synced.isSyncedFromAttendance ? ' • Presensi Realtime' : ''})
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>

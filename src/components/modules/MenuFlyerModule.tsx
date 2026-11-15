@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import { MenuItem, PortioningInspectionRecord, FlyerTemplateId, FlyerSizeId } from '../../types';
 import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
-import { formatIndonesianDate } from '../../lib/exportUtils';
+import { formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
 import { toPng } from 'html-to-image';
 import {
   Download,
@@ -229,6 +229,7 @@ export const MenuFlyerModule: React.FC = () => {
         quality: 0.98,
         pixelRatio: 2.5, // High resolution output
         cacheBust: true,
+        skipFonts: true,
       });
 
       const filename = `Flyer-Menu-MBG-${activeMenu.menuCode}-${activeMenu.date}-${size}.png`;
@@ -243,9 +244,13 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Handle Native Print
+  // Handle Print (uses resilient print + PDF fallback)
   const handlePrint = () => {
-    window.print();
+    triggerPrint({
+      targetSelector: '.flyer-print-target',
+      fileName: `Flyer_Menu_${activeMenu.menuCode}_${activeMenu.date}`,
+      title: `Flyer Menu MBG ${activeMenu.menuCode}`,
+    });
   };
 
   // Handle Copy Caption Text for WhatsApp / Social Media
@@ -877,19 +882,19 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
           </div>
 
           {/* Scaled Preview Frame Container */}
-          <div className="overflow-x-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950 rounded-2xl flex justify-center items-start shadow-inner">
+          <div className="overflow-x-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950 rounded-2xl flex justify-center items-start shadow-inner print:p-0 print:bg-white print:shadow-none print:overflow-visible">
             <div
               style={{
                 transform: `scale(${zoomScale})`,
                 transformOrigin: 'top center',
                 transition: 'transform 0.2s ease',
               }}
-              className="shrink-0"
+              className="shrink-0 flyer-print-scale-wrapper"
             >
               {/* THE FLYER CANVAS ITSELF */}
               <div
                 ref={flyerRef}
-                className={`bg-white text-slate-900 shadow-2xl overflow-hidden relative ${containerDimensions[size]} ${
+                className={`flyer-print-target bg-white text-slate-900 shadow-2xl overflow-hidden relative ${containerDimensions[size]} ${
                   template === 'modern_bgn'
                     ? 'font-sans'
                     : template === 'nutri_infographic'

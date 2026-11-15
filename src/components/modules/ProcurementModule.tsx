@@ -1141,6 +1141,7 @@ export const ProcurementModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari kode anggaran, barang, atau keterangan..."
             searchKeys={['budgetCode', 'itemName', 'category', 'notes', 'periodMonth']}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'budgetCode',
@@ -1386,6 +1387,7 @@ export const ProcurementModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari nomor PO, supplier, atau bahan..."
             searchKeys={['poNumber', 'supplierName', 'status', 'qcStatus', 'notes']}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'poNumber',
@@ -1661,6 +1663,7 @@ export const ProcurementModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari no PO, barang, supplier, pemeriksa, keterangan..."
             searchKeys={['poNumber', 'supplierName', 'itemName', 'inspectorName', 'condition', 'qualityGrade', 'notes']}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'poNumber',

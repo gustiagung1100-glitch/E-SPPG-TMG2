@@ -43,7 +43,8 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     inventory,
     purchaseOrders,
     distributionLogs,
-    financialTransactions,
+    pettyCashOpeningBalance,
+    pettyCashTransactions,
     volunteerAttendance,
     officialLetters,
     kitchenProgress,
@@ -91,16 +92,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
   const menuToday = menuItems.find(m => m.date === todayDateStr) || menuItems[0];
   const activeMenuCount = menuItems.length;
 
-  // Financial Stats
-  const totalRAB = totalRecipients * sppgConfig.smallPortionBudget; // Rp 42.750.000 / hari
+  // Financial Stats (Kas Petty Cash & Pengadaan)
+  const totalRAB = totalRecipients * sppgConfig.smallPortionBudget;
   const totalPOAmount = purchaseOrders.reduce((acc, p) => acc + p.totalAmount, 0);
-  const totalIncome = financialTransactions
+  const pettyCashIncome = pettyCashTransactions
     .filter(t => t.type === 'Pemasukan')
     .reduce((acc, t) => acc + t.amount, 0);
-  const totalExpense = financialTransactions
+  const pettyCashExpense = pettyCashTransactions
     .filter(t => t.type === 'Pengeluaran')
     .reduce((acc, t) => acc + t.amount, 0);
-  const cashBalance = totalIncome - totalExpense;
+  const pettyCashEndingBalance = pettyCashOpeningBalance + pettyCashIncome - pettyCashExpense;
 
   // Stock
   const totalStockItems = inventory.length;
@@ -808,20 +809,20 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
         </div>
       </div>
 
-      {/* Row 3: Financial & Rantai Pasok Overview */}
+      {/* Row 3: Petty Cash, Pengadaan & Insentif Overview */}
       <div>
         <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
-          2. Keuangan, Pengadaan & Gudang Bahan Pangan
+          2. Kas Petty Cash, Pengadaan &amp; Gudang Bahan Pangan
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <DashboardCard
-            title="Total RAB Harian"
-            value={formatRupiah(totalRAB)}
-            subtitle="Plafon BGN 2.850 Porsi x Rp 15rb"
+            title="Saldo Awal Petty Cash"
+            value={formatRupiah(pettyCashOpeningBalance)}
+            subtitle={`Plafon RAB Harian: ${formatRupiah(totalRAB)}`}
             icon={<Wallet className="w-5 h-5 text-[#142B4A] dark:text-sky-400" />}
-            badge={{ text: 'Plafon', color: 'blue' }}
+            badge={{ text: 'Saldo Awal', color: 'blue' }}
             accentColor="navy"
-            onClick={() => onNavigate('finance')}
+            onClick={() => onNavigate('petty_cash')}
           />
           <DashboardCard
             title="Total Purchase Order"
@@ -833,31 +834,31 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             onClick={() => onNavigate('procurement')}
           />
           <DashboardCard
-            title="Pemasukan Kas"
-            value={formatRupiah(totalIncome)}
-            subtitle="Dana Termin MBG BGN diterima"
+            title="Pemasukan Petty Cash"
+            value={formatRupiah(pettyCashIncome)}
+            subtitle="Top up & pengisian kas kecil"
             icon={<Coins className="w-5 h-5 text-[#16A34A]" />}
-            badge={{ text: 'Termin I', color: 'emerald' }}
+            badge={{ text: 'Kas Masuk', color: 'emerald' }}
             accentColor="emerald"
-            onClick={() => onNavigate('finance')}
+            onClick={() => onNavigate('petty_cash')}
           />
           <DashboardCard
-            title="Pengeluaran Realisasi"
-            value={formatRupiah(totalExpense)}
-            subtitle="Bahan baku, operasional, insentif"
+            title="Pengeluaran Petty Cash"
+            value={formatRupiah(pettyCashExpense)}
+            subtitle="Operasional, bahan & insentif"
             icon={<Wallet className="w-5 h-5 text-[#DC2626]" />}
-            badge={{ text: 'Tervalidasi', color: 'rose' }}
+            badge={{ text: 'Kas Keluar', color: 'rose' }}
             accentColor="rose"
-            onClick={() => onNavigate('finance')}
+            onClick={() => onNavigate('petty_cash')}
           />
           <DashboardCard
-            title="Saldo Kas Riil"
-            value={formatRupiah(cashBalance)}
-            subtitle="Likuiditas kas operasional aman"
+            title="Saldo Akhir Petty Cash"
+            value={formatRupiah(pettyCashEndingBalance)}
+            subtitle="Saldo Awal + Masuk − Keluar"
             icon={<Wallet className="w-5 h-5 text-[#0F766E]" />}
-            badge={{ text: 'Surplus', color: 'emerald' }}
+            badge={{ text: pettyCashEndingBalance >= 0 ? 'Aman' : 'Defisit', color: pettyCashEndingBalance >= 0 ? 'emerald' : 'rose' }}
             accentColor="sky"
-            onClick={() => onNavigate('finance')}
+            onClick={() => onNavigate('petty_cash')}
           />
         </div>
       </div>

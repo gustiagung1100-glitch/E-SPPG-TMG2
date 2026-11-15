@@ -25,7 +25,9 @@ import { ProcurementModule } from './components/modules/ProcurementModule';
 import { InventoryModule } from './components/modules/InventoryModule';
 import { ProductionModule } from './components/modules/ProductionModule';
 import { DistributionModule } from './components/modules/DistributionModule';
-import { FinanceModule } from './components/modules/FinanceModule';
+import { PICIncentiveModule } from './components/modules/PICIncentiveModule';
+import { VolunteerIncentiveModule } from './components/modules/VolunteerIncentiveModule';
+import { PettyCashModule } from './components/modules/PettyCashModule';
 import { VolunteersModule } from './components/modules/VolunteersModule';
 import { LettersModule } from './components/modules/LettersModule';
 import { ReportsModule } from './components/modules/ReportsModule';
@@ -44,7 +46,9 @@ const moduleTitles: Record<ModuleKey, string> = {
   inventory: 'Gudang & Stok Bahan Pangan',
   production: 'Dapur & Produksi MBG',
   distribution: 'Distribusi & Armada Pengiriman',
-  finance: 'Keuangan, RAB & Arus Kas',
+  pic_incentives: 'Insentif PIC Lembaga Penerima Manfaat',
+  volunteer_incentives: 'Insentif Harian Relawan',
+  petty_cash: 'Kas Petty Cash Operasional',
   volunteers: 'Relawan & Presensi SDM',
   letters: 'Tata Persuratan & SPK',
   reports: 'Dokumentasi & Laporan BGN',
@@ -143,8 +147,12 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
         return <ProductionModule />;
       case 'distribution':
         return <DistributionModule />;
-      case 'finance':
-        return <FinanceModule />;
+      case 'pic_incentives':
+        return <PICIncentiveModule />;
+      case 'volunteer_incentives':
+        return <VolunteerIncentiveModule />;
+      case 'petty_cash':
+        return <PettyCashModule />;
       case 'volunteers':
         return <VolunteersModule />;
       case 'letters':

@@ -69,21 +69,31 @@ table tr {
   aside,
   header,
   footer,
+  nav,
   .no-print,
-  button,
+  .print\:hidden,
+  button:not(.print-keep),
   .toast-container {
     display: none !important;
   }
 
-  body {
-    background: white !important;
-    color: black !important;
+  html,
+  body,
+  html.dark,
+  html.dark body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    color-scheme: light !important;
+    height: auto !important;
+    overflow: visible !important;
   }
 
   main {
     max-width: 100% !important;
+    width: 100% !important;
     padding: 0 !important;
     margin: 0 !important;
+    overflow: visible !important;
   }
 
   .print-area {
@@ -91,6 +101,31 @@ table tr {
     width: 100% !important;
     box-shadow: none !important;
     border: none !important;
+    overflow: visible !important;
+  }
+
+  /* Ensure open modals unclip and isolate cleanly during print */
+  body:has([data-print-modal="true"]) #root *:not(:has([data-print-modal="true"])):not([data-print-modal="true"]):not([data-print-modal="true"] *) {
+    display: none !important;
+  }
+
+  [data-print-modal="true"],
+  [data-print-modal="true"] > div,
+  [data-print-modal-body="true"] {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    display: block !important;
   }
 
   body:has(.bast-print-sheet) #root *:not(:has(.bast-print-sheet)):not(.bast-print-sheet):not(.bast-print-sheet *) {
@@ -103,6 +138,22 @@ table tr {
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  body:has(.flyer-print-target) #root *:not(:has(.flyer-print-target)):not(.flyer-print-target):not(.flyer-print-target *) {
+    display: none !important;
+  }
+
+  .flyer-print-scale-wrapper {
+    transform: none !important;
+    width: 100% !important;
+  }
+
+  .flyer-print-target {
+    box-shadow: none !important;
+    margin: 0 auto !important;
   }
 }
 

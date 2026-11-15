@@ -22,6 +22,8 @@ import {
   Store,
   PackageCheck,
   Sparkles,
+  HandCoins,
+  Coins,
   X,
 } from 'lucide-react';
 import { SPPGLogo } from '../common/OfficialLogos';
@@ -184,8 +186,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'AKUNTANSI & SDM',
       items: [
         {
-          key: 'finance',
-          label: 'Keuangan, RAB & Kas',
+          key: 'pic_incentives',
+          label: 'Insentif PIC Lembaga',
+          icon: <HandCoins className="w-4 h-4 shrink-0" />,
+        },
+        {
+          key: 'volunteer_incentives',
+          label: 'Insentif Relawan',
+          icon: <Coins className="w-4 h-4 shrink-0" />,
+        },
+        {
+          key: 'petty_cash',
+          label: 'Kas Petty Cash',
           icon: <Wallet className="w-4 h-4 shrink-0" />,
         },
         {

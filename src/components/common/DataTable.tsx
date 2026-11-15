@@ -113,9 +113,9 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] overflow-hidden print:overflow-visible print:shadow-none print:border-slate-300">
       {/* Top Header & Toolbar */}
-      <div className="p-5 border-b border-[#E2E8F0] dark:border-slate-800">
+      <div className="p-5 border-b border-[#E2E8F0] dark:border-slate-800 print:p-2 print:border-slate-300">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             {title && (
@@ -131,7 +131,7 @@ export function DataTable<T extends Record<string, any>>({
           </div>
 
           {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
             {actions}
             {onExportExcel && (
               <button
@@ -170,7 +170,7 @@ export function DataTable<T extends Record<string, any>>({
         </div>
 
         {/* Search & Custom Filter Bar */}
-        <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
           <div className="relative flex-1 max-w-md">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
             <input
@@ -202,7 +202,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Table Element */}
-      <div className="overflow-x-auto max-h-[calc(100vh-22rem)] scrollbar-thin">
+      <div className="overflow-x-auto max-h-[calc(100vh-22rem)] scrollbar-thin print:max-h-none print:overflow-visible">
         <table className="w-full text-left text-xs tabular-nums">
           <thead className="sticky top-0 z-10 bg-[#F4F7FA]/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-[#E2E8F0] dark:border-slate-700/80 text-[#1F2937] dark:text-slate-200 uppercase font-bold text-[10px] tracking-wider">
             <tr>
@@ -301,7 +301,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-4 border-t border-[#E2E8F0] dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-slate-400">
+      <div className="p-4 border-t border-[#E2E8F0] dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-slate-400 print:hidden">
         <div className="flex items-center gap-3">
           <span>
             Menampilkan {totalItems === 0 ? 0 : startIndex + 1} -{' '}

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
 import { VolunteerAttendance, VolunteerAbsenceRecord, DynamicFormId } from '../../types';
 import {
@@ -78,6 +79,7 @@ export const VolunteersModule: React.FC = () => {
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [selectedAbsenceForReject, setSelectedAbsenceForReject] = useState<VolunteerAbsenceRecord | null>(null);
   const [rejectionReasonText, setRejectionReasonText] = useState('');
+  const [confirmDeleteAbsence, setConfirmDeleteAbsence] = useState<VolunteerAbsenceRecord | null>(null);
 
   // Attendance Form State
   const [attFormData, setAttFormData] = useState<Omit<VolunteerAttendance, 'id'>>({
@@ -456,11 +458,7 @@ export const VolunteersModule: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => {
-              if (window.confirm(`Hapus catatan ketidakhadiran ${abs.volunteerName}?`)) {
-                deleteVolunteerAbsence(abs.id);
-              }
-            }}
+            onClick={() => setConfirmDeleteAbsence(abs)}
             title="Hapus Catatan"
             className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-600 dark:bg-slate-800 dark:text-slate-400 transition-colors"
           >
@@ -1143,6 +1141,22 @@ export const VolunteersModule: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Confirmation Dialog: Hapus Catatan Ketidakhadiran Relawan */}
+      <ConfirmDialog
+        isOpen={Boolean(confirmDeleteAbsence)}
+        onClose={() => setConfirmDeleteAbsence(null)}
+        onConfirm={() => {
+          if (confirmDeleteAbsence) {
+            deleteVolunteerAbsence(confirmDeleteAbsence.id);
+            setConfirmDeleteAbsence(null);
+          }
+        }}
+        title="Hapus Catatan Ketidakhadiran?"
+        message={`Apakah Anda yakin ingin menghapus catatan ketidakhadiran relawan "${confirmDeleteAbsence?.volunteerName || ''}" pada tanggal ${confirmDeleteAbsence?.date || ''}?`}
+        confirmLabel="Ya, Hapus Catatan"
+        isDestructive
+      />
     </div>
   );
 };

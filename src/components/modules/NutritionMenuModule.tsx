@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../lib/store';
+import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -74,6 +75,9 @@ import {
   Percent,
   RefreshCw,
   Camera,
+  ChevronLeft,
+  X,
+  Star,
 } from 'lucide-react';
 
 type SubModuleTab =
@@ -229,10 +233,67 @@ export const NutritionMenuModule: React.FC = () => {
   const [nutritionTarget, setNutritionTarget] = useState<NutritionTargetConfig>(defaultNutritionTarget);
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
 
-  // Division Jobdesks
-  const [jobdesks, setJobdesks] = useState<DivisionJobdesk[]>(defaultDivisionJobdesks);
+  // Division Jobdesks (Persisted with multi-photo support)
+  const [jobdesks, setJobdesks] = useState<DivisionJobdesk[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_division_jobdesks_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: DivisionJobdesk) => {
+            const photos =
+              Array.isArray(item.photoUrls) && item.photoUrls.length > 0
+                ? item.photoUrls.filter(Boolean)
+                : item.photoUrl
+                ? [item.photoUrl]
+                : [];
+            return {
+              ...item,
+              photoUrl: photos[0] || item.photoUrl || '',
+              photoUrls: photos,
+            };
+          });
+        }
+      }
+    } catch {
+      // Fallback to defaults
+    }
+    return defaultDivisionJobdesks;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('esppg_division_jobdesks_v1', JSON.stringify(jobdesks));
+    } catch {
+      // Ignore storage quota errors silently
+    }
+  }, [jobdesks]);
+
   const [isJobdeskModalOpen, setIsJobdeskModalOpen] = useState(false);
   const [selectedJobdesk, setSelectedJobdesk] = useState<DivisionJobdesk | null>(null);
+  const [jobdeskEditForm, setJobdeskEditForm] = useState<{
+    divisionName: DivisionJobdesk['divisionName'];
+    ingredientsHandled: string;
+    tasks: string;
+    photoCaption: string;
+    picName: string;
+    status: DivisionJobdesk['status'];
+    photoUrls: string[];
+  }>({
+    divisionName: 'Relawan Div. Persiapan',
+    ingredientsHandled: '',
+    tasks: '',
+    photoCaption: '',
+    picName: '',
+    status: 'Belum Mulai',
+    photoUrls: [],
+  });
+  const [photoLightbox, setPhotoLightbox] = useState<{
+    divisionName: string;
+    photos: string[];
+    index: number;
+    caption?: string;
+  } | null>(null);
 
   // Modal State for Adding Ingredient to Menu
   const [isAddIngredientModalOpen, setIsAddIngredientModalOpen] = useState(false);
@@ -680,20 +741,135 @@ export const NutritionMenuModule: React.FC = () => {
     exportToExcel(dataToExport, 'Daftar_Menu_Makanan_MBG_SPPG_TMG2', 'Daftar Menu');
   };
 
-  // Jobdesk Photo Upload
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, jobdeskId: string) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        setJobdesks(prev =>
-          prev.map(j => (j.id === jobdeskId ? { ...j, photoUrl: result } : j))
-        );
-        addToast('success', 'Foto Terunggah', 'Foto contoh plating/SOP divisi berhasil diperbarui.');
-      };
-      reader.readAsDataURL(file);
+  const getJobdeskPhotos = (job: DivisionJobdesk): string[] => {
+    if (Array.isArray(job.photoUrls) && job.photoUrls.length > 0) {
+      return job.photoUrls.filter(Boolean);
     }
+    return job.photoUrl ? [job.photoUrl] : [];
+  };
+
+  // Jobdesk Multi-Photo Upload
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, jobdeskId: string) => {
+    const targetJob = jobdesks.find(j => j.id === jobdeskId);
+    await processMultipleImageUploads(
+      e,
+      dataUrls => {
+        setJobdesks(prev =>
+          prev.map(j => {
+            if (j.id !== jobdeskId) return j;
+            const existing = getJobdeskPhotos(j);
+            const nextPhotos = [...existing, ...dataUrls];
+            return {
+              ...j,
+              photoUrls: nextPhotos,
+              photoUrl: nextPhotos[0] || '',
+            };
+          })
+        );
+        const currentCount = targetJob ? getJobdeskPhotos(targetJob).length : 0;
+        addToast(
+          'success',
+          `${dataUrls.length} Foto Ditambahkan`,
+          `${dataUrls.length} foto dokumentasi ${targetJob?.divisionName || 'divisi'} berhasil diunggah (total ${currentCount + dataUrls.length} foto).`
+        );
+      },
+      msg => addToast('error', 'Gagal Unggah Foto SOP', msg)
+    );
+  };
+
+  const handleRemoveJobdeskPhoto = (jobdeskId: string, photoIndex: number) => {
+    setJobdesks(prev =>
+      prev.map(j => {
+        if (j.id !== jobdeskId) return j;
+        const existing = getJobdeskPhotos(j);
+        const nextPhotos = existing.filter((_, idx) => idx !== photoIndex);
+        return {
+          ...j,
+          photoUrls: nextPhotos,
+          photoUrl: nextPhotos[0] || '',
+        };
+      })
+    );
+    addToast('info', 'Foto Dihapus', 'Foto dokumentasi SOP berhasil dihapus dari galeri divisi.');
+  };
+
+  const handleSetPrimaryJobdeskPhoto = (jobdeskId: string, photoIndex: number) => {
+    setJobdesks(prev =>
+      prev.map(j => {
+        if (j.id !== jobdeskId) return j;
+        const existing = getJobdeskPhotos(j);
+        const chosen = existing[photoIndex];
+        if (!chosen) return j;
+        const nextPhotos = [chosen, ...existing.filter((_, idx) => idx !== photoIndex)];
+        return {
+          ...j,
+          photoUrls: nextPhotos,
+          photoUrl: chosen,
+        };
+      })
+    );
+    addToast('success', 'Foto Utama Diperbarui', 'Foto pilihan dijadikan sampul utama SOP divisi.');
+  };
+
+  const openJobdeskEditModal = (job: DivisionJobdesk) => {
+    const existingPhotos = getJobdeskPhotos(job);
+    setSelectedJobdesk(job);
+    setJobdeskEditForm({
+      divisionName: job.divisionName,
+      ingredientsHandled: job.ingredientsHandled,
+      tasks: job.tasks,
+      photoCaption: job.photoCaption || '',
+      picName: job.picName,
+      status: job.status,
+      photoUrls: existingPhotos,
+    });
+    setIsJobdeskModalOpen(true);
+  };
+
+  const handleModalMultiPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await processMultipleImageUploads(
+      e,
+      dataUrls => {
+        setJobdeskEditForm(prev => ({
+          ...prev,
+          photoUrls: [...prev.photoUrls, ...dataUrls],
+        }));
+        addToast(
+          'success',
+          `${dataUrls.length} Foto Ditambahkan`,
+          'Foto berhasil ditambahkan ke daftar unggahan SOP. Klik Simpan Perubahan SOP untuk menerapkan.'
+        );
+      },
+      msg => addToast('error', 'Gagal Unggah Foto SOP', msg)
+    );
+  };
+
+  const handleSaveJobdeskEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedJobdesk) return;
+    const cleanedPhotos = jobdeskEditForm.photoUrls.filter(Boolean);
+    setJobdesks(prev =>
+      prev.map(j =>
+        j.id === selectedJobdesk.id
+          ? {
+              ...j,
+              ingredientsHandled: jobdeskEditForm.ingredientsHandled.trim(),
+              tasks: jobdeskEditForm.tasks.trim(),
+              photoCaption: jobdeskEditForm.photoCaption.trim(),
+              picName: jobdeskEditForm.picName.trim(),
+              status: jobdeskEditForm.status,
+              photoUrls: cleanedPhotos,
+              photoUrl: cleanedPhotos[0] || '',
+            }
+          : j
+      )
+    );
+    setIsJobdeskModalOpen(false);
+    addToast(
+      'success',
+      'SOP & Galeri Foto Disimpan',
+      `Pembaruan SOP ${selectedJobdesk.divisionName} dengan ${cleanedPhotos.length} foto dokumentasi telah disimpan.`
+    );
   };
 
   // Export PLOG Report to PDF
@@ -1740,93 +1916,250 @@ export const NutritionMenuModule: React.FC = () => {
             </button>
           </div>
 
-          {/* Grid of Division Jobdesks with Photo Upload */}
+          {/* Grid of Division Jobdesks with Multi-Photo Upload & SOP Edit */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {jobdesks.map(job => (
-              <div
-                key={job.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs flex flex-col"
-              >
-                {/* Division Header */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                      {job.divisionName}
-                    </h4>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      job.status === 'Selesai Sesuai Standar'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                        : job.status === 'Sedang Berjalan'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                    }`}
-                  >
-                    {job.status}
-                  </span>
-                </div>
+            {jobdesks.map(job => {
+              const photos = getJobdeskPhotos(job);
+              const coverPhoto = photos[0] || '';
+              const isPersiapan = job.divisionName === 'Relawan Div. Persiapan';
 
-                {/* Photo Example Container */}
-                <div className="relative h-48 bg-slate-100 dark:bg-slate-800 overflow-hidden group">
-                  <img
-                    src={job.photoUrl}
-                    alt={job.divisionName}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex items-end p-3">
-                    <p className="text-white text-[11px] leading-snug drop-shadow-xs italic">
-                      {job.photoCaption || 'Foto contoh standar kerja divisi'}
-                    </p>
-                  </div>
-
-                  {/* Interactive Upload Button Overlay */}
-                  <label className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-black/60 hover:bg-black/80 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer backdrop-blur-xs transition">
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Ganti Foto</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => handlePhotoUpload(e, job.id)}
-                    />
-                  </label>
-                </div>
-
-                {/* Jobdesk Content */}
-                <div className="p-4 space-y-3 flex-1 flex flex-col justify-between text-xs">
-                  <div className="space-y-2">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400">
-                        Bahan yang Ditangani:
+              return (
+                <div
+                  key={job.id}
+                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs flex flex-col"
+                >
+                  {/* Division Header */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0" />
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                        {job.divisionName}
+                      </h4>
+                      {isPersiapan && (
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                          Multi-Foto (&gt;1)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          job.status === 'Selesai Sesuai Standar'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            : job.status === 'Sedang Berjalan'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        {job.status}
                       </span>
-                      <div className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">
-                        {job.ingredientsHandled}
+                      <button
+                        type="button"
+                        onClick={() => openJobdeskEditModal(job)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition"
+                        title="Edit SOP & Kelola Galeri Foto"
+                      >
+                        <Edit className="w-3 h-3 text-blue-700 dark:text-sky-400" />
+                        <span>SOP Edit</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Photo Example Cover Container */}
+                  <div className="relative h-48 bg-slate-100 dark:bg-slate-800 overflow-hidden group">
+                    {coverPhoto ? (
+                      <img
+                        src={coverPhoto}
+                        alt={job.divisionName}
+                        onClick={() =>
+                          setPhotoLightbox({
+                            divisionName: job.divisionName,
+                            photos,
+                            index: 0,
+                            caption: job.photoCaption,
+                          })
+                        }
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-1.5">
+                        <Image className="w-8 h-8 opacity-50" />
+                        <span>Belum ada foto SOP terunggah</span>
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent pointer-events-none flex items-end p-3">
+                      <p className="text-white text-[11px] leading-snug drop-shadow-xs italic line-clamp-2">
+                        {job.photoCaption || 'Foto contoh standar kerja divisi'}
+                      </p>
+                    </div>
+
+                    {/* Top-Left Photo Count Badge */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (photos.length > 0) {
+                          setPhotoLightbox({
+                            divisionName: job.divisionName,
+                            photos,
+                            index: 0,
+                            caption: job.photoCaption,
+                          });
+                        }
+                      }}
+                      className="absolute top-2 left-2 px-2 py-1 rounded-lg bg-black/60 hover:bg-black/80 text-white text-[10px] font-bold flex items-center gap-1 backdrop-blur-xs transition"
+                    >
+                      <Image className="w-3 h-3" />
+                      <span>{photos.length} Foto</span>
+                    </button>
+
+                    {/* Top-Right Multi-Photo Upload Overlay */}
+                    <label className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-black/65 hover:bg-black/85 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer backdrop-blur-xs transition">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>+ Tambah Foto</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={e => handlePhotoUpload(e, job.id)}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Multi-Photo Gallery Strip */}
+                  <div className="px-4 py-2.5 bg-slate-50/80 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Galeri Dokumentasi SOP ({photos.length} Gambar)
+                      </span>
+                      {photos.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPhotoLightbox({
+                              divisionName: job.divisionName,
+                              photos,
+                              index: 0,
+                              caption: job.photoCaption,
+                            })
+                          }
+                          className="text-[10px] font-bold text-blue-700 dark:text-sky-400 hover:underline flex items-center gap-1"
+                        >
+                          <Eye className="w-3 h-3" />
+                          Lihat Semua
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {photos.map((photoSrc, idx) => (
+                        <div
+                          key={`${job.id}-photo-${idx}`}
+                          className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0 group/thumb bg-slate-100 dark:bg-slate-800"
+                        >
+                          <img
+                            src={photoSrc}
+                            alt={`${job.divisionName} ${idx + 1}`}
+                            onClick={() =>
+                              setPhotoLightbox({
+                                divisionName: job.divisionName,
+                                photos,
+                                index: idx,
+                                caption: job.photoCaption,
+                              })
+                            }
+                            className="w-full h-full object-cover cursor-pointer"
+                          />
+                          {idx === 0 && (
+                            <span className="absolute bottom-0 inset-x-0 bg-blue-900/85 text-white text-[8px] font-bold text-center py-0.5 leading-none">
+                              Utama
+                            </span>
+                          )}
+                          <div className="absolute top-0.5 right-0.5 flex items-center gap-0.5 opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                            {idx !== 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetPrimaryJobdeskPhoto(job.id, idx)}
+                                title="Jadikan Foto Utama"
+                                className="w-4 h-4 rounded bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center shadow-xs"
+                              >
+                                <Star className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveJobdeskPhoto(job.id, idx)}
+                              title="Hapus Foto"
+                              className="w-4 h-4 rounded bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center shadow-xs"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      <label
+                        title="Unggah satu atau banyak foto sekaligus"
+                        className="w-14 h-14 rounded-lg border-2 border-dashed border-sky-400/70 dark:border-sky-600/70 hover:border-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40 flex flex-col items-center justify-center gap-0.5 text-sky-700 dark:text-sky-400 cursor-pointer shrink-0 transition"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span className="text-[8px] font-bold text-center leading-tight px-0.5">
+                          Upload
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          onChange={e => handlePhotoUpload(e, job.id)}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Jobdesk Content */}
+                  <div className="p-4 space-y-3 flex-1 flex flex-col justify-between text-xs">
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                          Bahan yang Ditangani:
+                        </span>
+                        <div className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">
+                          {job.ingredientsHandled}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400">
+                          Tugas & Prosedur Spesifik:
+                        </span>
+                        <div className="text-slate-600 dark:text-slate-300 mt-0.5 whitespace-pre-line leading-relaxed font-sans bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                          {job.tasks}
+                        </div>
                       </div>
                     </div>
 
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400">
-                        Tugas & Prosedur Spesifik:
-                      </span>
-                      <div className="text-slate-600 dark:text-slate-300 mt-0.5 whitespace-pre-line leading-relaxed font-sans bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                        {job.tasks}
+                    <div className="border-t border-slate-100 dark:border-slate-800 pt-2.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                      <div className="truncate">
+                        Koordinator: <strong>{job.picName}</strong>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openJobdeskEditModal(job)}
+                          className="text-[10px] font-bold text-blue-800 dark:text-sky-400 hover:underline"
+                        >
+                          Edit SOP & Foto
+                        </button>
+                        <span className="text-[10px] font-mono text-sky-600">
+                          {currentMenu?.menuCode}
+                        </span>
                       </div>
                     </div>
                   </div>
-
-                  <div className="border-t border-slate-100 dark:border-slate-800 pt-2 flex items-center justify-between text-[11px] text-slate-500">
-                    <div>
-                      Koordinator: <strong>{job.picName}</strong>
-                    </div>
-                    <div className="text-[10px] font-mono text-sky-600">
-                      Menu: {currentMenu?.menuCode}
-                    </div>
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -2133,6 +2466,317 @@ export const NutritionMenuModule: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: SOP EDIT & KELOLA MULTI-FOTO JOBDESK DIVISI */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={isJobdeskModalOpen}
+        onClose={() => setIsJobdeskModalOpen(false)}
+        title={`SOP Edit & Galeri Foto — ${jobdeskEditForm.divisionName}`}
+        maxWidth="2xl"
+      >
+        <form onSubmit={handleSaveJobdeskEdit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Koordinator / PIC Divisi
+              </label>
+              <input
+                type="text"
+                required
+                value={jobdeskEditForm.picName}
+                onChange={e =>
+                  setJobdeskEditForm(prev => ({ ...prev, picName: e.target.value }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Status Pelaksanaan SOP
+              </label>
+              <select
+                value={jobdeskEditForm.status}
+                onChange={e =>
+                  setJobdeskEditForm(prev => ({
+                    ...prev,
+                    status: e.target.value as DivisionJobdesk['status'],
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              >
+                <option value="Belum Mulai">Belum Mulai</option>
+                <option value="Sedang Berjalan">Sedang Berjalan</option>
+                <option value="Selesai Sesuai Standar">Selesai Sesuai Standar</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Bahan / Objek yang Ditangani
+            </label>
+            <input
+              type="text"
+              required
+              value={jobdeskEditForm.ingredientsHandled}
+              onChange={e =>
+                setJobdeskEditForm(prev => ({
+                  ...prev,
+                  ingredientsHandled: e.target.value,
+                }))
+              }
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Tugas & Prosedur Spesifik (SOP)
+            </label>
+            <textarea
+              rows={4}
+              required
+              value={jobdeskEditForm.tasks}
+              onChange={e =>
+                setJobdeskEditForm(prev => ({ ...prev, tasks: e.target.value }))
+              }
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white leading-relaxed"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Keterangan Foto Standar SOP
+            </label>
+            <input
+              type="text"
+              value={jobdeskEditForm.photoCaption}
+              onChange={e =>
+                setJobdeskEditForm(prev => ({ ...prev, photoCaption: e.target.value }))
+              }
+              placeholder="Contoh: Pemotongan bahan sayur, penimbangan gramasi, sanitasi bahan..."
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          {/* Multi-Photo Upload Section inside SOP Edit */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h5 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-sky-600" />
+                  Galeri Foto Dokumentasi SOP ({jobdeskEditForm.photoUrls.length} Foto)
+                </h5>
+                <p className="text-[11px] text-slate-500">
+                  Dapat mengunggah lebih dari satu foto sekaligus (JPG, PNG, WebP, maks. 5 MB/foto).
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold cursor-pointer transition shrink-0">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload Banyak Foto</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleModalMultiPhotoUpload}
+                />
+              </label>
+            </div>
+
+            {jobdeskEditForm.photoUrls.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg">
+                Belum ada foto dokumentasi SOP. Klik &quot;Upload Banyak Foto&quot; di atas.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {jobdeskEditForm.photoUrls.map((photoSrc, idx) => (
+                  <div
+                    key={`modal-photo-${idx}`}
+                    className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 group"
+                  >
+                    <img
+                      src={photoSrc}
+                      alt={`SOP Foto ${idx + 1}`}
+                      onClick={() =>
+                        setPhotoLightbox({
+                          divisionName: jobdeskEditForm.divisionName,
+                          photos: jobdeskEditForm.photoUrls,
+                          index: idx,
+                          caption: jobdeskEditForm.photoCaption,
+                        })
+                      }
+                      className="w-full h-24 object-cover cursor-pointer"
+                    />
+                    {idx === 0 && (
+                      <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-blue-900/90 text-white text-[9px] font-bold">
+                        Foto Utama
+                      </span>
+                    )}
+                    <div className="p-1.5 flex items-center justify-between gap-1 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700">
+                      {idx !== 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setJobdeskEditForm(prev => {
+                              const chosen = prev.photoUrls[idx];
+                              if (!chosen) return prev;
+                              return {
+                                ...prev,
+                                photoUrls: [
+                                  chosen,
+                                  ...prev.photoUrls.filter((_, i) => i !== idx),
+                                ],
+                              };
+                            })
+                          }
+                          className="text-[10px] font-bold text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-0.5"
+                        >
+                          <Star className="w-3 h-3" />
+                          Utama
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-slate-500">
+                          Sampul #{idx + 1}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setJobdeskEditForm(prev => ({
+                            ...prev,
+                            photoUrls: prev.photoUrls.filter((_, i) => i !== idx),
+                          }))
+                        }
+                        className="text-[10px] font-bold text-rose-600 hover:underline flex items-center gap-0.5"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsJobdeskModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
+            >
+              Simpan Perubahan SOP &amp; Foto
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: LIGHTBOX GALERI FOTO SOP */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={Boolean(photoLightbox)}
+        onClose={() => setPhotoLightbox(null)}
+        title={
+          photoLightbox
+            ? `Galeri Foto SOP — ${photoLightbox.divisionName} (${photoLightbox.index + 1}/${photoLightbox.photos.length})`
+            : ''
+        }
+        maxWidth="3xl"
+      >
+        {photoLightbox && (
+          <div className="space-y-3">
+            <div className="relative rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center max-h-[60vh]">
+              <img
+                src={photoLightbox.photos[photoLightbox.index]}
+                alt={`${photoLightbox.divisionName} ${photoLightbox.index + 1}`}
+                className="max-h-[60vh] w-auto object-contain"
+              />
+              {photoLightbox.photos.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPhotoLightbox(prev =>
+                        prev
+                          ? {
+                              ...prev,
+                              index:
+                                (prev.index - 1 + prev.photos.length) %
+                                prev.photos.length,
+                            }
+                          : null
+                      )
+                    }
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white transition"
+                    title="Foto Sebelumnya"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPhotoLightbox(prev =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: (prev.index + 1) % prev.photos.length,
+                            }
+                          : null
+                      )
+                    }
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white transition"
+                    title="Foto Berikutnya"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {photoLightbox.caption && (
+              <p className="text-xs text-slate-600 dark:text-slate-300 italic">
+                {photoLightbox.caption}
+              </p>
+            )}
+
+            {photoLightbox.photos.length > 1 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {photoLightbox.photos.map((src, idx) => (
+                  <button
+                    key={`lightbox-thumb-${idx}`}
+                    type="button"
+                    onClick={() =>
+                      setPhotoLightbox(prev => (prev ? { ...prev, index: idx } : null))
+                    }
+                    className={`w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 transition ${
+                      idx === photoLightbox.index
+                        ? 'border-sky-500 ring-2 ring-sky-500/30'
+                        : 'border-slate-200 dark:border-slate-700 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <img
+                      src={src}
+                      alt={`Thumb ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

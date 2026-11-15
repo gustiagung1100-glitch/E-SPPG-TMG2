@@ -30,7 +30,9 @@ export type ModuleKey =
   | 'inventory'
   | 'production'
   | 'distribution'
-  | 'finance'
+  | 'pic_incentives'
+  | 'volunteer_incentives'
+  | 'petty_cash'
   | 'volunteers'
   | 'letters'
   | 'reports'
@@ -368,6 +370,7 @@ export interface DivisionJobdesk {
   ingredientsHandled: string;
   tasks: string;
   photoUrl: string;
+  photoUrls?: string[];
   photoCaption?: string;
   picName: string;
   status: 'Belum Mulai' | 'Sedang Berjalan' | 'Selesai Sesuai Standar';
@@ -595,6 +598,12 @@ export interface DistributionLog {
   photoEvidenceUrl?: string;
   bastNumber?: string;
   notes?: string;
+  registeredSmall?: number;
+  registeredLarge?: number;
+  absentSmall?: number;
+  absentLarge?: number;
+  attendanceLogId?: string;
+  portionSource?: 'presensi_realtime' | 'kuota_terdaftar';
   customFields?: Record<string, any>;
 }
 
@@ -850,6 +859,12 @@ export interface DistributionDeliveryRecord {
   status: 'Dalam Perjalanan' | 'Tiba di Lokasi' | 'Selesai Serah Terima';
   facilityTemps?: FacilityTemperatures;
   notes: string;
+  registeredSmall?: number;
+  registeredLarge?: number;
+  absentSmall?: number;
+  absentLarge?: number;
+  attendanceLogId?: string;
+  portionSource?: 'presensi_realtime' | 'kuota_terdaftar';
   customFields?: Record<string, any>;
 }
 
@@ -1069,6 +1084,105 @@ export interface DynamicFormSchema {
   updatedBy?: string;
   fields: DynamicFormField[];
 }
+
+// -------------------------------------------------------------
+// MODUL INSENTIF PIC LEMBAGA, INSENTIF RELAWAN & KAS PETTY CASH
+// -------------------------------------------------------------
+
+export type PICIncentiveRateMode = 'per_porsi' | 'flat_harian';
+export type IncentivePayoutStatus = 'Menunggu Pencairan' | 'Disetujui' | 'Sudah Dibayarkan';
+
+export interface PICIncentiveConfig {
+  rateMode: PICIncentiveRateMode;
+  ratePerPortion: number;
+  flatDailyRate: number;
+  minPortionThreshold: number;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface PICIncentivePayout {
+  id: string;
+  attendanceLogId: string;
+  date: string;
+  institutionId: string;
+  institutionName: string;
+  picName: string;
+  picPhone?: string;
+  bankName?: string;
+  accountNumber?: string;
+  bankAccountName?: string;
+  registeredPortions: number;
+  presentPortions: number;
+  rateMode: PICIncentiveRateMode;
+  unitRate: number;
+  totalIncentive: number;
+  status: IncentivePayoutStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  paidAt?: string;
+  pettyCashTxId?: string;
+  notes?: string;
+}
+
+export interface VolunteerIncentiveConfig {
+  defaultDailyRate: number;
+  divisionRates: Record<string, number>;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface VolunteerIncentivePayout {
+  id: string;
+  attendanceId: string;
+  date: string;
+  volunteerId: string;
+  volunteerName: string;
+  division: string;
+  shift: string;
+  attendanceStatus: VolunteerAttendance['status'];
+  isSubstitute?: boolean;
+  replacedVolunteerName?: string;
+  dailyRate: number;
+  totalIncentive: number;
+  status: IncentivePayoutStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  paidAt?: string;
+  pettyCashTxId?: string;
+  notes?: string;
+}
+
+export type PettyCashCategory =
+  | 'Top Up Saldo Kas'
+  | 'Dana Operasional Yayasan'
+  | 'Belanja Bahan Segar/Darurat'
+  | 'Insentif PIC Lembaga'
+  | 'Insentif Relawan'
+  | 'Gas LPG & Utilitas'
+  | 'BBM & Armada'
+  | 'Perlengkapan & Sanitasi'
+  | 'Lainnya';
+
+export interface PettyCashTransaction {
+  id: string;
+  voucherNumber: string;
+  date: string;
+  type: 'Pemasukan' | 'Pengeluaran';
+  category: PettyCashCategory | string;
+  description: string;
+  counterparty: string;
+  amount: number;
+  recordedBy: string;
+  sourceModule?: 'manual' | 'pic_incentives' | 'volunteer_incentives';
+  sourceRefId?: string;
+  proofNumber?: string;
+  proofFileUrl?: string;
+  notes?: string;
+  createdAt: string;
+  customFields?: Record<string, any>;
+}
+
 
 
 

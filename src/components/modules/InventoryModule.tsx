@@ -1064,6 +1064,7 @@ export const InventoryModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari kode bahan, nama, lokasi simpan, atau supplier..."
             searchKeys={['code', 'name', 'category', 'storageLocation', 'supplierName']}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'code',
@@ -1310,6 +1311,7 @@ export const InventoryModule: React.FC = () => {
             searchKeys={['referenceNumber', 'itemName', 'type', 'notes', 'operatorName', 'recipientOrDepartment']}
             onExportExcel={handleExportMutationsExcel}
             onExportPDF={handleExportMutationsPDF}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'timestamp',
@@ -1646,6 +1648,7 @@ export const InventoryModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari no opname, barang, pemeriksa..."
             searchKeys={['opnameNumber', 'itemName', 'reason', 'inspectorName']}
+            onPrint={triggerPrint}
             columns={[
               {
                 key: 'opnameNumber',

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
 import {
   BASTDocumentSheet,
@@ -10,7 +11,13 @@ import {
   generateBastNumber,
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
-import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
+import {
+  exportTableToPDF,
+  exportToExcel,
+  triggerPrint,
+  formatIndonesianDate,
+  exportTextDocumentToWord,
+} from '../../lib/exportUtils';
 import { officialDocumentTemplates } from '../../lib/letterTemplatesData';
 import {
   OutgoingDocument,
@@ -29,7 +36,6 @@ import {
   Clock,
   Printer,
   Copy,
-  ExternalLink,
   ShieldCheck,
   Search,
   Filter,
@@ -93,6 +99,8 @@ export const LettersModule: React.FC = () => {
   const [isDispositionOpen, setIsDispositionOpen] = useState(false);
   const [isScanPreviewOpen, setIsScanPreviewOpen] = useState(false);
   const [selectedIncoming, setSelectedIncoming] = useState<IncomingLetter | null>(null);
+  const [confirmDeleteOutgoing, setConfirmDeleteOutgoing] = useState<OutgoingDocument | null>(null);
+  const [confirmDeleteIncoming, setConfirmDeleteIncoming] = useState<IncomingLetter | null>(null);
 
   // Template Viewer Modal
   const [viewingTemplate, setViewingTemplate] = useState<DocumentTemplate | null>(null);
@@ -606,11 +614,8 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             <Printer className="w-4 h-4" />
           </button>
           <button
-            onClick={() => {
-              if (window.confirm(`Hapus salinan dokumen nomor ${doc.letterNumber}?`)) {
-                deleteOutgoingDocument(doc.id);
-              }
-            }}
+            type="button"
+            onClick={() => setConfirmDeleteOutgoing(doc)}
             title="Hapus Salinan"
             className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-300 transition-colors"
           >
@@ -725,11 +730,8 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             </button>
           )}
           <button
-            onClick={() => {
-              if (window.confirm(`Hapus register surat masuk nomor ${lettr.letterNumber}?`)) {
-                deleteIncomingLetter(lettr.id);
-              }
-            }}
+            type="button"
+            onClick={() => setConfirmDeleteIncoming(lettr)}
             title="Hapus Register"
             className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-300 transition-colors"
           >
@@ -1686,12 +1688,24 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
                   type="button"
                   onClick={() => {
                     handleCopyGoogleDocsText(selectedOutgoing);
-                    window.open('https://docs.new', '_blank');
+                    exportTextDocumentToWord({
+                      title: selectedOutgoing.type,
+                      subtitle: selectedOutgoing.subject,
+                      docNumber: selectedOutgoing.letterNumber,
+                      body: selectedOutgoing.mergedBody,
+                      sppgConfig,
+                      fileName: `Surat_${selectedOutgoing.letterCode || 'SPPG'}_${selectedOutgoing.letterNumber.replace(/[^a-zA-Z0-9_-]+/g, '_')}`,
+                    });
+                    addToast(
+                      'success',
+                      'Draft Word/Docs Diunduh & Teks Disalin',
+                      'File .doc siap dibuka atau diunggah langsung ke Google Docs / Microsoft Word.'
+                    );
                   }}
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow"
                 >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Buka Google Docs Baru (docs.new)
+                  <Download className="w-3.5 h-3.5" />
+                  Unduh File Docs (.doc) & Salin Teks
                 </button>
               </div>
             </div>
@@ -2190,6 +2204,37 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
           </div>
         </Modal>
       )}
+
+      {/* Confirmation Dialogs (Iframe-safe, no window.confirm) */}
+      <ConfirmDialog
+        isOpen={Boolean(confirmDeleteOutgoing)}
+        onClose={() => setConfirmDeleteOutgoing(null)}
+        onConfirm={() => {
+          if (confirmDeleteOutgoing) {
+            deleteOutgoingDocument(confirmDeleteOutgoing.id);
+            setConfirmDeleteOutgoing(null);
+          }
+        }}
+        title="Hapus Salinan Dokumen Keluar?"
+        message={`Apakah Anda yakin ingin menghapus salinan dokumen resmi nomor "${confirmDeleteOutgoing?.letterNumber || ''}"?`}
+        confirmLabel="Ya, Hapus Salinan"
+        isDestructive
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(confirmDeleteIncoming)}
+        onClose={() => setConfirmDeleteIncoming(null)}
+        onConfirm={() => {
+          if (confirmDeleteIncoming) {
+            deleteIncomingLetter(confirmDeleteIncoming.id);
+            setConfirmDeleteIncoming(null);
+          }
+        }}
+        title="Hapus Register Surat Masuk?"
+        message={`Apakah Anda yakin ingin menghapus arsip surat masuk nomor "${confirmDeleteIncoming?.letterNumber || ''}" dari ${confirmDeleteIncoming?.sender || ''}?`}
+        confirmLabel="Ya, Hapus Register"
+        isDestructive
+      />
     </div>
   );
 };

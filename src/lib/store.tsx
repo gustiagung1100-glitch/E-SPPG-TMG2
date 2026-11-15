@@ -41,6 +41,11 @@ import {
   DynamicFormId,
   DynamicFormSchema,
   RoleModuleAccessMap,
+  PICIncentiveConfig,
+  PICIncentivePayout,
+  VolunteerIncentiveConfig,
+  VolunteerIncentivePayout,
+  PettyCashTransaction,
 } from '../types';
 import {
   defaultDynamicFormSchemas,
@@ -91,7 +96,7 @@ import {
   defaultQualityControlRecords,
 } from './plokData';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 export interface ToastMessage {
@@ -229,6 +234,28 @@ interface AppContextType {
   approveTransaction: (id: string, approverName: string) => Promise<void>;
   rejectTransaction: (id: string, reason: string) => Promise<void>;
   cancelTransaction: (id: string, reason: string, cancelledByName: string) => Promise<void>;
+
+  // Modul Baru: Insentif PIC Lembaga (terhubung data harian penerima manfaat)
+  picIncentiveConfig: PICIncentiveConfig;
+  updatePICIncentiveConfig: (cfg: Partial<PICIncentiveConfig>) => Promise<void>;
+  picIncentivePayouts: PICIncentivePayout[];
+  upsertPICIncentivePayout: (payout: Omit<PICIncentivePayout, 'id'> & { id?: string }, recordToPettyCash?: boolean) => Promise<void>;
+  batchApprovePICIncentives: (items: (Omit<PICIncentivePayout, 'id'> & { id?: string })[]) => Promise<void>;
+
+  // Modul Baru: Insentif Relawan (terhubung data absensi relawan)
+  volunteerIncentiveConfig: VolunteerIncentiveConfig;
+  updateVolunteerIncentiveConfig: (cfg: Partial<VolunteerIncentiveConfig>) => Promise<void>;
+  volunteerIncentivePayouts: VolunteerIncentivePayout[];
+  upsertVolunteerIncentivePayout: (payout: Omit<VolunteerIncentivePayout, 'id'> & { id?: string }, recordToPettyCash?: boolean) => Promise<void>;
+  batchApproveVolunteerIncentives: (items: (Omit<VolunteerIncentivePayout, 'id'> & { id?: string })[]) => Promise<void>;
+
+  // Modul Baru: Kas Petty Cash (Saldo Awal, Pemasukan, Pengeluaran, Saldo Akhir)
+  pettyCashOpeningBalance: number;
+  setPettyCashOpeningBalance: (amount: number) => Promise<void>;
+  pettyCashTransactions: PettyCashTransaction[];
+  addPettyCashTransaction: (tx: Omit<PettyCashTransaction, 'id' | 'createdAt'>) => Promise<PettyCashTransaction>;
+  updatePettyCashTransaction: (id: string, tx: Partial<PettyCashTransaction>) => Promise<void>;
+  deletePettyCashTransaction: (id: string) => Promise<void>;
 
   volunteerAttendance: VolunteerAttendance[];
   recordAttendance: (att: Omit<VolunteerAttendance, 'id'>) => Promise<void>;
@@ -1073,6 +1100,109 @@ const initialTransactions: FinancialTransaction[] = [
   },
 ];
 
+const defaultPICIncentiveConfig: PICIncentiveConfig = {
+  rateMode: 'per_porsi',
+  ratePerPortion: 200,
+  flatDailyRate: 50000,
+  minPortionThreshold: 1,
+  updatedAt: '2026-11-08 07:00:00',
+  updatedBy: 'M. Farhan Al-Hafshi, S.E.',
+};
+
+const defaultVolunteerIncentiveConfig: VolunteerIncentiveConfig = {
+  defaultDailyRate: 100000,
+  divisionRates: {
+    Persiapan: 100000,
+    Pengolahan: 115000,
+    Pemorsian: 100000,
+    Distribusi: 110000,
+    'Cuci Ompreng': 95000,
+    Kebersihan: 90000,
+  },
+  updatedAt: '2026-11-08 07:00:00',
+  updatedBy: 'M. Farhan Al-Hafshi, S.E.',
+};
+
+const DEFAULT_PETTY_CASH_OPENING_BALANCE = 15000000;
+
+const initialPettyCashTransactions: PettyCashTransaction[] = [
+  {
+    id: 'pc-1',
+    voucherNumber: 'BKM-PC/SPPG-TMG2/2026/XI/001',
+    date: '2026-11-06',
+    type: 'Pemasukan',
+    category: 'Top Up Saldo Kas',
+    description: 'Pengisian Kas Kecil Operasional Dapur SPPG TMG2 Minggu II Nov 2026',
+    counterparty: 'Bendahara Yayasan Hafshawaty',
+    amount: 10000000,
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    sourceModule: 'manual',
+    proofNumber: 'TRF-YYS-0881',
+    notes: 'Top up likuiditas petty cash untuk belanja darurat, gas, BBM, dan insentif harian.',
+    createdAt: '2026-11-06 08:15:00',
+  },
+  {
+    id: 'pc-2',
+    voucherNumber: 'BKK-PC/SPPG-TMG2/2026/XI/001',
+    date: '2026-11-07',
+    type: 'Pengeluaran',
+    category: 'Gas LPG & Utilitas',
+    description: 'Refill Tabung Gas LPG 50 kg x 2 Tabung Dapur Pengolahan Utama',
+    counterparty: 'Agen LPG Pertamina Krejengan',
+    amount: 1850000,
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    sourceModule: 'manual',
+    proofNumber: 'NOTA-LPG-332',
+    notes: 'Kebutuhan bahan bakar masak siklus 3 hari ke depan.',
+    createdAt: '2026-11-07 16:45:00',
+  },
+  {
+    id: 'pc-3',
+    voucherNumber: 'BKK-PC/SPPG-TMG2/2026/XI/002',
+    date: '2026-11-07',
+    type: 'Pengeluaran',
+    category: 'Belanja Bahan Segar/Darurat',
+    description: 'Pembelian Bumbu Dapur Segar & Daun Jeruk Tambahan 15 kg',
+    counterparty: 'Pasar Baru Krejengan',
+    amount: 425000,
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    sourceModule: 'manual',
+    proofNumber: 'KWT-PBK-119',
+    notes: 'Kekurangan bumbu segar untuk batch pengolahan kloter pagi.',
+    createdAt: '2026-11-07 17:20:00',
+  },
+  {
+    id: 'pc-4',
+    voucherNumber: 'BKK-PC/SPPG-TMG2/2026/XI/003',
+    date: '2026-11-08',
+    type: 'Pengeluaran',
+    category: 'BBM & Armada',
+    description: 'BBM Dexlite 3 Unit Kendaraan Distribusi Box Isothermal SPPG TMG2',
+    counterparty: 'SPBU Krejengan Probolinggo',
+    amount: 750000,
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    sourceModule: 'manual',
+    proofNumber: 'STRUK-SPBU-88192',
+    notes: 'Klaim BBM armada rute timur dan barat tanggal 8 Nov 2026.',
+    createdAt: '2026-11-08 07:30:00',
+  },
+  {
+    id: 'pc-5',
+    voucherNumber: 'BKK-PC/SPPG-TMG2/2026/XI/004',
+    date: '2026-11-08',
+    type: 'Pengeluaran',
+    category: 'Perlengkapan & Sanitasi',
+    description: 'Pembelian Sabun Food Grade, Cairan Desinfektan & Tisu Dapur Steril',
+    counterparty: 'Toko Kebersihan Berkah Kraksaan',
+    amount: 540000,
+    recordedBy: 'M. Farhan Al-Hafshi, S.E.',
+    sourceModule: 'manual',
+    proofNumber: 'NOTA-TBK-204',
+    notes: 'Stok sanitasi ruang cuci ompreng dan pemorsian.',
+    createdAt: '2026-11-08 11:10:00',
+  },
+];
+
 const initialVolunteers: VolunteerAttendance[] = [
   {
     id: 'v-1',
@@ -1659,6 +1789,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : defaultVolunteerAbsences;
   });
 
+  const [picIncentiveConfig, setPicIncentiveConfig] = useState<PICIncentiveConfig>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_pic_incentive_config_v1');
+      return saved ? { ...defaultPICIncentiveConfig, ...JSON.parse(saved) } : defaultPICIncentiveConfig;
+    } catch {
+      return defaultPICIncentiveConfig;
+    }
+  });
+
+  const [picIncentivePayouts, setPicIncentivePayouts] = useState<PICIncentivePayout[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_pic_incentive_payouts_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [volunteerIncentiveConfig, setVolunteerIncentiveConfig] = useState<VolunteerIncentiveConfig>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_volunteer_incentive_config_v1');
+      return saved ? { ...defaultVolunteerIncentiveConfig, ...JSON.parse(saved) } : defaultVolunteerIncentiveConfig;
+    } catch {
+      return defaultVolunteerIncentiveConfig;
+    }
+  });
+
+  const [volunteerIncentivePayouts, setVolunteerIncentivePayouts] = useState<VolunteerIncentivePayout[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_volunteer_incentive_payouts_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [pettyCashOpeningBalance, setPettyCashOpeningBalanceState] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_petty_cash_opening_v1');
+      if (saved !== null) {
+        const parsed = Number(saved);
+        return Number.isFinite(parsed) ? parsed : DEFAULT_PETTY_CASH_OPENING_BALANCE;
+      }
+      return DEFAULT_PETTY_CASH_OPENING_BALANCE;
+    } catch {
+      return DEFAULT_PETTY_CASH_OPENING_BALANCE;
+    }
+  });
+
+  const [pettyCashTransactions, setPettyCashTransactions] = useState<PettyCashTransaction[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_petty_cash_transactions_v1');
+      return saved ? JSON.parse(saved) : initialPettyCashTransactions;
+    } catch {
+      return initialPettyCashTransactions;
+    }
+  });
+
   const [dynamicFormSchemas, setDynamicFormSchemas] = useState<Record<DynamicFormId, DynamicFormSchema>>(() => {
     try {
       const saved = localStorage.getItem('esppg_dynamic_form_schemas_v1');
@@ -1821,6 +2009,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [dynamicFormSchemas]);
 
   useEffect(() => {
+    localStorage.setItem('esppg_pic_incentive_config_v1', JSON.stringify(picIncentiveConfig));
+  }, [picIncentiveConfig]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_pic_incentive_payouts_v1', JSON.stringify(picIncentivePayouts));
+  }, [picIncentivePayouts]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_volunteer_incentive_config_v1', JSON.stringify(volunteerIncentiveConfig));
+  }, [volunteerIncentiveConfig]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_volunteer_incentive_payouts_v1', JSON.stringify(volunteerIncentivePayouts));
+  }, [volunteerIncentivePayouts]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_petty_cash_opening_v1', String(pettyCashOpeningBalance));
+  }, [pettyCashOpeningBalance]);
+
+  useEffect(() => {
+    localStorage.setItem('esppg_petty_cash_transactions_v1', JSON.stringify(pettyCashTransactions));
+  }, [pettyCashTransactions]);
+
+  useEffect(() => {
     localStorage.setItem('esppg_dark_mode', String(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -1845,6 +2057,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleDarkMode = () => {
     setDarkMode(prev => !prev);
   };
+
+  const addToastRef = React.useRef(addToast);
+  addToastRef.current = addToast;
+
+  useEffect(() => {
+    const handleToastEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        type?: ToastMessage['type'];
+        title?: string;
+        message?: string;
+      }>;
+      const detail = customEvent.detail;
+      if (detail?.title && detail?.message) {
+        addToastRef.current(detail.type || 'info', detail.title, detail.message);
+      }
+    };
+    window.addEventListener('sppg-toast', handleToastEvent);
+    return () => window.removeEventListener('sppg-toast', handleToastEvent);
+  }, []);
 
   // Re-validate session & Firebase Auth on load and across tabs
   useEffect(() => {
@@ -1981,6 +2212,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === 'esppg_beneficiary_attendance' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setBeneficiaryAttendance(parsed);
+        } catch {
+          // Ignore malformed storage payload
+        }
+      } else if (e.key === 'esppg_institutions_v2' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setInstitutions(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_distribution_deliveries' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setDistributionDeliveries(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_distribution_logs' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setDistributionLogs(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_ompreng_returns' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setOmprengReturns(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_volunteers' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setVolunteerAttendance(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_volunteer_absences' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setVolunteerAbsences(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_pic_incentive_config_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') setPicIncentiveConfig(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_pic_incentive_payouts_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setPicIncentivePayouts(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_volunteer_incentive_config_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') setVolunteerIncentiveConfig(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_volunteer_incentive_payouts_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setVolunteerIncentivePayouts(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_petty_cash_opening_v1' && e.newValue !== null) {
+        const parsed = Number(e.newValue);
+        if (Number.isFinite(parsed)) setPettyCashOpeningBalanceState(parsed);
+      } else if (e.key === 'esppg_petty_cash_transactions_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setPettyCashTransactions(parsed);
+        } catch {
+          // Ignore
+        }
+      }
+
       if (e.key === AUTH_SESSION_STORAGE_KEY || e.key === null) {
         if (!auth.currentUser) {
           const verified = validateStoredSessionAgainstPolicy(
@@ -2004,6 +2324,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubscribe();
     };
   }, []);
+
+  // Real-time Firestore listener for Student Attendance (beneficiary_daily_records) when Firebase Auth is active
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !auth.currentUser) return;
+    const attendanceQuery = query(
+      collection(db, 'beneficiary_daily_records'),
+      where('sppgId', '==', 'GFBQSYXD')
+    );
+    const unsubSnapshot = onSnapshot(
+      attendanceQuery,
+      snapshot => {
+        if (snapshot.empty) return;
+        const cloudLogs: BeneficiaryAttendanceLog[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as BeneficiaryAttendanceLog & { isDeleted?: boolean };
+          if (!data || data.isDeleted) return;
+          if (data.date && data.institutionId) {
+            cloudLogs.push({
+              ...data,
+              id: data.id || docSnap.id,
+            });
+          }
+        });
+        if (cloudLogs.length === 0) return;
+        setBeneficiaryAttendance(prev => {
+          const merged = [...prev];
+          for (const cloud of cloudLogs) {
+            const idx = merged.findIndex(
+              item =>
+                item.id === cloud.id ||
+                (item.date === cloud.date && item.institutionId === cloud.institutionId)
+            );
+            if (idx >= 0) {
+              merged[idx] = cloud;
+            } else {
+              merged.unshift(cloud);
+            }
+          }
+          return merged;
+        });
+      },
+      err => {
+        console.warn('Firestore attendance listener running in local fallback:', err?.message || err);
+      }
+    );
+    return () => unsubSnapshot();
+  }, [authReady, isAuthenticated]);
 
   // Re-validate session periodically or when whitelist/policy updates
   useEffect(() => {
@@ -2859,15 +3226,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [newLog, ...prev];
     });
 
+    // Realtime auto-sync porsi pengiriman & log armada untuk tanggal & lembaga yang sama
+    setDistributionDeliveries(prev =>
+      prev.map(d =>
+        d.date === log.date && d.institutionId === log.institutionId
+          ? {
+              ...d,
+              smallPortions: presentSmall,
+              largePortions: presentLarge,
+              totalPortions: actualPortions,
+              registeredSmall: log.registeredSmall,
+              registeredLarge: log.registeredLarge,
+              absentSmall: log.absentSmall,
+              absentLarge: log.absentLarge,
+              attendanceLogId: newLog.id,
+              portionSource: 'presensi_realtime',
+            }
+          : d
+      )
+    );
+
+    setDistributionLogs(prev =>
+      prev.map(d =>
+        d.date === log.date && d.institutionId === log.institutionId
+          ? {
+              ...d,
+              smallPortions: presentSmall,
+              largePortions: presentLarge,
+              totalPortions: actualPortions,
+              registeredSmall: log.registeredSmall,
+              registeredLarge: log.registeredLarge,
+              absentSmall: log.absentSmall,
+              absentLarge: log.absentLarge,
+              attendanceLogId: newLog.id,
+              portionSource: 'presensi_realtime',
+            }
+          : d
+      )
+    );
+
+    if (auth.currentUser) {
+      const cloudDocId = `att-${log.date}-${log.institutionId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      setDoc(
+        doc(db, 'beneficiary_daily_records', cloudDocId),
+        {
+          ...newLog,
+          sppgId: 'GFBQSYXD',
+          isDeleted: false,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      ).catch(() => {
+        // Non-blocking fallback to LocalStorage
+      });
+    }
+
     logAudit(
       'CREATE',
       'institutions',
-      `Presensi harian ${log.institutionName} (${log.date}): Hadir ${actualPortions}/${totalRegistered} porsi aktual.`
+      `Presensi harian ${log.institutionName} (${log.date}): Hadir ${actualPortions}/${totalRegistered} porsi aktual (tersinkron ke Distribusi).`
     );
     addToast(
       'success',
       'Presensi Siswa Disimpan',
-      `${log.institutionName}: Porsi aktual ${actualPortions} (Tidak hadir: ${totalAbsent} siswa).`
+      `${log.institutionName}: Porsi aktual ${actualPortions} (Tidak hadir: ${totalAbsent} siswa) tersinkron ke Modul Distribusi.`
     );
     return { success: true };
   };
@@ -2876,6 +3298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     id: string,
     logUpdate: Partial<BeneficiaryAttendanceLog>
   ) => {
+    let syncedTarget: BeneficiaryAttendanceLog | null = null;
     setBeneficiaryAttendance(prev =>
       prev.map(item => {
         if (item.id === id) {
@@ -2888,7 +3311,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const presentLarge = regLarge - absLarge;
           const actualPortions = presentSmall + presentLarge;
 
-          return {
+          const updatedItem: BeneficiaryAttendanceLog = {
             ...item,
             ...logUpdate,
             registeredSmall: regSmall,
@@ -2901,12 +3324,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             presentLarge,
             actualPortions,
           };
+          syncedTarget = updatedItem;
+          return updatedItem;
         }
         return item;
       })
     );
+
+    if (syncedTarget) {
+      const target = syncedTarget as BeneficiaryAttendanceLog;
+      setDistributionDeliveries(prev =>
+        prev.map(d =>
+          d.date === target.date && d.institutionId === target.institutionId
+            ? {
+                ...d,
+                smallPortions: target.presentSmall,
+                largePortions: target.presentLarge,
+                totalPortions: target.actualPortions,
+                registeredSmall: target.registeredSmall,
+                registeredLarge: target.registeredLarge,
+                absentSmall: target.absentSmall,
+                absentLarge: target.absentLarge,
+                attendanceLogId: target.id,
+                portionSource: 'presensi_realtime',
+              }
+            : d
+        )
+      );
+      setDistributionLogs(prev =>
+        prev.map(d =>
+          d.date === target.date && d.institutionId === target.institutionId
+            ? {
+                ...d,
+                smallPortions: target.presentSmall,
+                largePortions: target.presentLarge,
+                totalPortions: target.actualPortions,
+                registeredSmall: target.registeredSmall,
+                registeredLarge: target.registeredLarge,
+                absentSmall: target.absentSmall,
+                absentLarge: target.absentLarge,
+                attendanceLogId: target.id,
+                portionSource: 'presensi_realtime',
+              }
+            : d
+        )
+      );
+      if (auth.currentUser) {
+        const cloudDocId = `att-${target.date}-${target.institutionId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        try {
+          await setDoc(
+            doc(db, 'beneficiary_daily_records', cloudDocId),
+            {
+              ...target,
+              sppgId: 'GFBQSYXD',
+              isDeleted: false,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch {
+          // Non-blocking fallback
+        }
+      }
+    }
+
     await logAudit('UPDATE', 'institutions', `Memperbarui log presensi penerima manfaat ID: ${id}`);
-    addToast('success', 'Presensi Dimutakhirkan', 'Data kehadiran dan porsi aktual diperbarui.');
+    addToast('success', 'Presensi Dimutakhirkan', 'Data kehadiran dan porsi pengiriman aktual diperbarui.');
   };
 
   // Menu Items CRUD & Approval
@@ -3254,17 +3737,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'Distribusi Dimutakhirkan', 'Status serah terima berhasil diperbarui.');
   };
 
-  // Finance Transactions
+  // Finance Transactions (legacy internal helpers kept compatible via 'petty_cash' audit key)
   const addTransaction = async (tx: Omit<FinancialTransaction, 'id'>) => {
     const newTx: FinancialTransaction = { ...tx, id: 'tx-' + Date.now() };
     setFinancialTransactions(prev => [newTx, ...prev]);
-    await logAudit('CREATE', 'finance', `Mencatat ${tx.type} Rp ${tx.amount} (${tx.description}) [${tx.approvalStatus}]`);
+    await logAudit('CREATE', 'petty_cash', `Mencatat ${tx.type} Rp ${tx.amount} (${tx.description}) [${tx.approvalStatus}]`);
     addToast('success', 'Transaksi Tercatat', `Kas ${tx.type} Rp ${tx.amount.toLocaleString('id-ID')} berhasil dicatat.`);
   };
 
   const updateTransaction = async (id: string, update: Partial<FinancialTransaction>) => {
     setFinancialTransactions(prev => prev.map(t => (t.id === id ? { ...t, ...update } : t)));
-    await logAudit('UPDATE', 'finance', `Memperbarui transaksi kas ID: ${id}`);
+    await logAudit('UPDATE', 'petty_cash', `Memperbarui transaksi kas ID: ${id}`);
     addToast('info', 'Transaksi Diperbarui', 'Pembaruan data transaksi berhasil disimpan.');
   };
 
@@ -3272,14 +3755,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = financialTransactions.find(t => t.id === id);
     if (!target) return false;
 
-    // ATURAN TEGAS: Transaksi yang sudah disetujui tidak boleh dihapus tanpa proses pembatalan dan jejak audit
     if (target.approvalStatus === 'Disetujui') {
       addToast('error', 'Hapus Ditolak', 'Transaksi yang berstatus Disetujui tidak boleh dihapus secara permanen. Gunakan prosedur Pembatalan Resmi dengan jejak audit.');
       return false;
     }
 
     setFinancialTransactions(prev => prev.filter(t => t.id !== id));
-    await logAudit('DELETE', 'finance', `Menghapus transaksi draf/ditolak kas ID: ${id} (${target.transactionNumber})`);
+    await logAudit('DELETE', 'petty_cash', `Menghapus transaksi draf/ditolak kas ID: ${id} (${target.transactionNumber})`);
     addToast('warning', 'Transaksi Dihapus', 'Pencatatan kas telah dihapus.');
     return true;
   };
@@ -3289,7 +3771,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFinancialTransactions(prev =>
       prev.map(t => (t.id === id ? { ...t, approvalStatus: 'Disetujui', approvedBy: approverName, approvedAt: now } : t))
     );
-    await logAudit('APPROVE', 'finance', `Menyetujui transaksi kas ID: ${id} oleh ${approverName}`);
+    await logAudit('APPROVE', 'petty_cash', `Menyetujui transaksi kas ID: ${id} oleh ${approverName}`);
     addToast('success', 'Transaksi Disetujui', 'Pencatatan kas resmi disahkan dan mempengaruhi saldo kas.');
   };
 
@@ -3297,7 +3779,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFinancialTransactions(prev =>
       prev.map(t => (t.id === id ? { ...t, approvalStatus: 'Ditolak', notes: (t.notes ? t.notes + ' | ' : '') + `Ditolak: ${reason}` } : t))
     );
-    await logAudit('UPDATE', 'finance', `Menolak transaksi kas ID: ${id} alasan: ${reason}`);
+    await logAudit('UPDATE', 'petty_cash', `Menolak transaksi kas ID: ${id} alasan: ${reason}`);
     addToast('warning', 'Transaksi Ditolak', 'Status pengajuan kas telah ditolak.');
   };
 
@@ -3316,8 +3798,234 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : t
       )
     );
-    await logAudit('DELETE', 'finance', `PEMBATALAN TRANSAKSI RESMI ID: ${id} alasan: "${reason}" oleh: ${cancelledByName}`);
+    await logAudit('DELETE', 'petty_cash', `PEMBATALAN TRANSAKSI RESMI ID: ${id} alasan: "${reason}" oleh: ${cancelledByName}`);
     addToast('error', 'Transaksi Dibatalkan', 'Transaksi disetujui telah dibatalkan dengan jejak audit permanen.');
+  };
+
+  // ---------------------------------------------------------------------------
+  // KAS PETTY CASH (Saldo Awal, Pemasukan, Pengeluaran, Saldo Akhir)
+  // ---------------------------------------------------------------------------
+  const setPettyCashOpeningBalance = async (amount: number) => {
+    const sanitized = Number.isFinite(amount) && amount >= 0 ? Math.round(amount) : 0;
+    setPettyCashOpeningBalanceState(sanitized);
+    await logAudit('UPDATE', 'petty_cash', `Menetapkan Saldo Awal Kas Petty Cash sebesar Rp ${sanitized.toLocaleString('id-ID')}`);
+    addToast('success', 'Saldo Awal Disimpan', `Saldo awal Petty Cash diperbarui menjadi Rp ${sanitized.toLocaleString('id-ID')}.`);
+  };
+
+  const addPettyCashTransaction = async (
+    tx: Omit<PettyCashTransaction, 'id' | 'createdAt'>
+  ): Promise<PettyCashTransaction> => {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const created: PettyCashTransaction = {
+      ...tx,
+      id: 'pc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
+      createdAt: now,
+    };
+    setPettyCashTransactions(prev => [created, ...prev]);
+    await logAudit('CREATE', 'petty_cash', `Petty Cash ${tx.type}: Rp ${tx.amount.toLocaleString('id-ID')} - ${tx.description}`);
+    addToast('success', `${tx.type} Petty Cash Dicatat`, `${tx.voucherNumber} sebesar Rp ${tx.amount.toLocaleString('id-ID')} tersimpan.`);
+    return created;
+  };
+
+  const updatePettyCashTransaction = async (id: string, tx: Partial<PettyCashTransaction>) => {
+    setPettyCashTransactions(prev => prev.map(item => (item.id === id ? { ...item, ...tx } : item)));
+    await logAudit('UPDATE', 'petty_cash', `Memperbarui mutasi Petty Cash ID: ${id}`);
+    addToast('info', 'Mutasi Diperbarui', 'Data transaksi Petty Cash berhasil diperbarui.');
+  };
+
+  const deletePettyCashTransaction = async (id: string) => {
+    const target = pettyCashTransactions.find(item => item.id === id);
+    setPettyCashTransactions(prev => prev.filter(item => item.id !== id));
+    await logAudit('DELETE', 'petty_cash', `Menghapus mutasi Petty Cash ${target?.voucherNumber || id}`);
+    addToast('warning', 'Mutasi Dihapus', 'Catatan mutasi Petty Cash telah dihapus dan saldo akhir dihitung ulang.');
+  };
+
+  // ---------------------------------------------------------------------------
+  // INSENTIF PIC LEMBAGA (Terhubung Data Harian Penerima Manfaat)
+  // ---------------------------------------------------------------------------
+  const updatePICIncentiveConfig = async (cfg: Partial<PICIncentiveConfig>) => {
+    const updated: PICIncentiveConfig = {
+      ...picIncentiveConfig,
+      ...cfg,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      updatedBy: currentUser.name,
+    };
+    setPicIncentiveConfig(updated);
+    await logAudit('UPDATE', 'pic_incentives', `Memperbarui tarif insentif PIC Lembaga (${updated.rateMode === 'per_porsi' ? `Rp ${updated.ratePerPortion}/porsi` : `Flat Rp ${updated.flatDailyRate}/hari`})`);
+    addToast('success', 'Tarif Insentif PIC Disimpan', 'Perhitungan insentif PIC Lembaga otomatis menyesuaikan data kehadiran harian.');
+  };
+
+  const upsertPICIncentivePayout = async (
+    payout: Omit<PICIncentivePayout, 'id'> & { id?: string },
+    recordToPettyCash: boolean = false
+  ) => {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const targetId = payout.id || `picp-${payout.attendanceLogId}`;
+    let pettyCashTxId = payout.pettyCashTxId;
+
+    if (recordToPettyCash && payout.status === 'Sudah Dibayarkan' && !pettyCashTxId && payout.totalIncentive > 0) {
+      const pcTx = await addPettyCashTransaction({
+        voucherNumber: `BKK-PC/PIC/${payout.date.replace(/-/g, '')}/${String(pettyCashTransactions.length + 1).padStart(3, '0')}`,
+        date: payout.date,
+        type: 'Pengeluaran',
+        category: 'Insentif PIC Lembaga',
+        description: `Pencairan Insentif PIC ${payout.institutionName} (${payout.presentPortions} porsi hadir)`,
+        counterparty: `${payout.picName} (${payout.institutionName})`,
+        amount: payout.totalIncentive,
+        recordedBy: currentUser.name,
+        sourceModule: 'pic_incentives',
+        sourceRefId: targetId,
+        proofNumber: `INS-PIC-${payout.attendanceLogId}`,
+        notes: `Otomatis terhubung dari Modul Insentif PIC Lembaga.`,
+      });
+      pettyCashTxId = pcTx.id;
+    }
+
+    const finalRecord: PICIncentivePayout = {
+      ...payout,
+      id: targetId,
+      pettyCashTxId,
+      approvedAt: payout.status !== 'Menunggu Pencairan' ? payout.approvedAt || now : payout.approvedAt,
+      paidAt: payout.status === 'Sudah Dibayarkan' ? payout.paidAt || now : payout.paidAt,
+    };
+
+    setPicIncentivePayouts(prev => {
+      const idx = prev.findIndex(p => p.id === targetId || p.attendanceLogId === payout.attendanceLogId);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...finalRecord };
+        return next;
+      }
+      return [finalRecord, ...prev];
+    });
+
+    await logAudit('APPROVE', 'pic_incentives', `Status insentif PIC ${payout.institutionName} (${payout.date}) -> ${payout.status} Rp ${payout.totalIncentive.toLocaleString('id-ID')}`);
+    addToast('success', 'Insentif PIC Diperbarui', `${payout.picName} (${payout.institutionName}): ${payout.status}.`);
+  };
+
+  const batchApprovePICIncentives = async (items: (Omit<PICIncentivePayout, 'id'> & { id?: string })[]) => {
+    if (items.length === 0) return;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    setPicIncentivePayouts(prev => {
+      const next = [...prev];
+      for (const item of items) {
+        const targetId = item.id || `picp-${item.attendanceLogId}`;
+        const idx = next.findIndex(p => p.id === targetId || p.attendanceLogId === item.attendanceLogId);
+        const merged: PICIncentivePayout = {
+          ...item,
+          id: targetId,
+          status: 'Disetujui',
+          approvedBy: currentUser.name,
+          approvedAt: now,
+        };
+        if (idx >= 0) {
+          if (next[idx].status !== 'Sudah Dibayarkan') {
+            next[idx] = { ...next[idx], ...merged };
+          }
+        } else {
+          next.unshift(merged);
+        }
+      }
+      return next;
+    });
+    await logAudit('APPROVE', 'pic_incentives', `Menyetujui massal ${items.length} daftar insentif PIC Lembaga.`);
+    addToast('success', 'Persetujuan Massal Berhasil', `${items.length} tagihan insentif PIC telah disetujui.`);
+  };
+
+  // ---------------------------------------------------------------------------
+  // INSENTIF RELAWAN (Terhubung Data Absensi & Penggantian Relawan)
+  // ---------------------------------------------------------------------------
+  const updateVolunteerIncentiveConfig = async (cfg: Partial<VolunteerIncentiveConfig>) => {
+    const updated: VolunteerIncentiveConfig = {
+      ...volunteerIncentiveConfig,
+      ...cfg,
+      divisionRates: {
+        ...volunteerIncentiveConfig.divisionRates,
+        ...(cfg.divisionRates || {}),
+      },
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      updatedBy: currentUser.name,
+    };
+    setVolunteerIncentiveConfig(updated);
+    await logAudit('UPDATE', 'volunteer_incentives', `Memperbarui tarif insentif harian relawan per divisi.`);
+    addToast('success', 'Tarif Relawan Disimpan', 'Tarif insentif per divisi berhasil diperbarui.');
+  };
+
+  const upsertVolunteerIncentivePayout = async (
+    payout: Omit<VolunteerIncentivePayout, 'id'> & { id?: string },
+    recordToPettyCash: boolean = false
+  ) => {
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const targetId = payout.id || `volp-${payout.attendanceId}`;
+    let pettyCashTxId = payout.pettyCashTxId;
+
+    if (recordToPettyCash && payout.status === 'Sudah Dibayarkan' && !pettyCashTxId && payout.totalIncentive > 0) {
+      const pcTx = await addPettyCashTransaction({
+        voucherNumber: `BKK-PC/REL/${payout.date.replace(/-/g, '')}/${String(pettyCashTransactions.length + 1).padStart(3, '0')}`,
+        date: payout.date,
+        type: 'Pengeluaran',
+        category: 'Insentif Relawan',
+        description: `Pencairan Insentif Relawan ${payout.volunteerName} (Div. ${payout.division}${payout.isSubstitute ? ' - Pengganti' : ''})`,
+        counterparty: payout.volunteerName,
+        amount: payout.totalIncentive,
+        recordedBy: currentUser.name,
+        sourceModule: 'volunteer_incentives',
+        sourceRefId: targetId,
+        proofNumber: `INS-REL-${payout.attendanceId}`,
+        notes: `Otomatis terhubung dari Modul Insentif Relawan.`,
+      });
+      pettyCashTxId = pcTx.id;
+    }
+
+    const finalRecord: VolunteerIncentivePayout = {
+      ...payout,
+      id: targetId,
+      pettyCashTxId,
+      approvedAt: payout.status !== 'Menunggu Pencairan' ? payout.approvedAt || now : payout.approvedAt,
+      paidAt: payout.status === 'Sudah Dibayarkan' ? payout.paidAt || now : payout.paidAt,
+    };
+
+    setVolunteerIncentivePayouts(prev => {
+      const idx = prev.findIndex(p => p.id === targetId || p.attendanceId === payout.attendanceId);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...finalRecord };
+        return next;
+      }
+      return [finalRecord, ...prev];
+    });
+
+    await logAudit('APPROVE', 'volunteer_incentives', `Status insentif relawan ${payout.volunteerName} (${payout.date}) -> ${payout.status} Rp ${payout.totalIncentive.toLocaleString('id-ID')}`);
+    addToast('success', 'Insentif Relawan Diperbarui', `${payout.volunteerName}: ${payout.status}.`);
+  };
+
+  const batchApproveVolunteerIncentives = async (items: (Omit<VolunteerIncentivePayout, 'id'> & { id?: string })[]) => {
+    if (items.length === 0) return;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    setVolunteerIncentivePayouts(prev => {
+      const next = [...prev];
+      for (const item of items) {
+        const targetId = item.id || `volp-${item.attendanceId}`;
+        const idx = next.findIndex(p => p.id === targetId || p.attendanceId === item.attendanceId);
+        const merged: VolunteerIncentivePayout = {
+          ...item,
+          id: targetId,
+          status: 'Disetujui',
+          approvedBy: currentUser.name,
+          approvedAt: now,
+        };
+        if (idx >= 0) {
+          if (next[idx].status !== 'Sudah Dibayarkan') {
+            next[idx] = { ...next[idx], ...merged };
+          }
+        } else {
+          next.unshift(merged);
+        }
+      }
+      return next;
+    });
+    await logAudit('APPROVE', 'volunteer_incentives', `Menyetujui massal ${items.length} insentif harian relawan.`);
+    addToast('success', 'Persetujuan Massal Berhasil', `${items.length} insentif relawan telah disetujui.`);
   };
 
   // Volunteers Attendance
@@ -3753,6 +4461,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         approveTransaction,
         rejectTransaction,
         cancelTransaction,
+        picIncentiveConfig,
+        updatePICIncentiveConfig,
+        picIncentivePayouts,
+        upsertPICIncentivePayout,
+        batchApprovePICIncentives,
+        volunteerIncentiveConfig,
+        updateVolunteerIncentiveConfig,
+        volunteerIncentivePayouts,
+        upsertVolunteerIncentivePayout,
+        batchApproveVolunteerIncentives,
+        pettyCashOpeningBalance,
+        setPettyCashOpeningBalance,
+        pettyCashTransactions,
+        addPettyCashTransaction,
+        updatePettyCashTransaction,
+        deletePettyCashTransaction,
         volunteerAttendance,
         recordAttendance,
         updateAttendance,
