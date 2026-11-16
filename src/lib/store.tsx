@@ -47,6 +47,11 @@ import {
   VolunteerIncentiveConfig,
   VolunteerIncentivePayout,
   PettyCashTransaction,
+  StockMutation,
+  StockOpnameRecord,
+  MutationType,
+  RecipeIngredient,
+  DivisionJobdesk,
 } from '../types';
 import {
   defaultDynamicFormSchemas,
@@ -96,6 +101,15 @@ import {
   defaultRABItems,
   defaultQualityControlRecords,
 } from './plokData';
+import {
+  defaultInventoryItemsWithBatches,
+  defaultStockMutations,
+  defaultStockOpnameRecords,
+} from './inventoryData';
+import {
+  sampleIngredientsMenu1,
+  defaultDivisionJobdesks,
+} from './plogData';
 import { initialBeneficiaryNutritionRecords } from './beneficiaryNutritionData';
 import { calculateWHOZScore, validateNikFormat, normalizeNik } from './whoZScore';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
@@ -236,12 +250,33 @@ interface AppContextType {
   updateMenuItem: (id: string, item: Partial<MenuItem>) => Promise<void>;
   deleteMenuItem: (id: string) => Promise<void>;
   approveMenuItem: (id: string, approvedBy: string) => Promise<void>;
+  menuIngredientsMap: Record<string, RecipeIngredient[]>;
+  updateMenuIngredients: (menuId: string, ingredients: RecipeIngredient[]) => void;
+  divisionJobdesks: DivisionJobdesk[];
+  updateDivisionJobdesks: (
+    updater: DivisionJobdesk[] | ((prev: DivisionJobdesk[]) => DivisionJobdesk[])
+  ) => void;
 
   inventory: InventoryItem[];
   addInventoryItem: (item: Omit<InventoryItem, 'id'>) => Promise<void>;
   updateInventoryItem: (id: string, item: Partial<InventoryItem>) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
   adjustStock: (id: string, delta: number, reason: string) => Promise<void>;
+
+  // Mutasi & Opname Stok Terpusat (Single Source of Truth)
+  stockMutations: StockMutation[];
+  addStockMutation: (mutation: Omit<StockMutation, 'id' | 'timestamp' | 'balance'> & {
+    expiryDate?: string;
+    supplierName?: string;
+  }) => Promise<StockMutation | null>;
+  updateStockMutation: (id: string, updates: Partial<StockMutation>) => Promise<void>;
+  stockOpnames: StockOpnameRecord[];
+  recordStockOpname: (input: {
+    itemId: string;
+    physicalStock: number;
+    reason: string;
+    inspectorName: string;
+  }) => Promise<StockOpnameRecord | null>;
 
   purchaseOrders: PurchaseOrder[];
   addPurchaseOrder: (po: Omit<PurchaseOrder, 'id'>) => Promise<void>;
@@ -257,6 +292,17 @@ interface AppContextType {
   updateRABItem: (id: string, item: Partial<RABItem>) => Promise<void>;
   deleteRABItem: (id: string) => Promise<void>;
   approveRABItem: (id: string, approverName: string) => Promise<void>;
+  syncCriticalInventoryToRAB: () => Promise<number>;
+  syncMenuNeedsToRAB: (
+    menuId: string,
+    needs: Array<{
+      name: string;
+      category: string;
+      quantity: number;
+      unit: string;
+      unitPrice: number;
+    }>
+  ) => Promise<number>;
   qualityControlRecords: QualityControlRecord[];
   addQualityControlRecord: (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => Promise<void>;
   updateQualityControlRecord: (id: string, qc: Partial<QualityControlRecord>) => Promise<void>;
@@ -397,8 +443,8 @@ const defaultSPPGConfig: SPPGConfig = {
   programName: 'Program Makan Bergizi Gratis (MBG)',
   nationalAgency: 'Badan Gizi Nasional (BGN)',
   dailyPortionTarget: 2850,
-  smallPortionBudget: 15000,
-  largePortionBudget: 15000,
+  smallPortionBudget: 8000,
+  largePortionBudget: 10000,
 };
 
 const defaultPermissions: RolePermissions = {
@@ -1611,6 +1657,319 @@ function validateStoredSessionAgainstPolicy(
   }
 }
 
+// =============================================================================
+// REAL-TIME CROSS-MODULE DATA SYNCHRONIZATION HELPERS
+// =============================================================================
+const SYNC_STOP_WORDS = new Set([
+  'segar',
+  'grade',
+  'kemasan',
+  'lokal',
+  'kupas',
+  'medium',
+  'pulen',
+  'wangi',
+  'standar',
+  'bgn',
+  'murni',
+  'pengadaan',
+  'bahan',
+  'pangan',
+  'super',
+  'alami',
+  'matang',
+  'plastik',
+  'food',
+  'probolinggo',
+  'kraksaan',
+  'gending',
+  'pajarakan',
+  'sukapura',
+  'dringu',
+  'krejengan',
+  'dataran',
+  'tinggi',
+  'broiler',
+  'ras',
+  'giling',
+]);
+
+export function normalizeSyncName(name: string): string {
+  return (name || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractSyncTokens(name: string): string[] {
+  return normalizeSyncName(name)
+    .split(' ')
+    .filter(tok => tok.length >= 3 && !SYNC_STOP_WORDS.has(tok) && !/^\d+$/.test(tok));
+}
+
+export function isMatchingMaterialName(a: string, b: string): boolean {
+  const na = normalizeSyncName(a);
+  const nb = normalizeSyncName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length >= 4 && nb.length >= 4 && (na.includes(nb) || nb.includes(na))) return true;
+
+  const ta = extractSyncTokens(a);
+  const tb = extractSyncTokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+
+  const hasTelurA = ta.includes('telur');
+  const hasTelurB = tb.includes('telur');
+  if (hasTelurA !== hasTelurB) return false;
+
+  const compoundHeads = new Set([
+    'bawang',
+    'cabai',
+    'gula',
+    'daging',
+    'ikan',
+    'kacang',
+    'tepung',
+    'daun',
+    'saus',
+    'minyak',
+  ]);
+
+  if (ta[0] === tb[0]) {
+    if (compoundHeads.has(ta[0]) && ta.length >= 2 && tb.length >= 2) {
+      return ta[1] === tb[1];
+    }
+    return true;
+  }
+
+  if (ta.includes('ayam') && tb.includes('ayam') && !hasTelurA && !hasTelurB) {
+    return true;
+  }
+  if (ta.includes('sapi') && tb.includes('sapi') && !ta.includes('bakso') && !tb.includes('bakso')) {
+    return true;
+  }
+  return false;
+}
+
+function reconcileRABWithPurchaseOrders(pos: PurchaseOrder[], rabs: RABItem[]): RABItem[] {
+  const activePOs = pos.filter(po => po.status !== 'Ditolak' && po.status !== 'Dibatalkan');
+  return rabs.map(rab => {
+    let totalQty = 0;
+    let totalAmount = 0;
+
+    for (const po of activePOs) {
+      const matchingItems = (po.items || []).filter(item => item.rabId === rab.id);
+      if (matchingItems.length > 0) {
+        for (const item of matchingItems) {
+          totalQty += Number(item.quantity || 0);
+          totalAmount += Number(item.subtotal || (item.quantity || 0) * (item.unitPrice || 0));
+        }
+      } else if (po.rabId === rab.id) {
+        totalQty += (po.items || []).reduce((acc, i) => acc + Number(i.quantity || 0), 0);
+        totalAmount += Number(po.totalAmount || 0);
+      }
+    }
+
+    return {
+      ...rab,
+      poCreatedQuantity: totalQty,
+      poCreatedAmount: totalAmount,
+    };
+  });
+}
+
+function buildDefaultMenuIngredientsMap(): Record<string, RecipeIngredient[]> {
+  return {
+    'menu-1': sampleIngredientsMenu1,
+    'menu-2': [
+      {
+        id: 'ing-201',
+        name: 'Beras Kuning Kunyit',
+        category: 'Makanan Pokok',
+        netWeightSmall: 85,
+        netWeightLarge: 125,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 15500,
+        calories100g: 365,
+        protein100g: 6.9,
+        fat100g: 1.2,
+        carb100g: 78.0,
+        fiber100g: 1.0,
+        referenceSource: 'TKPI 2020 (A01)',
+      },
+      {
+        id: 'ing-202',
+        name: 'Daging Sapi Murni Suwir',
+        category: 'Lauk Hewani',
+        netWeightSmall: 45,
+        netWeightLarge: 70,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 125000,
+        calories100g: 201,
+        protein100g: 20.0,
+        fat100g: 13.0,
+        carb100g: 0.0,
+        fiber100g: 0.0,
+        referenceSource: 'TKPI 2020 (B01)',
+      },
+      {
+        id: 'ing-203',
+        name: 'Perkedel Tempe Rempah',
+        category: 'Lauk Nabati',
+        netWeightSmall: 40,
+        netWeightLarge: 60,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 12000,
+        calories100g: 193,
+        protein100g: 20.8,
+        fat100g: 8.8,
+        carb100g: 13.5,
+        fiber100g: 1.4,
+        referenceSource: 'TKPI 2020 (C02)',
+      },
+      {
+        id: 'ing-204',
+        name: 'Tumis Buncis & Jagung Pipil',
+        category: 'Sayuran',
+        netWeightSmall: 60,
+        netWeightLarge: 90,
+        unit: 'gram',
+        ediblePortionPercent: 90,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 14000,
+        calories100g: 63,
+        protein100g: 2.6,
+        fat100g: 0.8,
+        carb100g: 14.0,
+        fiber100g: 2.7,
+        referenceSource: 'TKPI 2020 (D06 & D09)',
+      },
+      {
+        id: 'ing-205',
+        name: 'Semangka Merah Manis',
+        category: 'Buah Segar',
+        netWeightSmall: 100,
+        netWeightLarge: 140,
+        unit: 'gram',
+        ediblePortionPercent: 54,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 7500,
+        calories100g: 30,
+        protein100g: 0.6,
+        fat100g: 0.2,
+        carb100g: 7.6,
+        fiber100g: 0.4,
+        referenceSource: 'TKPI 2020 (E18)',
+      },
+      {
+        id: 'ing-206',
+        name: 'Puding Kacang Hijau Santan Encer',
+        category: 'Ekstra / Susu',
+        netWeightSmall: 75,
+        netWeightLarge: 100,
+        unit: 'pcs',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 1,
+        purchaseUnit: 'pcs',
+        unitPrice: 2800,
+        calories100g: 110,
+        protein100g: 4.0,
+        fat100g: 2.5,
+        carb100g: 18.0,
+        fiber100g: 1.8,
+        referenceSource: 'TKPI Kemenkes RI',
+      },
+    ],
+  };
+}
+
+function recomputeMenuItemsFromRecipes(
+  menus: MenuItem[],
+  recipesMap: Record<string, RecipeIngredient[]>,
+  masterUnits: MasterUnit[],
+  quotaSmall: number,
+  quotaLarge: number
+): MenuItem[] {
+  const totalPortions = Math.max(1, quotaSmall + quotaLarge);
+  return menus.map(menu => {
+    const ings = recipesMap[menu.id];
+    if (!ings || ings.length === 0) return menu;
+
+    let calSmall = 0;
+    let calLarge = 0;
+    let protSmall = 0;
+    let carbSmall = 0;
+    let fatSmall = 0;
+    let fibSmall = 0;
+    let totalCost = 0;
+
+    for (const ing of ings) {
+      const bddRatio = Math.max(1, ing.ediblePortionPercent || 100) / 100;
+      const bkSmall = ing.netWeightSmall / bddRatio;
+      const bkLarge = ing.netWeightLarge / bddRatio;
+
+      const unitMeta = masterUnits.find(
+        u => u.code.trim().toLowerCase() === (ing.purchaseUnit || 'kg').trim().toLowerCase()
+      );
+      const isUnitBased =
+        unitMeta?.baseUnit === 'satuan' ||
+        ing.purchaseUnit === 'pcs' ||
+        ing.purchaseUnit === 'ikat' ||
+        ing.purchaseUnit === 'butir';
+
+      let kebSmall = (quotaSmall * bkSmall) / 1000;
+      let kebLarge = (quotaLarge * bkLarge) / 1000;
+
+      if ((unitMeta?.baseUnit === 'gram' || unitMeta?.baseUnit === 'ml') && unitMeta.conversionToBase > 0) {
+        kebSmall = (quotaSmall * bkSmall) / unitMeta.conversionToBase;
+        kebLarge = (quotaLarge * bkLarge) / unitMeta.conversionToBase;
+      } else if (isUnitBased) {
+        kebSmall = quotaSmall;
+        kebLarge = quotaLarge;
+      }
+
+      const bufSmall = typeof ing.bufferPercentSmall === 'number' ? ing.bufferPercentSmall : 2;
+      const bufLarge = typeof ing.bufferPercentLarge === 'number' ? ing.bufferPercentLarge : 2;
+      const bulSmall = kebSmall > 0 ? Math.ceil(kebSmall * (1 + Math.max(0, bufSmall) / 100)) : 0;
+      const bulLarge = kebLarge > 0 ? Math.ceil(kebLarge * (1 + Math.max(0, bufLarge) / 100)) : 0;
+      const totalQty = bulSmall + bulLarge;
+      totalCost += totalQty * (ing.unitPrice || 0);
+
+      calSmall += (ing.netWeightSmall / 100) * (ing.calories100g || 0);
+      calLarge += (ing.netWeightLarge / 100) * (ing.calories100g || 0);
+      protSmall += (ing.netWeightSmall / 100) * (ing.protein100g || 0);
+      carbSmall += (ing.netWeightSmall / 100) * (ing.carb100g || 0);
+      fatSmall += (ing.netWeightSmall / 100) * (ing.fat100g || 0);
+      fibSmall += (ing.netWeightSmall / 100) * (ing.fiber100g || 0);
+    }
+
+    return {
+      ...menu,
+      caloriesSmall: Math.round(calSmall),
+      caloriesLarge: Math.round(calLarge),
+      proteinGrams: Number(protSmall.toFixed(1)),
+      carbGrams: Number(carbSmall.toFixed(1)),
+      fatGrams: Number(fatSmall.toFixed(1)),
+      fiberGrams: Number(fibSmall.toFixed(1)),
+      targetPortions: totalPortions,
+      estimatedCostPerPortion: Math.round(totalCost / totalPortions),
+    };
+  });
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => readStoredWebAccessUsers());
 
@@ -1660,8 +2019,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [sppgConfig, setSppgConfig] = useState<SPPGConfig>(() => {
-    const saved = localStorage.getItem('esppg_config');
-    return saved ? JSON.parse(saved) : defaultSPPGConfig;
+    try {
+      const saved = localStorage.getItem('esppg_config');
+      if (saved) {
+        const parsed = JSON.parse(saved) as SPPGConfig;
+        const migrationKey = 'esppg_budget_pagu_v2_migrated';
+        if (!localStorage.getItem(migrationKey)) {
+          const hasLegacyCap =
+            (parsed.smallPortionBudget === 15000 || parsed.smallPortionBudget === 12500 || !parsed.smallPortionBudget) &&
+            (parsed.largePortionBudget === 15000 || !parsed.largePortionBudget);
+          localStorage.setItem(migrationKey, 'true');
+          if (hasLegacyCap) {
+            const migrated: SPPGConfig = {
+              ...defaultSPPGConfig,
+              ...parsed,
+              smallPortionBudget: 8000,
+              largePortionBudget: 10000,
+            };
+            localStorage.setItem('esppg_config', JSON.stringify(migrated));
+            return migrated;
+          }
+        }
+        return { ...defaultSPPGConfig, ...parsed };
+      }
+      localStorage.setItem('esppg_budget_pagu_v2_migrated', 'true');
+    } catch {
+      // ignore storage errors
+    }
+    return defaultSPPGConfig;
   });
 
   // Master Data & Beneficiaries States
@@ -1738,15 +2123,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [isDataHydrating, setIsDataHydrating] = useState<boolean>(true);
 
-  // Existing Operational States
+  // Existing Operational States (Single Source of Truth)
   const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
     const saved = localStorage.getItem('esppg_menu_items');
     return saved ? JSON.parse(saved) : initialMenuItems;
   });
 
+  const [menuIngredientsMap, setMenuIngredientsMap] = useState<Record<string, RecipeIngredient[]>>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_menu_ingredients_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return buildDefaultMenuIngredientsMap();
+  });
+
+  const [divisionJobdesks, setDivisionJobdesks] = useState<DivisionJobdesk[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_division_jobdesks_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: DivisionJobdesk) => {
+            const photos =
+              Array.isArray(item.photoUrls) && item.photoUrls.length > 0
+                ? item.photoUrls.filter(Boolean)
+                : item.photoUrl
+                ? [item.photoUrl]
+                : [];
+            return {
+              ...item,
+              photoUrl: photos[0] || item.photoUrl || '',
+              photoUrls: photos,
+            };
+          });
+        }
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultDivisionJobdesks;
+  });
+
   const [inventory, setInventory] = useState<InventoryItem[]>(() => {
-    const saved = localStorage.getItem('esppg_inventory');
-    return saved ? JSON.parse(saved) : initialInventory;
+    try {
+      const saved = localStorage.getItem('esppg_inventory');
+      if (saved) {
+        const parsed: InventoryItem[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(item => {
+            if (item.batches && item.batches.length > 0) return item;
+            const richDefault = defaultInventoryItemsWithBatches.find(d => d.id === item.id);
+            return richDefault?.batches ? { ...item, batches: richDefault.batches } : item;
+          });
+        }
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultInventoryItemsWithBatches;
+  });
+
+  const [stockMutations, setStockMutations] = useState<StockMutation[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_stock_mutations_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultStockMutations;
+  });
+
+  const [stockOpnames, setStockOpnames] = useState<StockOpnameRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_stock_opnames_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultStockOpnameRecords;
   });
 
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
@@ -1982,8 +2447,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [menuItems]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('esppg_menu_ingredients_v1', JSON.stringify(menuIngredientsMap));
+    } catch {
+      // ignore quota errors
+    }
+  }, [menuIngredientsMap]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('esppg_division_jobdesks_v1', JSON.stringify(divisionJobdesks));
+    } catch {
+      // ignore quota errors
+    }
+  }, [divisionJobdesks]);
+
+  useEffect(() => {
     localStorage.setItem('esppg_inventory', JSON.stringify(inventory));
   }, [inventory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('esppg_stock_mutations_v1', JSON.stringify(stockMutations));
+    } catch {
+      // ignore quota errors
+    }
+  }, [stockMutations]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('esppg_stock_opnames_v1', JSON.stringify(stockOpnames));
+    } catch {
+      // ignore quota errors
+    }
+  }, [stockOpnames]);
 
   useEffect(() => {
     localStorage.setItem('esppg_purchase_orders', JSON.stringify(purchaseOrders));
@@ -2364,6 +2861,90 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setPettyCashTransactions(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_inventory' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setInventory(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_stock_mutations_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setStockMutations(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_stock_opnames_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setStockOpnames(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_rab_items' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setRabItems(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_purchase_orders' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setPurchaseOrders(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_qc_records' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setQualityControlRecords(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_master_bahan' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setMasterBahan(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_master_suppliers' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setMasterSuppliers(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_menu_items' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setMenuItems(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_menu_ingredients_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') setMenuIngredientsMap(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_division_jobdesks_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setDivisionJobdesks(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_fuel_logs' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setFuelLogs(parsed);
         } catch {
           // Ignore
         }
@@ -3031,7 +3612,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Akses Modul Direset', 'Hak akses modul/menu seluruh peran dikembalikan ke konfigurasi default.');
   };
 
-  // Institutions CRUD & Quota History
+  // Institutions CRUD & Quota History (Real-time cascading to Distribusi, Antropometri & Insentif PIC)
   const addInstitution = async (inst: Omit<Institution, 'id'>) => {
     const total = Number(inst.smallPortions) + Number(inst.largePortions);
     const newInst: Institution = { ...inst, id: 'inst-' + Date.now(), totalPortions: total };
@@ -3041,24 +3622,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateInstitution = async (id: string, inst: Partial<Institution>) => {
+    const prevTarget = institutions.find(i => i.id === id);
+    let updatedInst: Institution | null = null;
+
     setInstitutions(prev =>
       prev.map(item => {
         if (item.id === id) {
           const small = inst.smallPortions !== undefined ? Number(inst.smallPortions) : item.smallPortions;
           const large = inst.largePortions !== undefined ? Number(inst.largePortions) : item.largePortions;
-          return {
+          updatedInst = {
             ...item,
             ...inst,
             smallPortions: small,
             largePortions: large,
             totalPortions: small + large,
           };
+          return updatedInst;
         }
         return item;
       })
     );
-    await logAudit('UPDATE', 'institutions', `Memperbarui data lembaga ID: ${id}`);
-    addToast('success', 'Data Diperbarui', 'Data lembaga penerima berhasil diperbarui.');
+
+    const nextName = inst.name !== undefined ? inst.name : prevTarget?.name;
+    const nextPicName = inst.picName !== undefined ? inst.picName : prevTarget?.picName;
+    const nextPicPhone = inst.picPhone !== undefined ? inst.picPhone : prevTarget?.picPhone;
+    const nextBankName = inst.bankName !== undefined ? inst.bankName : prevTarget?.bankName;
+    const nextAccountNumber = inst.accountNumber !== undefined ? inst.accountNumber : prevTarget?.accountNumber;
+    const nextBankAccountName = inst.bankAccountName !== undefined ? inst.bankAccountName : prevTarget?.bankAccountName;
+
+    // Cascade identity & PIC/bank info to unpaid PIC incentives, active deliveries, and beneficiary records
+    setPicIncentivePayouts(prev =>
+      prev.map(p =>
+        p.institutionId === id && p.status !== 'Sudah Dibayarkan'
+          ? {
+              ...p,
+              institutionName: nextName || p.institutionName,
+              picName: nextPicName || p.picName,
+              picPhone: nextPicPhone ?? p.picPhone,
+              bankName: nextBankName ?? p.bankName,
+              accountNumber: nextAccountNumber ?? p.accountNumber,
+              bankAccountName: nextBankAccountName ?? p.bankAccountName,
+            }
+          : p
+      )
+    );
+
+    if (nextName || nextPicName) {
+      setDistributionLogs(prev =>
+        prev.map(l =>
+          l.institutionId === id
+            ? {
+                ...l,
+                institutionName: nextName || l.institutionName,
+                receivedBy: l.status !== 'Selesai Serah Terima' && nextPicName ? nextPicName : l.receivedBy,
+              }
+            : l
+        )
+      );
+      setDistributionDeliveries(prev =>
+        prev.map(d =>
+          d.institutionId === id
+            ? {
+                ...d,
+                institutionName: nextName || d.institutionName,
+                picName: d.status !== 'Selesai Serah Terima' && nextPicName ? nextPicName : d.picName,
+              }
+            : d
+        )
+      );
+      if (nextName) {
+        setBeneficiaryRecords(prev =>
+          prev.map(r => (r.institutionId === id ? { ...r, institutionName: nextName } : r))
+        );
+      }
+    }
+
+    await logAudit('UPDATE', 'institutions', `Memperbarui data lembaga ID: ${id} (sinkron ke Distribusi & Insentif PIC)`);
+    addToast('success', 'Data Diperbarui & Tersinkron', 'Data lembaga, PIC, dan modul terkait (Distribusi & Insentif) diperbarui real-time.');
   };
 
   const updateInstitutionQuotaWithHistory = async (
@@ -3076,19 +3716,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newTotal = Number(newSmall) + Number(newLarge);
     const deltaTotal = newTotal - previousTotal;
 
-    // 1. Update institution
-    setInstitutions(prev =>
-      prev.map(item =>
-        item.id === id
-          ? {
-              ...item,
-              smallPortions: newSmall,
-              largePortions: newLarge,
-              totalPortions: newTotal,
-            }
-          : item
-      )
+    const nextInstitutions = institutions.map(item =>
+      item.id === id
+        ? {
+            ...item,
+            smallPortions: newSmall,
+            largePortions: newLarge,
+            totalPortions: newTotal,
+          }
+        : item
     );
+
+    // 1. Update institution
+    setInstitutions(nextInstitutions);
 
     // 2. Append to Quota History
     const historyEntry: BeneficiaryQuotaHistory = {
@@ -3109,6 +3749,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setBeneficiaryQuotaHistory(prev => [historyEntry, ...prev]);
 
+    // 3. Real-time recalculate MenuItem targetPortions & estimatedCostPerPortion
+    const nextQuotaSmall = nextInstitutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+    const nextQuotaLarge = nextInstitutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+    setMenuItems(prev =>
+      recomputeMenuItemsFromRecipes(prev, menuIngredientsMap, masterUnits, nextQuotaSmall, nextQuotaLarge)
+    );
+
     await logAudit(
       'UPDATE',
       'institutions',
@@ -3116,8 +3763,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     addToast(
       'success',
-      'Kuota Diperbarui',
-      `Kuota ${target.name} diubah menjadi ${newTotal} porsi. Riwayat tersimpan.`
+      'Kuota Diperbarui & Tersinkron',
+      `Kuota ${target.name} diubah menjadi ${newTotal} porsi. Kalkulasi porsi & food cost menu ikut diperbarui.`
     );
   };
 
@@ -3126,6 +3773,105 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setInstitutions(prev => prev.filter(i => i.id !== id));
     await logAudit('DELETE', 'institutions', `Menghapus data lembaga: ${target?.name || id}`);
     addToast('warning', 'Lembaga Dihapus', 'Data lembaga telah dihapus dari sistem.');
+  };
+
+  // Shared helper: Cascade price / unit / minimumStock / name changes from Inventory or Master Bahan
+  const cascadeMaterialSync = (params: {
+    sourceName: string;
+    nextName?: string;
+    nextUnit?: string;
+    nextPrice?: number;
+    nextMinStock?: number;
+    source: 'inventory' | 'master_bahan';
+  }) => {
+    const { sourceName, nextName, nextUnit, nextPrice, nextMinStock, source } = params;
+    let syncedInventory = 0;
+    let syncedMasterBahan = 0;
+    let syncedRAB = 0;
+    let syncedRecipeRows = 0;
+
+    if (source === 'master_bahan') {
+      setInventory(prev =>
+        prev.map(inv => {
+          if (isMatchingMaterialName(inv.name, sourceName)) {
+            syncedInventory++;
+            const updatedMin = nextMinStock !== undefined ? nextMinStock : inv.minimumStock;
+            return {
+              ...inv,
+              unit: nextUnit || inv.unit,
+              pricePerUnit: nextPrice !== undefined ? nextPrice : inv.pricePerUnit,
+              minimumStock: updatedMin,
+              qualityStatus: inv.currentStock <= updatedMin ? 'Perlu Pemantauan' : 'Baik',
+            };
+          }
+          return inv;
+        })
+      );
+    }
+
+    if (source === 'inventory') {
+      setMasterBahan(prev =>
+        prev.map(mb => {
+          if (isMatchingMaterialName(mb.name, sourceName)) {
+            syncedMasterBahan++;
+            return {
+              ...mb,
+              unit: nextUnit || mb.unit,
+              actualPrice: nextPrice !== undefined ? nextPrice : mb.actualPrice,
+              minimumStock: nextMinStock !== undefined ? nextMinStock : mb.minimumStock,
+            };
+          }
+          return mb;
+        })
+      );
+    }
+
+    // Cascade to RAB Pengadaan (recalculate unitPrice, unit & totalBudget = volume * unitPrice)
+    if (nextPrice !== undefined || nextUnit !== undefined) {
+      setRabItems(prev =>
+        prev.map(rab => {
+          if (rab.category === 'RAB Bahan Pangan' && isMatchingMaterialName(rab.itemName, sourceName)) {
+            syncedRAB++;
+            const updatedPrice = nextPrice !== undefined ? nextPrice : rab.unitPrice;
+            const updatedUnit = nextUnit || rab.unit;
+            return {
+              ...rab,
+              unit: updatedUnit,
+              unitPrice: updatedPrice,
+              totalBudget: Number(rab.volume || 0) * Number(updatedPrice || 0),
+            };
+          }
+          return rab;
+        })
+      );
+
+      // Cascade to Menu Recipes & Food Cost (PLOG)
+      const updatedMap: Record<string, RecipeIngredient[]> = {};
+      let mapChanged = false;
+      Object.entries(menuIngredientsMap).forEach(([menuId, ingredients]) => {
+        updatedMap[menuId] = ingredients.map(ing => {
+          if (isMatchingMaterialName(ing.name, sourceName)) {
+            syncedRecipeRows++;
+            mapChanged = true;
+            return {
+              ...ing,
+              unitPrice: nextPrice !== undefined ? nextPrice : ing.unitPrice,
+              purchaseUnit: nextUnit || ing.purchaseUnit,
+            };
+          }
+          return ing;
+        });
+      });
+
+      if (mapChanged) {
+        setMenuIngredientsMap(updatedMap);
+        const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+        const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+        setMenuItems(prev => recomputeMenuItemsFromRecipes(prev, updatedMap, masterUnits, qSmall, qLarge));
+      }
+    }
+
+    return { syncedInventory, syncedMasterBahan, syncedRAB, syncedRecipeRows, nextName };
   };
 
   // Master Bahan Pangan CRUD
@@ -3137,9 +3883,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateMasterBahan = async (id: string, item: Partial<MasterBahan>) => {
+    const existing = masterBahan.find(m => m.id === id);
     setMasterBahan(prev => prev.map(m => (m.id === id ? { ...m, ...item } : m)));
-    await logAudit('UPDATE', 'master_data', `Memperbarui master bahan pangan ID: ${id}`);
-    addToast('success', 'Bahan Dimutakhirkan', 'Data master bahan pangan berhasil diperbarui.');
+
+    let syncSummary = '';
+    if (existing) {
+      const res = cascadeMaterialSync({
+        sourceName: existing.name,
+        nextName: item.name,
+        nextUnit: item.unit,
+        nextPrice: item.actualPrice,
+        nextMinStock: item.minimumStock,
+        source: 'master_bahan',
+      });
+      const parts: string[] = [];
+      if (res.syncedInventory > 0) parts.push(`${res.syncedInventory} Gudang`);
+      if (res.syncedRAB > 0) parts.push(`${res.syncedRAB} RAB`);
+      if (res.syncedRecipeRows > 0) parts.push(`${res.syncedRecipeRows} Resep Menu`);
+      if (parts.length > 0) syncSummary = ` Tersinkron otomatis ke ${parts.join(', ')}.`;
+    }
+
+    await logAudit('UPDATE', 'master_data', `Memperbarui master bahan pangan ID: ${id}.${syncSummary}`);
+    addToast('success', 'Bahan Dimutakhirkan & Tersinkron', `Data master bahan diperbarui.${syncSummary}`);
   };
 
   const deleteMasterBahan = async (id: string) => {
@@ -3149,7 +3914,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('warning', 'Bahan Dihapus', 'Bahan telah dihapus dari master data.');
   };
 
-  // Master Supplier CRUD
+  // Master Supplier CRUD (Real-time cascading to Inventory & Active PO)
   const addMasterSupplier = async (sup: Omit<MasterSupplier, 'id'>) => {
     const newSup: MasterSupplier = { ...sup, id: 'sup-' + Date.now() };
     setMasterSuppliers(prev => [...prev, newSup]);
@@ -3158,9 +3923,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateMasterSupplier = async (id: string, sup: Partial<MasterSupplier>) => {
+    const existing = masterSuppliers.find(s => s.id === id);
     setMasterSuppliers(prev => prev.map(s => (s.id === id ? { ...s, ...sup } : s)));
-    await logAudit('UPDATE', 'master_data', `Memperbarui master supplier ID: ${id}`);
-    addToast('success', 'Supplier Diperbarui', 'Data master supplier berhasil dimutakhirkan.');
+
+    if (existing) {
+      const nextSupName = sup.name || existing.name;
+      const nextPhone = sup.phone || existing.phone;
+      const nextPic = sup.contactPerson || existing.contactPerson;
+
+      if (sup.name && sup.name !== existing.name) {
+        setInventory(prev =>
+          prev.map(inv =>
+            inv.supplierName.toLowerCase() === existing.name.toLowerCase()
+              ? { ...inv, supplierName: nextSupName }
+              : inv
+          )
+        );
+      }
+
+      setPurchaseOrders(prev =>
+        prev.map(po =>
+          po.supplierName.toLowerCase() === existing.name.toLowerCase()
+            ? {
+                ...po,
+                supplierName: nextSupName,
+                supplierContact: `${nextPic} - ${nextPhone}`,
+              }
+            : po
+        )
+      );
+    }
+
+    await logAudit('UPDATE', 'master_data', `Memperbarui master supplier ID: ${id} (sinkron ke Gudang & PO)`);
+    addToast('success', 'Supplier Diperbarui & Tersinkron', 'Data supplier pada Gudang dan Purchase Order ikut diperbarui.');
   };
 
   const deleteMasterSupplier = async (id: string) => {
@@ -3761,18 +4556,136 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'Menu Disetujui', 'Status persetujuan menu gizi berhasil diproses.');
   };
 
-  // Inventory CRUD & Adjustments
+  // Menu Ingredients & Jobdesk Central Sync Handlers
+  const updateMenuIngredients = (menuId: string, ingredients: RecipeIngredient[]) => {
+    const nextMap = {
+      ...menuIngredientsMap,
+      [menuId]: ingredients,
+    };
+    setMenuIngredientsMap(nextMap);
+    const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+    const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+    setMenuItems(prev => recomputeMenuItemsFromRecipes(prev, nextMap, masterUnits, qSmall, qLarge));
+  };
+
+  const updateDivisionJobdesks = (
+    updater: DivisionJobdesk[] | ((prev: DivisionJobdesk[]) => DivisionJobdesk[])
+  ) => {
+    setDivisionJobdesks(prev => (typeof updater === 'function' ? updater(prev) : updater));
+  };
+
+  // Inventory CRUD, Real-Time Mutations, Opname & Cross-Module Cascading
   const addInventoryItem = async (item: Omit<InventoryItem, 'id'>) => {
-    const newItem: InventoryItem = { ...item, id: 'inv-' + Date.now() };
-    setInventory(prev => [...prev, newItem]);
+    const newId = 'inv-' + Date.now();
+    const initialQty = Number(item.currentStock ?? item.initialStock ?? 0);
+    const defaultBatch = {
+      id: 'b-' + Date.now(),
+      batchNumber: `BATCH-${item.code}-${Date.now().toString().slice(-4)}`,
+      receivedDate: item.lastRestocked || new Date().toISOString().slice(0, 10),
+      expiryDate: item.expiryDate,
+      initialQty,
+      remainingQty: initialQty,
+      unitPrice: Number(item.pricePerUnit || 0),
+      supplierName: item.supplierName,
+    };
+    const newItem: InventoryItem = {
+      ...item,
+      id: newId,
+      batches: item.batches && item.batches.length > 0 ? item.batches : [defaultBatch],
+    };
+    setInventory(prev => [newItem, ...prev]);
+
+    if (initialQty > 0) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const initMutation: StockMutation = {
+        id: 'mut-' + Date.now(),
+        itemId: newId,
+        itemCode: newItem.code,
+        itemName: newItem.name,
+        date: todayStr,
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        type: 'Stok Awal',
+        referenceNumber: `INIT-${newItem.code}`,
+        batchNumber: defaultBatch.batchNumber,
+        expiryDate: newItem.expiryDate,
+        supplierName: newItem.supplierName,
+        unit: newItem.unit,
+        quantityIn: initialQty,
+        quantityOut: 0,
+        balance: initialQty,
+        unitPrice: newItem.pricePerUnit,
+        totalPrice: initialQty * newItem.pricePerUnit,
+        notes: 'Registrasi item gudang & pencatatan stok awal otomatis.',
+        operatorName: currentUser.name,
+      };
+      setStockMutations(prev => [...prev, initMutation]);
+    }
+
     await logAudit('CREATE', 'inventory', `Menambah stok bahan pangan baru: ${item.name}`);
-    addToast('success', 'Bahan Terdaftar', `${item.name} berhasil ditambahkan ke inventaris gudang.`);
+    addToast('success', 'Bahan Terdaftar', `${item.name} berhasil ditambahkan ke inventaris gudang & kartu stok.`);
   };
 
   const updateInventoryItem = async (id: string, item: Partial<InventoryItem>) => {
-    setInventory(prev => prev.map(i => (i.id === id ? { ...i, ...item } : i)));
-    await logAudit('UPDATE', 'inventory', `Memperbarui data stok bahan ID: ${id}`);
-    addToast('success', 'Inventaris Diperbarui', 'Data stok bahan telah diperbarui.');
+    const existing = inventory.find(i => i.id === id);
+    setInventory(prev =>
+      prev.map(i => {
+        if (i.id !== id) return i;
+        const merged = { ...i, ...item };
+        const minSt = merged.minimumStock ?? i.minimumStock;
+        return {
+          ...merged,
+          qualityStatus:
+            item.qualityStatus !== undefined
+              ? item.qualityStatus
+              : merged.currentStock <= minSt
+              ? 'Perlu Pemantauan'
+              : 'Baik',
+        };
+      })
+    );
+
+    let syncSummary = '';
+    if (existing) {
+      const syncSourceName = existing.name;
+      const shouldSyncSpecs =
+        item.pricePerUnit !== undefined ||
+        item.unit !== undefined ||
+        item.minimumStock !== undefined ||
+        item.name !== undefined;
+
+      if (shouldSyncSpecs) {
+        const res = cascadeMaterialSync({
+          sourceName: syncSourceName,
+          nextName: item.name,
+          nextUnit: item.unit,
+          nextPrice: item.pricePerUnit,
+          nextMinStock: item.minimumStock,
+          source: 'inventory',
+        });
+
+        // Update matching open StockMutation labels if item name/unit changed
+        if (item.name && item.name !== existing.name) {
+          setStockMutations(prev =>
+            prev.map(m => (m.itemId === id ? { ...m, itemName: item.name! } : m))
+          );
+        }
+
+        const syncedParts: string[] = [];
+        if (res.syncedMasterBahan > 0) syncedParts.push(`${res.syncedMasterBahan} Master Bahan`);
+        if (res.syncedRAB > 0) syncedParts.push(`${res.syncedRAB} RAB Pengadaan`);
+        if (res.syncedRecipeRows > 0) syncedParts.push(`${res.syncedRecipeRows} Resep & Food Cost Menu`);
+        if (syncedParts.length > 0) {
+          syncSummary = ` Sinkron otomatis ke ${syncedParts.join(', ')}.`;
+        }
+      }
+    }
+
+    await logAudit('UPDATE', 'inventory', `Memperbarui data stok bahan ID: ${id}.${syncSummary}`);
+    addToast(
+      'success',
+      'Inventaris Diperbarui & Tersinkron',
+      `Data gudang diperbarui.${syncSummary || ' Perubahan tersimpan ke pusat data.'}`
+    );
   };
 
   const deleteInventoryItem = async (id: string) => {
@@ -3781,54 +4694,264 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('warning', 'Bahan Dihapus', 'Item telah dihapus dari inventaris.');
   };
 
-  const adjustStock = async (id: string, delta: number, reason: string) => {
+  const addStockMutation = async (
+    mutation: Omit<StockMutation, 'id' | 'timestamp' | 'balance'> & {
+      expiryDate?: string;
+      supplierName?: string;
+    }
+  ): Promise<StockMutation | null> => {
+    const targetItem = inventory.find(i => i.id === mutation.itemId);
+    if (!targetItem) return null;
+
+    const isOutgoing = mutation.type === 'Barang Keluar' || mutation.type === 'Retur Keluar';
+    const qtyIn = isOutgoing ? 0 : Number(mutation.quantityIn || 0);
+    const qtyOut = isOutgoing ? Number(mutation.quantityOut || 0) : 0;
+
+    if (isOutgoing && qtyOut > targetItem.currentStock) {
+      addToast(
+        'error',
+        'Stok Tidak Mencukupi',
+        `Stok ${targetItem.name} saat ini hanya ${targetItem.currentStock} ${targetItem.unit}.`
+      );
+      return null;
+    }
+
+    const newBalance = Math.max(0, targetItem.currentStock + qtyIn - qtyOut);
+    const nowTime = new Date().toTimeString().slice(0, 8);
+    const effectiveDate = mutation.date || new Date().toISOString().slice(0, 10);
+    const unitPrice = mutation.unitPrice > 0 ? mutation.unitPrice : targetItem.pricePerUnit;
+
+    const newMutation: StockMutation = {
+      ...mutation,
+      id: `mut-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      itemCode: mutation.itemCode || targetItem.code,
+      itemName: mutation.itemName || targetItem.name,
+      unit: mutation.unit || targetItem.unit,
+      date: effectiveDate,
+      timestamp: `${effectiveDate} ${nowTime}`,
+      quantityIn: qtyIn,
+      quantityOut: qtyOut,
+      balance: newBalance,
+      unitPrice,
+      totalPrice: (isOutgoing ? qtyOut : qtyIn) * unitPrice,
+    };
+
+    setStockMutations(prev => [...prev, newMutation]);
+
     setInventory(prev =>
       prev.map(i => {
-        if (i.id === id) {
-          const newStock = Math.max(0, i.currentStock + delta);
-          return {
-            ...i,
-            currentStock: newStock,
-            qualityStatus: newStock <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-          };
+        if (i.id !== targetItem.id) return i;
+        let updatedBatches = [...(i.batches || [])];
+        if (qtyIn > 0) {
+          updatedBatches.push({
+            id: `b-${Date.now()}`,
+            batchNumber: mutation.batchNumber || `BATCH-${Date.now().toString().slice(-6)}`,
+            receivedDate: effectiveDate,
+            expiryDate: mutation.expiryDate || i.expiryDate,
+            initialQty: qtyIn,
+            remainingQty: qtyIn,
+            unitPrice,
+            supplierName: mutation.supplierName || i.supplierName,
+          });
+        } else if (qtyOut > 0 && updatedBatches.length > 0) {
+          // FEFO depletion
+          let remainingToDeduct = qtyOut;
+          updatedBatches = updatedBatches
+            .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime())
+            .map(b => {
+              if (remainingToDeduct <= 0 || b.remainingQty <= 0) return b;
+              const take = Math.min(b.remainingQty, remainingToDeduct);
+              remainingToDeduct -= take;
+              return { ...b, remainingQty: b.remainingQty - take };
+            });
         }
-        return i;
+
+        return {
+          ...i,
+          currentStock: newBalance,
+          lastRestocked: qtyIn > 0 ? effectiveDate : i.lastRestocked,
+          qualityStatus: newBalance <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
+          batches: updatedBatches,
+        };
       })
     );
-    await logAudit('UPDATE', 'inventory', `Penyesuaian stok (${delta > 0 ? '+' : ''}${delta}) ID: ${id}. Alasan: ${reason}`);
-    addToast('info', 'Stok Disesuaikan', `Stok berhasil dimutakhirkan (${delta > 0 ? '+' : ''}${delta}).`);
+
+    await logAudit(
+      'UPDATE',
+      'inventory',
+      `Mutasi ${newMutation.type} ${targetItem.name}: ${qtyIn > 0 ? '+' + qtyIn : '-' + qtyOut} ${targetItem.unit} -> Saldo ${newBalance}`
+    );
+    addToast(
+      'success',
+      'Mutasi Stok Tersinkron',
+      `${newMutation.type} ${targetItem.name} (${qtyIn > 0 ? `+${qtyIn}` : `-${qtyOut}`} ${targetItem.unit}) -> Saldo akhir: ${newBalance} ${targetItem.unit}.`
+    );
+    return newMutation;
   };
 
-  // Purchase Orders Workflow
-  const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
-    const newPO: PurchaseOrder = { ...po, id: 'po-' + Date.now() };
-    setPurchaseOrders(prev => [newPO, ...prev]);
+  const updateStockMutation = async (id: string, updates: Partial<StockMutation>) => {
+    setStockMutations(prev =>
+      prev.map(m => {
+        if (m.id !== id) return m;
+        const nextQtyIn = updates.quantityIn !== undefined ? updates.quantityIn : m.quantityIn;
+        const nextQtyOut = updates.quantityOut !== undefined ? updates.quantityOut : m.quantityOut;
+        const nextUnitPrice = updates.unitPrice !== undefined ? updates.unitPrice : m.unitPrice;
+        const qtyBase = nextQtyIn > 0 ? nextQtyIn : nextQtyOut;
+        return {
+          ...m,
+          ...updates,
+          quantityIn: nextQtyIn,
+          quantityOut: nextQtyOut,
+          unitPrice: nextUnitPrice,
+          totalPrice: qtyBase * nextUnitPrice,
+        };
+      })
+    );
+    await logAudit('UPDATE', 'inventory', `Memperbarui catatan mutasi stok ID: ${id}`);
+    addToast('success', 'Mutasi Diperbarui', 'Catatan mutasi stok berhasil diperbarui.');
+  };
 
-    // Relational sync: update matching RAB items if rabId is provided
-    if (po.rabId) {
-      const totalQty = po.items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-      setRabItems(prev =>
-        prev.map(r => {
-          if (r.id === po.rabId) {
-            return {
-              ...r,
-              poCreatedQuantity: (r.poCreatedQuantity || 0) + totalQty,
-              poCreatedAmount: (r.poCreatedAmount || 0) + po.totalAmount,
-            };
-          }
-          return r;
-        })
+  const recordStockOpname = async (input: {
+    itemId: string;
+    physicalStock: number;
+    reason: string;
+    inspectorName: string;
+  }): Promise<StockOpnameRecord | null> => {
+    const targetItem = inventory.find(i => i.id === input.itemId);
+    if (!targetItem) return null;
+
+    const diff = input.physicalStock - targetItem.currentStock;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const nowTime = new Date().toTimeString().slice(0, 8);
+    const opNum = `SO-${todayStr.replace(/-/g, '').slice(2)}-0${stockOpnames.length + 1}`;
+
+    const newOpname: StockOpnameRecord = {
+      id: 'so-' + Date.now(),
+      opnameNumber: opNum,
+      date: todayStr,
+      itemId: targetItem.id,
+      itemName: targetItem.name,
+      unit: targetItem.unit,
+      systemStock: targetItem.currentStock,
+      physicalStock: input.physicalStock,
+      difference: diff,
+      unitPrice: targetItem.pricePerUnit,
+      differenceValuation: diff * targetItem.pricePerUnit,
+      reason: input.reason,
+      inspectorName: input.inspectorName,
+      status: 'Disetujui',
+      verifiedBy: currentUser.name,
+    };
+
+    setStockOpnames(prev => [newOpname, ...prev]);
+
+    if (diff !== 0) {
+      const opMut: StockMutation = {
+        id: 'mut-so-' + Date.now(),
+        itemId: targetItem.id,
+        itemCode: targetItem.code,
+        itemName: targetItem.name,
+        date: todayStr,
+        timestamp: `${todayStr} ${nowTime}`,
+        type: 'Stok Opname',
+        referenceNumber: opNum,
+        unit: targetItem.unit,
+        quantityIn: diff > 0 ? diff : 0,
+        quantityOut: diff < 0 ? Math.abs(diff) : 0,
+        balance: input.physicalStock,
+        unitPrice: targetItem.pricePerUnit,
+        totalPrice: Math.abs(diff) * targetItem.pricePerUnit,
+        notes: `Penyesuaian Stok Opname (${diff > 0 ? '+' : ''}${diff} ${targetItem.unit}). Alasan: ${input.reason}`,
+        operatorName: input.inspectorName,
+      };
+      setStockMutations(prev => [...prev, opMut]);
+
+      setInventory(prev =>
+        prev.map(i =>
+          i.id === targetItem.id
+            ? {
+                ...i,
+                currentStock: input.physicalStock,
+                qualityStatus: input.physicalStock <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
+              }
+            : i
+        )
       );
     }
 
+    await logAudit(
+      'UPDATE',
+      'inventory',
+      `Stok Opname ${opNum} (${targetItem.name}): Sistem ${targetItem.currentStock} -> Fisik ${input.physicalStock} (${diff > 0 ? '+' : ''}${diff})`
+    );
+    addToast(
+      'info',
+      'Stok Opname Dicatat & Tersinkron',
+      `${opNum}: Stok ${targetItem.name} disesuaikan menjadi ${input.physicalStock} ${targetItem.unit}.`
+    );
+    return newOpname;
+  };
+
+  const adjustStock = async (id: string, delta: number, reason: string) => {
+    const targetItem = inventory.find(i => i.id === id);
+    if (!targetItem || delta === 0) return;
+    const nextStock = Math.max(0, targetItem.currentStock + delta);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const nowTime = new Date().toTimeString().slice(0, 8);
+
+    setInventory(prev =>
+      prev.map(i =>
+        i.id === id
+          ? {
+              ...i,
+              currentStock: nextStock,
+              qualityStatus: nextStock <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
+            }
+          : i
+      )
+    );
+
+    const adjMut: StockMutation = {
+      id: `mut-adj-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      itemId: targetItem.id,
+      itemCode: targetItem.code,
+      itemName: targetItem.name,
+      date: todayStr,
+      timestamp: `${todayStr} ${nowTime}`,
+      type: delta > 0 ? 'Barang Masuk' : 'Barang Keluar',
+      referenceNumber: `ADJ-${Date.now().toString().slice(-6)}`,
+      unit: targetItem.unit,
+      quantityIn: delta > 0 ? delta : 0,
+      quantityOut: delta < 0 ? Math.abs(delta) : 0,
+      balance: nextStock,
+      unitPrice: targetItem.pricePerUnit,
+      totalPrice: Math.abs(delta) * targetItem.pricePerUnit,
+      notes: reason,
+      operatorName: currentUser.name,
+    };
+    setStockMutations(prev => [...prev, adjMut]);
+
+    await logAudit('UPDATE', 'inventory', `Penyesuaian stok (${delta > 0 ? '+' : ''}${delta}) ${targetItem.name}. Alasan: ${reason}`);
+    addToast('info', 'Stok & Kartu Stok Disesuaikan', `${targetItem.name} dimutakhirkan (${delta > 0 ? '+' : ''}${delta} ${targetItem.unit}).`);
+  };
+
+  // Purchase Orders Workflow (Single-pass RAB Reconciliation prevents double-counting & releases cancelled/rejected PO allocations)
+  const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
+    const newPO: PurchaseOrder = { ...po, id: 'po-' + Date.now() };
+    const nextPOs = [newPO, ...purchaseOrders];
+    setPurchaseOrders(nextPOs);
+    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
+
     await logAudit('CREATE', 'procurement', `Membuat Purchase Order baru: ${po.poNumber} (${po.supplierName})`);
-    addToast('success', 'PO Berhasil Dibuat', `Purchase Order ${po.poNumber} berhasil diajukan.`);
+    addToast('success', 'PO Berhasil Dibuat', `Purchase Order ${po.poNumber} berhasil diajukan & alokasi RAB disinkronkan.`);
   };
 
   const updatePurchaseOrder = async (id: string, po: Partial<PurchaseOrder>) => {
-    setPurchaseOrders(prev => prev.map(p => (p.id === id ? { ...p, ...po } : p)));
+    const nextPOs = purchaseOrders.map(p => (p.id === id ? { ...p, ...po } : p));
+    setPurchaseOrders(nextPOs);
+    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
     await logAudit('UPDATE', 'procurement', `Memperbarui Purchase Order ID: ${id}`);
-    addToast('success', 'PO Diperbarui', 'Data Purchase Order berhasil diperbarui.');
+    addToast('success', 'PO Diperbarui', 'Data Purchase Order & sisa alokasi RAB diperbarui.');
   };
 
   const verifyPurchaseOrderFinance = async (id: string, verifierName: string) => {
@@ -3883,24 +5006,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const po = purchaseOrders.find(p => p.id === id);
     if (!po) return;
 
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const nowTime = new Date().toTimeString().slice(0, 8);
+    const generatedMutations: StockMutation[] = [];
+    let updatedInventory = [...inventory];
+
+    po.items.forEach((poItem, idx) => {
+      const targetIdx = updatedInventory.findIndex(
+        inv => inv.id === poItem.itemId || isMatchingMaterialName(inv.name, poItem.itemName)
+      );
+      if (targetIdx >= 0) {
+        const curr = updatedInventory[targetIdx];
+        const nextStock = curr.currentStock + poItem.quantity;
+        const batchNumber = `BATCH-PO-${Date.now().toString().slice(-5)}-${idx + 1}`;
+        const expDate = curr.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+        updatedInventory[targetIdx] = {
+          ...curr,
+          currentStock: nextStock,
+          lastRestocked: todayStr,
+          qualityStatus: nextStock <= curr.minimumStock ? 'Perlu Pemantauan' : 'Baik',
+          batches: [
+            ...(curr.batches || []),
+            {
+              id: `b-po-${Date.now()}-${idx}`,
+              batchNumber,
+              receivedDate: todayStr,
+              expiryDate: expDate,
+              initialQty: poItem.quantity,
+              remainingQty: poItem.quantity,
+              unitPrice: poItem.unitPrice || curr.pricePerUnit,
+              supplierName: po.supplierName,
+            },
+          ],
+        };
+        generatedMutations.push({
+          id: `mut-po-${Date.now()}-${idx}`,
+          itemId: curr.id,
+          itemCode: curr.code,
+          itemName: curr.name,
+          date: todayStr,
+          timestamp: `${todayStr} ${nowTime}`,
+          type: 'Barang Masuk',
+          referenceNumber: po.poNumber,
+          batchNumber,
+          expiryDate: expDate,
+          supplierName: po.supplierName,
+          unit: curr.unit,
+          orderedQuantity: poItem.quantity,
+          quantityIn: poItem.quantity,
+          quantityOut: 0,
+          balance: nextStock,
+          unitPrice: poItem.unitPrice || curr.pricePerUnit,
+          totalPrice: poItem.quantity * (poItem.unitPrice || curr.pricePerUnit),
+          notes: `Penerimaan fisik gudang dari PO ${po.poNumber}`,
+          operatorName: currentUser.name,
+        });
+      }
+    });
+
     setPurchaseOrders(prev =>
       prev.map(p => (p.id === id ? { ...p, status: 'Diterima di Gudang' } : p))
     );
+    setInventory(updatedInventory);
+    if (generatedMutations.length > 0) {
+      setStockMutations(prev => [...prev, ...generatedMutations]);
+    }
 
-    po.items.forEach(item => {
-      adjustStock(item.itemId, item.quantity, `Penerimaan PO ${po.poNumber}`);
-    });
-
-    await logAudit('UPDATE', 'inventory', `Penerimaan fisik barang PO ${po.poNumber} masuk ke stok gudang`);
-    addToast('success', 'Bahan Diterima di Gudang', `Stok barang otomatis ditambahkan ke inventaris.`);
+    await logAudit('UPDATE', 'inventory', `Penerimaan fisik barang PO ${po.poNumber} masuk ke stok & kartu mutasi gudang`);
+    addToast('success', 'Bahan Diterima di Gudang', `Stok & kartu mutasi PO ${po.poNumber} otomatis ditambahkan ke inventaris.`);
   };
 
-  // Modul PLOK: RAB Handlers
+  // Modul PLOK: RAB Handlers & Single-Entry Sync Generators
   const addRABItem = async (item: Omit<RABItem, 'id' | 'totalBudget'>) => {
     const totalBudget = item.volume * item.unitPrice;
     const newRAB: RABItem = {
       ...item,
-      id: 'rab-' + Date.now(),
+      id: 'rab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
       totalBudget,
       poCreatedQuantity: 0,
       poCreatedAmount: 0,
@@ -3950,9 +5131,143 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'RAB Disetujui', 'RAB disetujui Kepala SPPG.');
   };
 
-  // Modul PLOK: Quality Control Handlers with Automated Stock Addition
+  const syncCriticalInventoryToRAB = async (): Promise<number> => {
+    const criticalItems = inventory.filter(i => i.currentStock <= i.minimumStock);
+    if (criticalItems.length === 0) {
+      addToast('info', 'Stok Gudang Aman', 'Tidak ada bahan dengan stok di bawah minimum saat ini.');
+      return 0;
+    }
+
+    const activeRABs = rabItems.filter(r => r.status !== 'Ditolak');
+    const newEntries: RABItem[] = [];
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    criticalItems.forEach((inv, idx) => {
+      const hasOpenRAB = activeRABs.some(
+        r => isMatchingMaterialName(r.itemName, inv.name) && (r.volume - (r.poCreatedQuantity || 0)) > 0
+      );
+      if (hasOpenRAB) return;
+
+      const suggestedVol = Math.max(inv.minimumStock * 2 - inv.currentStock, inv.minimumStock, 10);
+      const codeNum = String(rabItems.length + newEntries.length + 1).padStart(3, '0');
+      newEntries.push({
+        id: `rab-inv-${Date.now()}-${idx}`,
+        category: 'RAB Bahan Pangan',
+        budgetCode: `RAB-BP-${todayStr.slice(2, 7).replace('-', '')}-${codeNum}`,
+        planDate: todayStr,
+        periodMonth: 'November 2026',
+        itemName: inv.name,
+        volume: suggestedVol,
+        unit: inv.unit,
+        unitPrice: inv.pricePerUnit,
+        totalBudget: suggestedVol * inv.pricePerUnit,
+        status: 'Menunggu Persetujuan',
+        poCreatedQuantity: 0,
+        poCreatedAmount: 0,
+        notes: `Otomatis dari alert stok kritis Gudang (${inv.code}: sisa ${inv.currentStock} <= min ${inv.minimumStock} ${inv.unit})`,
+      });
+    });
+
+    if (newEntries.length === 0) {
+      addToast('info', 'Sudah Ada Pengajuan RAB', 'Seluruh bahan stok kritis sudah memiliki alokasi RAB aktif.');
+      return 0;
+    }
+
+    setRabItems(prev => [...newEntries, ...prev]);
+    await logAudit('CREATE', 'procurement', `Sinkronisasi otomatis ${newEntries.length} bahan stok kritis gudang ke RAB Pengadaan`);
+    addToast(
+      'success',
+      'Sinkronisasi Gudang -> RAB Berhasil',
+      `${newEntries.length} item stok kritis otomatis dibuatkan pengajuan RAB dengan harga terbaru gudang.`
+    );
+    return newEntries.length;
+  };
+
+  const syncMenuNeedsToRAB = async (
+    menuId: string,
+    needs: Array<{
+      name: string;
+      category: string;
+      quantity: number;
+      unit: string;
+      unitPrice: number;
+    }>
+  ): Promise<number> => {
+    const targetMenu = menuItems.find(m => m.id === menuId);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    setRabItems(prev => {
+      const next = [...prev];
+      needs.forEach((need, idx) => {
+        if (need.quantity <= 0) return;
+        // Prefer latest price from Inventory or Master Bahan if matched
+        const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, need.name));
+        const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, need.name));
+        const resolvedPrice = invMatch?.pricePerUnit || mbMatch?.actualPrice || need.unitPrice || 15000;
+        const resolvedUnit = invMatch?.unit || mbMatch?.unit || need.unit || 'kg';
+
+        const existingDraftIdx = next.findIndex(
+          r =>
+            r.category === 'RAB Bahan Pangan' &&
+            (r.status === 'Draft' || r.status === 'Menunggu Persetujuan') &&
+            isMatchingMaterialName(r.itemName, need.name)
+        );
+
+        if (existingDraftIdx >= 0) {
+          const curr = next[existingDraftIdx];
+          next[existingDraftIdx] = {
+            ...curr,
+            volume: need.quantity,
+            unit: resolvedUnit,
+            unitPrice: resolvedPrice,
+            totalBudget: need.quantity * resolvedPrice,
+            notes: `Disinkronkan dari Perencanaan Menu ${targetMenu?.menuCode || menuId}`,
+          };
+          updatedCount++;
+        } else {
+          const codeNum = String(next.length + 1).padStart(3, '0');
+          next.unshift({
+            id: `rab-menu-${Date.now()}-${idx}`,
+            category: 'RAB Bahan Pangan',
+            budgetCode: `RAB-BP-${todayStr.slice(2, 7).replace('-', '')}-${codeNum}`,
+            planDate: targetMenu?.date || todayStr,
+            periodMonth: 'November 2026',
+            itemName: invMatch?.name || need.name,
+            volume: need.quantity,
+            unit: resolvedUnit,
+            unitPrice: resolvedPrice,
+            totalBudget: need.quantity * resolvedPrice,
+            status: 'Menunggu Persetujuan',
+            poCreatedQuantity: 0,
+            poCreatedAmount: 0,
+            notes: `Sinkron otomatis Resep Menu ${targetMenu?.menuCode || menuId} (${need.category})`,
+          });
+          createdCount++;
+        }
+      });
+      return next;
+    });
+
+    await logAudit(
+      'CREATE',
+      'procurement',
+      `Sinkronisasi kebutuhan bahan Menu ${targetMenu?.menuCode || menuId} ke RAB (+${createdCount} baru, ${updatedCount} diperbarui)`
+    );
+    addToast(
+      'success',
+      'Kebutuhan Resep Tersinkron ke RAB',
+      `${createdCount} item RAB baru & ${updatedCount} item RAB diperbarui langsung dari resep ${targetMenu?.menuCode || ''}.`
+    );
+    return createdCount + updatedCount;
+  };
+
+  // Modul PLOK: Quality Control Handlers with Automated Stock + Kartu Stok Mutation + Batch Addition
   const addQualityControlRecord = async (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => {
     const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const todayDate = inspectedAt.slice(0, 10);
+    const nowTime = new Date().toTimeString().slice(0, 8);
     const uniqueSuffix = Math.random().toString(36).slice(2, 6);
     const differenceQuantity =
       qc.differenceQuantity !== undefined
@@ -3966,86 +5281,168 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setQualityControlRecords(prev => [newQC, ...prev]);
 
-    // Relational sync 1: update PO status
-    setPurchaseOrders(prev =>
-      prev.map(p => {
-        if (p.id === qc.poId || p.poNumber === qc.poNumber) {
-          const nextStatus =
-            qc.status === 'Diterima' || qc.status === 'Lolos Penuh'
-              ? 'Diterima di Gudang'
-              : qc.status === 'Diterima sebagian'
-              ? 'Sebagian diterima'
-              : qc.status === 'Ditolak'
-              ? 'Ditolak'
-              : p.status;
-          return {
-            ...p,
-            qcStatus: qc.status,
-            status: nextStatus,
-            qcNotes: qc.notes,
-            qcRecords: [...(p.qcRecords || []), newQC],
-          };
-        }
-        return p;
-      })
-    );
+    // Relational sync 1: update PO status, QC record, and item receivedQuantity
+    const nextPOs = purchaseOrders.map(p => {
+      if (p.id === qc.poId || p.poNumber === qc.poNumber) {
+        const nextStatus =
+          qc.status === 'Diterima' || qc.status === 'Lolos Penuh'
+            ? ('Diterima di Gudang' as const)
+            : qc.status === 'Diterima sebagian'
+            ? ('Sebagian diterima' as const)
+            : qc.status === 'Ditolak'
+            ? ('Ditolak' as const)
+            : p.status;
+        const nextItems = (p.items || []).map(it =>
+          isMatchingMaterialName(it.itemName, qc.itemName)
+            ? { ...it, receivedQuantity: (it.receivedQuantity || 0) + qc.receivedQuantity }
+            : it
+        );
+        return {
+          ...p,
+          qcStatus: qc.status,
+          status: nextStatus,
+          qcNotes: qc.notes,
+          items: nextItems,
+          qcRecords: [...(p.qcRecords || []), newQC],
+        };
+      }
+      return p;
+    });
+    setPurchaseOrders(nextPOs);
+    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
 
-    // Relational sync 2: If accepted, increase warehouse stock automatically!
+    // Relational sync 2: If accepted, increase warehouse stock, append FEFO batch, AND record StockMutation!
     if (
       (qc.status === 'Diterima' || qc.status === 'Lolos Penuh' || qc.status === 'Diterima sebagian') &&
       qc.receivedQuantity > 0 &&
       qc.inventoryAdded
     ) {
-      setInventory(prev => {
-        const existingIdx = prev.findIndex(
-          i => i.name.toLowerCase() === qc.itemName.toLowerCase()
+      const matchedPO = purchaseOrders.find(p => p.id === qc.poId || p.poNumber === qc.poNumber);
+      const poItemMatch = matchedPO?.items?.find(it => isMatchingMaterialName(it.itemName, qc.itemName));
+      const existingIdx = inventory.findIndex(i => isMatchingMaterialName(i.name, qc.itemName));
+      const batchNum = `BATCH-QC-${Date.now().toString().slice(-6)}`;
+      const expDate = qc.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+      if (existingIdx !== -1) {
+        const curr = inventory[existingIdx];
+        const nextStock = curr.currentStock + qc.receivedQuantity;
+        const effectiveUnitPrice = poItemMatch?.unitPrice || curr.pricePerUnit;
+
+        setInventory(prev =>
+          prev.map((inv, idx) =>
+            idx === existingIdx
+              ? {
+                  ...inv,
+                  currentStock: nextStock,
+                  lastRestocked: todayDate,
+                  qualityStatus: nextStock <= inv.minimumStock ? 'Perlu Pemantauan' : 'Baik',
+                  batches: [
+                    ...(inv.batches || []),
+                    {
+                      id: `b-qc-${Date.now()}-${uniqueSuffix}`,
+                      batchNumber: batchNum,
+                      receivedDate: todayDate,
+                      expiryDate: expDate,
+                      initialQty: qc.receivedQuantity,
+                      remainingQty: qc.receivedQuantity,
+                      unitPrice: effectiveUnitPrice,
+                      supplierName: qc.supplierName,
+                    },
+                  ],
+                }
+              : inv
+          )
         );
-        if (existingIdx !== -1) {
-          const updated = [...prev];
-          const curr = updated[existingIdx];
-          const nextStock = curr.currentStock + qc.receivedQuantity;
-          const newTx = {
-            id: 'tx-qc-' + Date.now(),
-            date: inspectedAt.slice(0, 10),
-            type: 'Masuk' as const,
-            quantity: qc.receivedQuantity,
-            balanceAfter: nextStock,
-            reason: `Penerimaan QC Lolos PO ${qc.poNumber} (${qc.supplierName})`,
-            pic: qc.inspectorName,
-            batchNumber: `BATCH-${Date.now().toString().slice(-6)}`,
-            expiryDate: qc.expiryDate,
-          };
-          updated[existingIdx] = {
-            ...curr,
-            currentStock: nextStock,
-            lastRestocked: inspectedAt.slice(0, 10),
-            qualityStatus: 'Baik',
-          };
-          return updated;
-        } else {
-          const newItem: InventoryItem = {
-            id: 'inv-' + Date.now(),
-            code: 'BAHAN-' + Date.now().toString().slice(-4),
-            name: qc.itemName,
-            category: 'Bahan Segar',
-            initialStock: qc.receivedQuantity,
-            currentStock: qc.receivedQuantity,
-            unit: qc.unit,
-            minimumStock: Math.round(qc.receivedQuantity * 0.2),
-            pricePerUnit: 20000,
-            storageLocation: qc.receivingTemp && qc.receivingTemp < 5 ? 'Cold Storage 1' : 'Gudang Kering A',
-            supplierName: qc.supplierName,
-            lastRestocked: inspectedAt.slice(0, 10),
-            expiryDate: qc.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-            qualityStatus: 'Baik',
-          };
-          return [newItem, ...prev];
-        }
-      });
+
+        const newMut: StockMutation = {
+          id: `mut-qc-${Date.now()}-${uniqueSuffix}`,
+          itemId: curr.id,
+          itemCode: curr.code,
+          itemName: curr.name,
+          date: todayDate,
+          timestamp: `${todayDate} ${nowTime}`,
+          type: 'Barang Masuk',
+          referenceNumber: qc.poNumber,
+          batchNumber: batchNum,
+          expiryDate: expDate,
+          supplierName: qc.supplierName,
+          unit: curr.unit,
+          orderedQuantity: qc.orderedQuantity,
+          quantityIn: qc.receivedQuantity,
+          quantityOut: 0,
+          differenceQuantity,
+          balance: nextStock,
+          unitPrice: effectiveUnitPrice,
+          totalPrice: qc.receivedQuantity * effectiveUnitPrice,
+          photoUrls: qc.photoUrls,
+          notes: `Penerimaan QC (${qc.status}) PO ${qc.poNumber} — ${qc.notes || 'Lolos standar mutu'}`,
+          operatorName: qc.inspectorName,
+        };
+        setStockMutations(prev => [...prev, newMut]);
+      } else {
+        const newInvId = `inv-${Date.now()}-${uniqueSuffix}`;
+        const newInvCode = 'BAHAN-' + Date.now().toString().slice(-4);
+        const unitPrice = poItemMatch?.unitPrice || 20000;
+        const newItem: InventoryItem = {
+          id: newInvId,
+          code: newInvCode,
+          name: qc.itemName,
+          category: 'Bahan Segar',
+          initialStock: qc.receivedQuantity,
+          currentStock: qc.receivedQuantity,
+          unit: qc.unit,
+          minimumStock: Math.round(qc.receivedQuantity * 0.2),
+          pricePerUnit: unitPrice,
+          storageLocation: qc.receivingTemp && qc.receivingTemp < 5 ? 'Cold Storage 1' : 'Gudang Kering A',
+          supplierName: qc.supplierName,
+          lastRestocked: todayDate,
+          expiryDate: expDate,
+          qualityStatus: 'Baik',
+          batches: [
+            {
+              id: `b-qc-${Date.now()}-${uniqueSuffix}`,
+              batchNumber: batchNum,
+              receivedDate: todayDate,
+              expiryDate: expDate,
+              initialQty: qc.receivedQuantity,
+              remainingQty: qc.receivedQuantity,
+              unitPrice,
+              supplierName: qc.supplierName,
+            },
+          ],
+        };
+        setInventory(prev => [newItem, ...prev]);
+
+        const newMut: StockMutation = {
+          id: `mut-qc-${Date.now()}-${uniqueSuffix}`,
+          itemId: newInvId,
+          itemCode: newInvCode,
+          itemName: qc.itemName,
+          date: todayDate,
+          timestamp: `${todayDate} ${nowTime}`,
+          type: 'Barang Masuk',
+          referenceNumber: qc.poNumber,
+          batchNumber: batchNum,
+          expiryDate: expDate,
+          supplierName: qc.supplierName,
+          unit: qc.unit,
+          orderedQuantity: qc.orderedQuantity,
+          quantityIn: qc.receivedQuantity,
+          quantityOut: 0,
+          differenceQuantity,
+          balance: qc.receivedQuantity,
+          unitPrice,
+          totalPrice: qc.receivedQuantity * unitPrice,
+          photoUrls: qc.photoUrls,
+          notes: `Penerimaan QC (${qc.status}) SKU baru dari PO ${qc.poNumber}`,
+          operatorName: qc.inspectorName,
+        };
+        setStockMutations(prev => [...prev, newMut]);
+      }
     }
 
     await logAudit('CREATE', 'procurement', `Pemeriksaan QC PO ${qc.poNumber}: ${qc.itemName} status ${qc.status} (${qc.receivedQuantity} ${qc.unit})`);
-    addToast('success', 'QC Dicatat', `Pemeriksaan QC PO ${qc.poNumber} berhasil disimpan.`);
+    addToast('success', 'QC Dicatat & Tersinkron ke Gudang', `Pemeriksaan QC PO ${qc.poNumber} tersimpan & otomatis masuk Kartu Stok.`);
   };
 
   const updateQualityControlRecord = async (id: string, qc: Partial<QualityControlRecord>) => {
@@ -4672,14 +6069,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const supplierRejectPO = async (poId: string, reason: string) => {
-    setPurchaseOrders(prev => prev.map(po => po.id === poId ? {
-      ...po,
-      supplierConfirmed: false,
-      supplierDeliveryStatus: 'Ditolak Supplier',
-      supplierRejectionReason: reason,
-      status: 'Ditolak',
-    } : po));
-    addToast('warning', 'Pesanan Ditolak Supplier', `Pesanan PO ditolak oleh supplier dengan alasan: ${reason}`);
+    const nextPOs = purchaseOrders.map(po =>
+      po.id === poId
+        ? {
+            ...po,
+            supplierConfirmed: false,
+            supplierDeliveryStatus: 'Ditolak Supplier' as const,
+            supplierRejectionReason: reason,
+            status: 'Ditolak' as const,
+          }
+        : po
+    );
+    setPurchaseOrders(nextPOs);
+    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
+    addToast('warning', 'Pesanan Ditolak Supplier', `Pesanan PO ditolak oleh supplier dengan alasan: ${reason}. Alokasi RAB dikembalikan.`);
     await logAudit('UPDATE', 'procurement', `Supplier menolak pesanan PO ${poId}: ${reason}`);
   };
 
@@ -4770,11 +6173,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateMenuItem,
         deleteMenuItem,
         approveMenuItem,
+        menuIngredientsMap,
+        updateMenuIngredients,
+        divisionJobdesks,
+        updateDivisionJobdesks,
         inventory,
         addInventoryItem,
         updateInventoryItem,
         deleteInventoryItem,
         adjustStock,
+        stockMutations,
+        addStockMutation,
+        updateStockMutation,
+        stockOpnames,
+        recordStockOpname,
         purchaseOrders,
         addPurchaseOrder,
         updatePurchaseOrder,
@@ -4787,6 +6199,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateRABItem,
         deleteRABItem,
         approveRABItem,
+        syncCriticalInventoryToRAB,
+        syncMenuNeedsToRAB,
         qualityControlRecords,
         addQualityControlRecord,
         updateQualityControlRecord,

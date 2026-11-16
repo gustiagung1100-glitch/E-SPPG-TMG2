@@ -762,6 +762,44 @@ export const SettingsModule: React.FC = () => {
                   className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
                 />
               </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Pagu Anggaran Porsi Besar (Rp / Porsi):
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  value={profileForm.largePortionBudget}
+                  onChange={e =>
+                    setProfileForm({
+                      ...profileForm,
+                      largePortionBudget: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Pagu Anggaran Porsi Kecil (Rp / Porsi):
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  value={profileForm.smallPortionBudget}
+                  onChange={e =>
+                    setProfileForm({
+                      ...profileForm,
+                      smallPortionBudget: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full p-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg font-mono font-bold text-slate-900 dark:text-white"
+                />
+              </div>
             </div>
           </form>
         </div>

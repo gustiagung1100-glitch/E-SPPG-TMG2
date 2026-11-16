@@ -96,7 +96,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
   const activeMenuCount = menuItems.length;
 
   // Financial Stats (Kas Petty Cash & Pengadaan)
-  const totalRAB = totalRecipients * sppgConfig.smallPortionBudget;
+  const totalRAB =
+    totalSmallPortions * (sppgConfig.smallPortionBudget || 8000) +
+    totalLargePortions * (sppgConfig.largePortionBudget || 10000);
   const totalPOAmount = purchaseOrders.reduce((acc, p) => acc + p.totalAmount, 0);
   const pettyCashIncome = pettyCashTransactions
     .filter(t => t.type === 'Pemasukan')

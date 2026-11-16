@@ -556,79 +556,74 @@ export const VolunteersModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Module Banner Header */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-800/60 border border-blue-400/30 text-xs font-semibold text-blue-200 mb-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-              MANAJEMEN SDM DAPUR & PERGANTIAN SHIFT
-            </div>
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight">
-              Presensi & Ketidakhadiran Relawan
-            </h1>
-            <p className="text-sm text-blue-200 mt-1 max-w-3xl">
-              Pengelolaan kehadiran harian relawan 5 divisi dapur MBG, persetujuan ketidakhadiran relawan, penunjukan relawan pengganti shift, serta verifikasi kelayakan sanitasi higiene pangan.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setAbsenceFormData({
-                  date: new Date().toISOString().slice(0, 10),
-                  volunteerId: masterVolunteers[0]?.id || 'vol-01',
-                  volunteerName: masterVolunteers[0]?.name || 'Dewi Sartika',
-                  division: masterVolunteers[0]?.division || 'Persiapan',
-                  reason: 'Sakit',
-                  reasonDetails: '',
-                  replacementVolunteerId: 'vol-cad-1',
-                  replacementVolunteerName: 'Bu Anisa',
-                  replacementDivision: masterVolunteers[0]?.division || 'Persiapan',
-                  approvalStatus: 'Menunggu Persetujuan',
-                  notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
-                  customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
-                });
-                setIsModalAbsenceSchemaEdit(false);
-                setIsAbsenceModalOpen(true);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-md transition-all active:scale-95"
-            >
-              <ArrowRightLeft className="w-4 h-4" />
-              Ajukan Ketidakhadiran Relawan
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedAtt(null);
-                setAttFormData({
-                  date: new Date().toISOString().slice(0, 10),
-                  volunteerId: `vol-${Math.floor(Math.random() * 80) + 20}`,
-                  volunteerName: '',
-                  division: 'Persiapan',
-                  shift: 'Pagi (03:30 - 08:30)',
-                  status: 'Hadir',
-                  healthCheckPassed: true,
-                  hygieneGearComplete: true,
-                  reason: '',
-                  replacementVolunteer: '',
-                  notes: 'Kondisi fit dan APD lengkap',
-                  customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_attendance_form),
-                });
-                setIsModalAttSchemaEdit(false);
-                setIsAttendanceModalOpen(true);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm border border-white/20 backdrop-blur-sm transition-all active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              Catat Presensi Harian
-            </button>
-          </div>
+      {/* Clean Module Header */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-sky-400">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Manajemen SDM Dapur & Pergantian Shift
+          </span>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-white mt-1">
+            Presensi & Ketidakhadiran Relawan
+          </h1>
+          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
+            Pengelolaan kehadiran harian relawan 5 divisi dapur MBG, persetujuan ketidakhadiran relawan, penunjukan relawan pengganti shift, serta verifikasi kelayakan sanitasi higiene pangan.
+          </p>
         </div>
 
-        {/* Decorative background shape */}
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-sky-400/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="flex flex-wrap gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setAbsenceFormData({
+                date: new Date().toISOString().slice(0, 10),
+                volunteerId: masterVolunteers[0]?.id || 'vol-01',
+                volunteerName: masterVolunteers[0]?.name || 'Dewi Sartika',
+                division: masterVolunteers[0]?.division || 'Persiapan',
+                reason: 'Sakit',
+                reasonDetails: '',
+                replacementVolunteerId: 'vol-cad-1',
+                replacementVolunteerName: 'Bu Anisa',
+                replacementDivision: masterVolunteers[0]?.division || 'Persiapan',
+                approvalStatus: 'Menunggu Persetujuan',
+                notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
+                customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
+              });
+              setIsModalAbsenceSchemaEdit(false);
+              setIsAbsenceModalOpen(true);
+            }}
+            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 dark:border-amber-800 font-semibold text-sm transition-all active:scale-95"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            Ajukan Ketidakhadiran Relawan
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedAtt(null);
+              setAttFormData({
+                date: new Date().toISOString().slice(0, 10),
+                volunteerId: `vol-${Math.floor(Math.random() * 80) + 20}`,
+                volunteerName: '',
+                division: 'Persiapan',
+                shift: 'Pagi (03:30 - 08:30)',
+                status: 'Hadir',
+                healthCheckPassed: true,
+                hygieneGearComplete: true,
+                reason: '',
+                replacementVolunteer: '',
+                notes: 'Kondisi fit dan APD lengkap',
+                customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_attendance_form),
+              });
+              setIsModalAttSchemaEdit(false);
+              setIsAttendanceModalOpen(true);
+            }}
+            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-semibold text-sm shadow-sm transition-all active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            Catat Presensi Harian
+          </button>
+        </div>
       </div>
 
       {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
@@ -725,52 +720,62 @@ export const VolunteersModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Tabs */}
-      <div className="flex items-center border-b border-slate-200 dark:border-slate-800 space-x-2 sm:space-x-4">
-        <button
-          type="button"
-          onClick={() => setActiveTab('absences')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'absences'
-              ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <ArrowRightLeft className="w-4 h-4" />
-          <span>Modul Ketidakhadiran Relawan & Pergantian Shift</span>
-          <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300 font-bold">
-            {volunteerAbsences.length}
-          </span>
-        </button>
+      {/* Main Pill Tabs */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 min-w-max">
+          <button
+            type="button"
+            onClick={() => setActiveTab('absences')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'absences'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <ArrowRightLeft className="w-4 h-4 shrink-0" />
+            <span>Modul Ketidakhadiran Relawan & Pergantian Shift</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'absences'
+                ? 'bg-white/25 text-white'
+                : 'bg-amber-50 text-amber-800 border border-amber-200/80 dark:bg-amber-900/50 dark:text-amber-300 dark:border-amber-800'
+            }`}>
+              {volunteerAbsences.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('attendance')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'attendance'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <UserCheck className="w-4 h-4" />
-          <span>Presensi Harian & Sanitasi Dapur</span>
-          <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold">
-            {volunteerAttendance.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('attendance')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'attendance'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <UserCheck className="w-4 h-4 shrink-0" />
+            <span>Presensi Harian & Sanitasi Dapur</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'attendance'
+                ? 'bg-white/25 text-white'
+                : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+            }`}>
+              {volunteerAttendance.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('directory')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'directory'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <Users2 className="w-4 h-4" />
-          <span>Direktori Relawan & Jadwal Divisi</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('directory')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'directory'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Users2 className="w-4 h-4 shrink-0" />
+            <span>Direktori Relawan & Jadwal Divisi</span>
+          </button>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -779,7 +784,7 @@ export const VolunteersModule: React.FC = () => {
       {activeTab === 'absences' && (
         <div className="space-y-4">
           {/* Rules Banner */}
-          <div className="bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 p-4 rounded-r-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
+          <div className="bg-amber-50/90 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-800/80 p-4 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-bold">Standar Zero Kitchen Downtime BGN:</span> Setiap relawan yang berhalangan hadir wajib menunjuk atau dipasangkan dengan relawan pengganti sebelum waktu operasional dimulai. Setelah disetujui pimpinan dapur (Chef / Pengawas Gizi / Kepala SPPG), sistem akan secara otomatis memutakhirkan log presensi harian relawan.

@@ -7,6 +7,8 @@ import {
   BeneficiaryAttendanceLog,
   MasterVolunteer,
   DistributionLog,
+  DistributionDeliveryRecord,
+  OmprengReturnRecord,
   SPPGConfig,
 } from '../../types';
 
@@ -18,11 +20,18 @@ export interface BASTSheetData {
   receiveTime: string;
   returnTime: string;
   totalPortions: number;
+  smallPortions?: number;
+  largePortions?: number;
+  institutionId?: string;
   institutionName: string;
+  institutionType?: string;
   picName: string;
   picPhone: string;
   distributorName: string;
   distributorPhone: string;
+  vehicleNumber?: string;
+  deliveryStatus?: string;
+  notes?: string;
   headOfSppg: string;
   sppgName: string;
   district: string;
@@ -30,6 +39,34 @@ export interface BASTSheetData {
 }
 
 const ROMAN_MONTHS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+
+function normalizeInstName(name?: string): string {
+  return (name || '')
+    .toLowerCase()
+    .replace(/\b(kecamatan|kec\.?|kabupaten|kab\.?|krejengan)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isSameInstitution(
+  inst: { id?: string; name?: string },
+  targetId?: string,
+  targetName?: string
+): boolean {
+  if (targetId && inst.id && inst.id === targetId) {
+    // Verify name doesn't point to a completely different school if both exist
+    if (!targetName || !inst.name) return true;
+    const a = normalizeInstName(inst.name);
+    const b = normalizeInstName(targetName);
+    if (a === b || a.includes(b) || b.includes(a)) return true;
+  }
+  if (targetName && inst.name) {
+    const a = normalizeInstName(inst.name);
+    const b = normalizeInstName(targetName);
+    if (a && b && (a === b || a.includes(b) || b.includes(a))) return true;
+  }
+  return false;
+}
 
 export function formatBastDayDate(dateStr?: string): {
   dayName: string;
@@ -68,16 +105,23 @@ export interface ResolveBastParams {
   beneficiaryAttendance?: BeneficiaryAttendanceLog[];
   masterVolunteers?: MasterVolunteer[];
   distributionLogs?: DistributionLog[];
+  distributionDeliveries?: DistributionDeliveryRecord[];
+  omprengReturns?: OmprengReturnRecord[];
   sppgConfig: SPPGConfig;
   institutionId?: string;
   institutionName?: string;
   date?: string;
   bastNumber?: string;
   totalPortions?: number;
+  smallPortions?: number;
+  largePortions?: number;
   picName?: string;
   picPhone?: string;
   distributorName?: string;
   distributorPhone?: string;
+  vehicleNumber?: string;
+  deliveryStatus?: string;
+  notes?: string;
   receiveTime?: string;
   returnTime?: string;
   headOfSppg?: string;
@@ -89,16 +133,23 @@ export function resolveBastAutoFields(params: ResolveBastParams): BASTSheetData 
     beneficiaryAttendance = [],
     masterVolunteers = [],
     distributionLogs = [],
+    distributionDeliveries = [],
+    omprengReturns = [],
     sppgConfig,
     institutionId,
     institutionName,
     date,
     bastNumber,
     totalPortions,
+    smallPortions,
+    largePortions,
     picName,
     picPhone,
     distributorName,
     distributorPhone,
+    vehicleNumber,
+    deliveryStatus,
+    notes,
     receiveTime,
     returnTime,
     headOfSppg,
@@ -107,50 +158,101 @@ export function resolveBastAutoFields(params: ResolveBastParams): BASTSheetData 
   const activeDate = date || new Date().toISOString().slice(0, 10);
   const { dayName, ddmmyyyy } = formatBastDayDate(activeDate);
 
-  // Match Institution from Master Data / Penerima Manfaat
+  // Match Institution from Master Data / Penerima Manfaat (match by name first if provided to handle ID/name mismatches cleanly, then by ID)
   const matchedInst =
-    (institutionId ? institutions.find(i => i.id === institutionId) : undefined) ||
     (institutionName
-      ? institutions.find(
-          i =>
-            i.name.trim().toLowerCase() === institutionName.trim().toLowerCase() ||
-            i.name.trim().toLowerCase().includes(institutionName.trim().toLowerCase())
-        )
+      ? institutions.find(i => isSameInstitution(i, undefined, institutionName))
+      : undefined) ||
+    (institutionId ? institutions.find(i => i.id === institutionId) : undefined);
+
+  const lookupId = matchedInst?.id || institutionId;
+  const lookupName = matchedInst?.name || institutionName;
+
+  // Match Delivery from Modul Tugas Divisi Distribusi
+  const matchedDelivery =
+    distributionDeliveries.find(
+      d => d.date === activeDate && isSameInstitution({ id: d.institutionId, name: d.institutionName }, lookupId, lookupName)
+    ) ||
+    (institutionId
+      ? distributionDeliveries.find(d => d.date === activeDate && d.institutionId === institutionId)
+      : undefined);
+
+  // Match Ompreng Return from Modul Tugas Divisi Distribusi
+  const matchedReturn =
+    omprengReturns.find(
+      r => r.date === activeDate && isSameInstitution({ id: r.institutionId, name: r.institutionName }, lookupId, lookupName)
+    ) ||
+    (institutionId
+      ? omprengReturns.find(r => r.date === activeDate && r.institutionId === institutionId)
       : undefined);
 
   // Match Attendance for that institution & date from Modul Penerima Manfaat
-  const matchedAttendance = matchedInst
-    ? beneficiaryAttendance.find(a => a.institutionId === matchedInst.id && a.date === activeDate)
+  const matchedAttendance = lookupId
+    ? beneficiaryAttendance.find(a => a.institutionId === lookupId && a.date === activeDate)
     : undefined;
 
   // Match Distribution Log for arrival time & driver if available
-  const matchedDist = matchedInst
-    ? distributionLogs.find(d => d.institutionId === matchedInst.id && d.date === activeDate) ||
-      distributionLogs.find(d => d.institutionId === matchedInst.id)
-    : undefined;
+  const matchedDist =
+    distributionLogs.find(
+      d => d.date === activeDate && isSameInstitution({ id: d.institutionId, name: d.institutionName }, lookupId, lookupName)
+    ) ||
+    (lookupId ? distributionLogs.find(d => d.institutionId === lookupId && d.date === activeDate) : undefined) ||
+    (lookupId ? distributionLogs.find(d => d.institutionId === lookupId) : undefined);
 
   // Match Distributor Volunteer from Master Relawan (Divisi Distribusi)
   const distVolunteers = masterVolunteers.filter(v => v.division === 'Distribusi' && v.isActive);
-  const targetDriverName = distributorName || matchedDist?.driverName || '';
+  const targetDriverName = distributorName || matchedDelivery?.driverName || matchedDist?.driverName || '';
   const matchedVolunteer =
     (targetDriverName
-      ? masterVolunteers.find(v => v.name.toLowerCase().includes(targetDriverName.toLowerCase()))
+      ? masterVolunteers.find(v => {
+          const vName = v.name.toLowerCase().trim();
+          const dName = targetDriverName.toLowerCase().trim();
+          return vName.includes(dName) || dName.includes(vName);
+        })
       : undefined) || distVolunteers[0];
+
+  const resolvedSmallPortions =
+    typeof smallPortions === 'number' && smallPortions >= 0
+      ? smallPortions
+      : matchedDelivery
+      ? matchedDelivery.smallPortions
+      : matchedAttendance
+      ? matchedAttendance.presentSmall
+      : matchedDist
+      ? matchedDist.smallPortions
+      : matchedInst?.smallPortions ?? 0;
+
+  const resolvedLargePortions =
+    typeof largePortions === 'number' && largePortions >= 0
+      ? largePortions
+      : matchedDelivery
+      ? matchedDelivery.largePortions
+      : matchedAttendance
+      ? matchedAttendance.presentLarge
+      : matchedDist
+      ? matchedDist.largePortions
+      : matchedInst?.largePortions ?? 0;
 
   const resolvedPortions =
     typeof totalPortions === 'number' && totalPortions >= 0
       ? totalPortions
+      : matchedDelivery
+      ? matchedDelivery.totalPortions
       : matchedAttendance
       ? matchedAttendance.actualPortions
+      : matchedDist
+      ? matchedDist.totalPortions
       : matchedInst
       ? matchedInst.totalPortions
-      : 0;
+      : resolvedSmallPortions + resolvedLargePortions;
 
-  const resolvedInstName = matchedInst?.name || institutionName || 'Lembaga Penerima Manfaat';
+  const resolvedInstName = matchedDelivery?.institutionName || matchedInst?.name || institutionName || 'Lembaga Penerima Manfaat';
   const resolvedPicName =
     picName && picName.trim() !== ''
       ? picName
-      : matchedInst?.picName || matchedInst?.contactPerson || 'PIC Lembaga';
+      : matchedDelivery?.picName && matchedDelivery.picName.trim() !== ''
+      ? matchedDelivery.picName
+      : matchedInst?.picName || matchedInst?.contactPerson || matchedDist?.receivedBy || 'PIC Lembaga';
   const resolvedPicPhone =
     picPhone && picPhone.trim() !== ''
       ? picPhone
@@ -159,28 +261,50 @@ export function resolveBastAutoFields(params: ResolveBastParams): BASTSheetData 
   const resolvedDistName =
     distributorName && distributorName.trim() !== ''
       ? distributorName
-      : matchedVolunteer?.name || matchedDist?.driverName || 'Tim Distribusi SPPG';
+      : matchedDelivery?.driverName && matchedDelivery.driverName.trim() !== ''
+      ? matchedDelivery.driverName
+      : matchedDist?.driverName && matchedDist.driverName.trim() !== ''
+      ? matchedDist.driverName
+      : matchedVolunteer?.name || 'Tim Distribusi SPPG';
   const resolvedDistPhone =
     distributorPhone && distributorPhone.trim() !== ''
       ? distributorPhone
       : matchedVolunteer?.phone || sppgConfig.phone || '-';
 
-  const resolvedReceiveTime = normalizeWibTime(receiveTime || matchedDist?.arrivalTime, '07:00');
-  const resolvedReturnTime = returnTime ? normalizeWibTime(returnTime, '') : '';
+  const resolvedReceiveTime = normalizeWibTime(
+    receiveTime || matchedDelivery?.arrivalTime || matchedDist?.arrivalTime || matchedDelivery?.departureTime,
+    '07:00'
+  );
+  const resolvedReturnTime = returnTime
+    ? normalizeWibTime(returnTime, '')
+    : matchedReturn?.arrivalTime && matchedReturn.arrivalTime !== '-'
+    ? normalizeWibTime(matchedReturn.arrivalTime, '')
+    : '';
 
   return {
-    bastNumber: bastNumber || generateBastNumber(192, activeDate),
+    bastNumber:
+      bastNumber ||
+      matchedDelivery?.bastNumber ||
+      matchedDist?.bastNumber ||
+      generateBastNumber(192, activeDate),
     date: activeDate,
     dayName,
     ddmmyyyy,
     receiveTime: resolvedReceiveTime,
     returnTime: resolvedReturnTime,
     totalPortions: resolvedPortions,
+    smallPortions: resolvedSmallPortions,
+    largePortions: resolvedLargePortions,
+    institutionId: lookupId,
     institutionName: resolvedInstName,
+    institutionType: matchedInst?.institutionType,
     picName: resolvedPicName,
     picPhone: resolvedPicPhone,
     distributorName: resolvedDistName,
     distributorPhone: resolvedDistPhone,
+    vehicleNumber: vehicleNumber || matchedDelivery?.vehicleNumber || matchedDist?.vehicleNumber,
+    deliveryStatus: deliveryStatus || matchedDelivery?.status || matchedDist?.status || 'Menunggu Pengantaran',
+    notes: notes || matchedDelivery?.notes || matchedDist?.notes,
     headOfSppg: headOfSppg || sppgConfig.headOfSppg,
     sppgName: sppgConfig.sppgName,
     district: sppgConfig.district,

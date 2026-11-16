@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useApp } from '../../lib/store';
+import { useApp, isMatchingMaterialName } from '../../lib/store';
 import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
@@ -39,7 +39,6 @@ import {
   defaultFoodCompositions,
   defaultNutritionTarget,
   sampleIngredientsMenu1,
-  defaultDivisionJobdesks,
 } from '../../lib/plogData';
 import {
   UtensilsCrossed,
@@ -95,11 +94,19 @@ export const NutritionMenuModule: React.FC = () => {
     updateMenuItem,
     deleteMenuItem,
     approveMenuItem,
+    menuIngredientsMap,
+    updateMenuIngredients,
+    divisionJobdesks: jobdesks,
+    updateDivisionJobdesks: setJobdesks,
+    inventory,
+    masterBahan,
+    syncMenuNeedsToRAB,
     institutions,
     masterUnits,
     currentUser,
     hasPermission,
     sppgConfig,
+    updateSPPGConfig,
     addToast,
     dynamicFormSchemas,
   } = useApp();
@@ -128,120 +135,9 @@ export const NutritionMenuModule: React.FC = () => {
   // Selected Active Menu for PLOG details (default: first menu)
   const [selectedMenuId, setSelectedMenuId] = useState<string>(menuItems[0]?.id || 'menu-1');
 
-  // Menu Ingredients State per Menu
-  const [menuIngredientsMap, setMenuIngredientsMap] = useState<Record<string, RecipeIngredient[]>>({
-    'menu-1': sampleIngredientsMenu1,
-    'menu-2': [
-      {
-        id: 'ing-201',
-        name: 'Beras Kuning Kunyit',
-        category: 'Makanan Pokok',
-        netWeightSmall: 85,
-        netWeightLarge: 125,
-        unit: 'gram',
-        ediblePortionPercent: 100,
-        conversionFactorToBase: 0.001,
-        purchaseUnit: 'kg',
-        unitPrice: 15500,
-        calories100g: 365,
-        protein100g: 6.9,
-        fat100g: 1.2,
-        carb100g: 78.0,
-        fiber100g: 1.0,
-        referenceSource: 'TKPI 2020 (A01)',
-      },
-      {
-        id: 'ing-202',
-        name: 'Daging Sapi Murni Suwir',
-        category: 'Lauk Hewani',
-        netWeightSmall: 45,
-        netWeightLarge: 70,
-        unit: 'gram',
-        ediblePortionPercent: 100,
-        conversionFactorToBase: 0.001,
-        purchaseUnit: 'kg',
-        unitPrice: 125000,
-        calories100g: 201,
-        protein100g: 20.0,
-        fat100g: 13.0,
-        carb100g: 0.0,
-        fiber100g: 0.0,
-        referenceSource: 'TKPI 2020 (B01)',
-      },
-      {
-        id: 'ing-203',
-        name: 'Perkedel Tempe Rempah',
-        category: 'Lauk Nabati',
-        netWeightSmall: 40,
-        netWeightLarge: 60,
-        unit: 'gram',
-        ediblePortionPercent: 100,
-        conversionFactorToBase: 0.001,
-        purchaseUnit: 'kg',
-        unitPrice: 12000,
-        calories100g: 193,
-        protein100g: 20.8,
-        fat100g: 8.8,
-        carb100g: 13.5,
-        fiber100g: 1.4,
-        referenceSource: 'TKPI 2020 (C02)',
-      },
-      {
-        id: 'ing-204',
-        name: 'Tumis Buncis & Jagung Pipil',
-        category: 'Sayuran',
-        netWeightSmall: 60,
-        netWeightLarge: 90,
-        unit: 'gram',
-        ediblePortionPercent: 90,
-        conversionFactorToBase: 0.001,
-        purchaseUnit: 'kg',
-        unitPrice: 14000,
-        calories100g: 63,
-        protein100g: 2.6,
-        fat100g: 0.8,
-        carb100g: 14.0,
-        fiber100g: 2.7,
-        referenceSource: 'TKPI 2020 (D06 & D09)',
-      },
-      {
-        id: 'ing-205',
-        name: 'Semangka Merah Manis',
-        category: 'Buah Segar',
-        netWeightSmall: 100,
-        netWeightLarge: 140,
-        unit: 'gram',
-        ediblePortionPercent: 54, // 54% BDD (46% kulit)
-        conversionFactorToBase: 0.001,
-        purchaseUnit: 'kg',
-        unitPrice: 7500,
-        calories100g: 30,
-        protein100g: 0.6,
-        fat100g: 0.2,
-        carb100g: 7.6,
-        fiber100g: 0.4,
-        referenceSource: 'TKPI 2020 (E18)',
-      },
-      {
-        id: 'ing-206',
-        name: 'Puding Kacang Hijau Santan Encer',
-        category: 'Ekstra / Susu',
-        netWeightSmall: 75,
-        netWeightLarge: 100,
-        unit: 'pcs',
-        ediblePortionPercent: 100,
-        conversionFactorToBase: 1,
-        purchaseUnit: 'pcs',
-        unitPrice: 2800,
-        calories100g: 110,
-        protein100g: 4.0,
-        fat100g: 2.5,
-        carb100g: 18.0,
-        fiber100g: 1.8,
-        referenceSource: 'TKPI Kemenkes RI',
-      },
-    ],
-  });
+  // Default Buffer (%) for Porsi Kecil & Porsi Besar (editable per menu/baris)
+  const [defaultBufferSmallPct, setDefaultBufferSmallPct] = useState<number>(2);
+  const [defaultBufferLargePct, setDefaultBufferLargePct] = useState<number>(2);
 
   // Food Composition Database
   const [foodCompositions, setFoodCompositions] = useState<FoodCompositionItem[]>(defaultFoodCompositions);
@@ -250,41 +146,14 @@ export const NutritionMenuModule: React.FC = () => {
   const [nutritionTarget, setNutritionTarget] = useState<NutritionTargetConfig>(defaultNutritionTarget);
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
 
-  // Division Jobdesks (Persisted with multi-photo support)
-  const [jobdesks, setJobdesks] = useState<DivisionJobdesk[]>(() => {
-    try {
-      const saved = localStorage.getItem('esppg_division_jobdesks_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((item: DivisionJobdesk) => {
-            const photos =
-              Array.isArray(item.photoUrls) && item.photoUrls.length > 0
-                ? item.photoUrls.filter(Boolean)
-                : item.photoUrl
-                ? [item.photoUrl]
-                : [];
-            return {
-              ...item,
-              photoUrl: photos[0] || item.photoUrl || '',
-              photoUrls: photos,
-            };
-          });
-        }
-      }
-    } catch {
-      // Fallback to defaults
-    }
-    return defaultDivisionJobdesks;
-  });
+  // Two-category Pagu Anggaran Draft State (Porsi Besar 10.000 & Porsi Kecil 8.000)
+  const [smallCapDraft, setSmallCapDraft] = useState<number>(sppgConfig.smallPortionBudget || 8000);
+  const [largeCapDraft, setLargeCapDraft] = useState<number>(sppgConfig.largePortionBudget || 10000);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('esppg_division_jobdesks_v1', JSON.stringify(jobdesks));
-    } catch {
-      // Ignore storage quota errors silently
-    }
-  }, [jobdesks]);
+    setSmallCapDraft(sppgConfig.smallPortionBudget || 8000);
+    setLargeCapDraft(sppgConfig.largePortionBudget || 10000);
+  }, [sppgConfig.smallPortionBudget, sppgConfig.largePortionBudget]);
 
   const [isJobdeskModalOpen, setIsJobdeskModalOpen] = useState(false);
   const [selectedJobdesk, setSelectedJobdesk] = useState<DivisionJobdesk | null>(null);
@@ -315,9 +184,12 @@ export const NutritionMenuModule: React.FC = () => {
   // Modal State for Adding Ingredient to Menu
   const [isAddIngredientModalOpen, setIsAddIngredientModalOpen] = useState(false);
   const [selectedCompositionId, setSelectedCompositionId] = useState<string>(foodCompositions[0]?.id || '');
+  const [customMenuName, setCustomMenuName] = useState<string>('');
   const [customGramSmall, setCustomGramSmall] = useState<number>(50);
   const [customGramLarge, setCustomGramLarge] = useState<number>(75);
   const [customBdd, setCustomBdd] = useState<number>(100);
+  const [customBufferSmallPct, setCustomBufferSmallPct] = useState<number>(2);
+  const [customBufferLargePct, setCustomBufferLargePct] = useState<number>(2);
   const [customUnitPrice, setCustomUnitPrice] = useState<number>(30000);
   const [customPurchaseUnit, setCustomPurchaseUnit] = useState<string>(masterUnits[0]?.code || 'kg');
 
@@ -348,7 +220,7 @@ export const NutritionMenuModule: React.FC = () => {
     vegetable: '',
     fruit: '',
     milkOrExtra: 'Susu UHT Plain 125ml',
-    estimatedCostPerPortion: 13500,
+    estimatedCostPerPortion: 9000,
     notes: '',
     customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
   });
@@ -377,56 +249,98 @@ export const NutritionMenuModule: React.FC = () => {
   }, [menuIngredientsMap, selectedMenuId]);
 
   // ---------------------------------------------------------------------------
-  // A. CALCULATIONS: PERENCANAAN MENU DAN BAHAN
+  // A. CALCULATIONS: PERENCANAAN MENU DAN BAHAN (FORMAT RINCIAN RESEP PORSI KECIL & BESAR)
   // ---------------------------------------------------------------------------
-  // Rumus kebutuhan bahan memperhitungkan jumlah penerima berdasarkan kategori porsi dan gramasi:
-  // Total Berat Bersih = (Porsi Kecil * Gram Kecil) + (Porsi Besar * Gram Besar)
-  // Berat Kotor = Total Berat Bersih / (% BDD / 100)
-  // Kebutuhan Pembelian = Berat Kotor * Faktor Konversi
+  // BK = BB / (BDD% / 100)
+  // KEBUTUHAN = (BK * PORSI) dikonversi ke Satuan Beli
+  // BUFFER = KEBUTUHAN * (Buffer% / 100)
+  // TOTAL = KEBUTUHAN + BUFFER
+  // PEMBULATAN = Math.ceil(TOTAL)
+  // TOTAL KUANTITI = PEMBULATAN PORSI KECIL + PEMBULATAN PORSI BESAR
+  const resolveIngredientMenuLabel = (ing: RecipeIngredient): string => {
+    if (ing.menuName && ing.menuName.trim() !== '') return ing.menuName.trim();
+    const cat = (ing.category || '').toLowerCase();
+    if (cat.includes('pokok')) return currentMenu?.stapleFood || 'Makanan Pokok';
+    if (cat.includes('hewani')) return currentMenu?.animalProtein || 'Lauk Hewani';
+    if (cat.includes('nabati')) return currentMenu?.plantProtein || 'Lauk Nabati';
+    if (cat.includes('sayur')) return currentMenu?.vegetable || 'Sayuran';
+    if (cat.includes('buah')) return currentMenu?.fruit || 'Buah Segar';
+    if (cat.includes('ekstra') || cat.includes('susu')) return currentMenu?.milkOrExtra || 'Ekstra / Susu';
+    return 'Bumbu & Pelengkap';
+  };
+
   const ingredientsCalculated = useMemo(() => {
     return currentIngredients.map(ing => {
+      const bddPct = Math.max(1, ing.ediblePortionPercent || 100);
+      const bddRatio = bddPct / 100;
+
+      // Berat Kotor per porsi (gram)
+      const bkSmall = ing.netWeightSmall / bddRatio;
+      const bkLarge = ing.netWeightLarge / bddRatio;
+
       const netGramsSmallTotal = quotaSmall * ing.netWeightSmall;
       const netGramsLargeTotal = quotaLarge * ing.netWeightLarge;
       const totalNetGrams = netGramsSmallTotal + netGramsLargeTotal;
       const totalNetKg = totalNetGrams / 1000;
 
-      // Edible portion ratio (BDD)
-      const bddRatio = Math.max(0.01, (ing.ediblePortionPercent || 100) / 100);
-
-      // Berat Kotor (Gross Weight)
-      const totalGrossGrams = totalNetGrams / bddRatio;
+      const grossGramsSmallTotal = quotaSmall * bkSmall;
+      const grossGramsLargeTotal = quotaLarge * bkLarge;
+      const totalGrossGrams = grossGramsSmallTotal + grossGramsLargeTotal;
       const totalGrossKg = totalGrossGrams / 1000;
 
-      // Kebutuhan Pembelian terkonversi sesuai Master Satuan
+      // Konversi Kebutuhan sesuai Master Satuan
       const unitMeta = masterUnits.find(
         u => u.code.trim().toLowerCase() === (ing.purchaseUnit || 'kg').trim().toLowerCase()
       );
-      let purchaseQty = totalGrossKg;
-      let costPortionSmall = (ing.netWeightSmall / 1000 / bddRatio) * ing.unitPrice;
-      let costPortionLarge = (ing.netWeightLarge / 1000 / bddRatio) * ing.unitPrice;
-
-      if (unitMeta?.baseUnit === 'gram' && unitMeta.conversionToBase > 0) {
-        purchaseQty = totalGrossGrams / unitMeta.conversionToBase;
-        costPortionSmall = (ing.netWeightSmall / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
-        costPortionLarge = (ing.netWeightLarge / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
-      } else if (unitMeta?.baseUnit === 'ml' && unitMeta.conversionToBase > 0) {
-        purchaseQty = totalGrossGrams / unitMeta.conversionToBase;
-        costPortionSmall = (ing.netWeightSmall / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
-        costPortionLarge = (ing.netWeightLarge / unitMeta.conversionToBase / bddRatio) * ing.unitPrice;
-      } else if (
+      const isUnitBased =
         unitMeta?.baseUnit === 'satuan' ||
         ing.purchaseUnit === 'pcs' ||
         ing.purchaseUnit === 'ikat' ||
-        ing.purchaseUnit === 'butir'
-      ) {
-        purchaseQty = Math.ceil(totalBeneficiaries);
+        ing.purchaseUnit === 'butir';
+
+      let kebutuhanSmall = grossGramsSmallTotal / 1000;
+      let kebutuhanLarge = grossGramsLargeTotal / 1000;
+      let costPortionSmall = (bkSmall / 1000) * ing.unitPrice;
+      let costPortionLarge = (bkLarge / 1000) * ing.unitPrice;
+
+      if (unitMeta?.baseUnit === 'gram' && unitMeta.conversionToBase > 0) {
+        kebutuhanSmall = grossGramsSmallTotal / unitMeta.conversionToBase;
+        kebutuhanLarge = grossGramsLargeTotal / unitMeta.conversionToBase;
+        costPortionSmall = (bkSmall / unitMeta.conversionToBase) * ing.unitPrice;
+        costPortionLarge = (bkLarge / unitMeta.conversionToBase) * ing.unitPrice;
+      } else if (unitMeta?.baseUnit === 'ml' && unitMeta.conversionToBase > 0) {
+        kebutuhanSmall = grossGramsSmallTotal / unitMeta.conversionToBase;
+        kebutuhanLarge = grossGramsLargeTotal / unitMeta.conversionToBase;
+        costPortionSmall = (bkSmall / unitMeta.conversionToBase) * ing.unitPrice;
+        costPortionLarge = (bkLarge / unitMeta.conversionToBase) * ing.unitPrice;
+      } else if (isUnitBased) {
+        kebutuhanSmall = quotaSmall;
+        kebutuhanLarge = quotaLarge;
+        costPortionSmall = ing.unitPrice;
+        costPortionLarge = ing.unitPrice;
       }
 
-      // Total Biaya Bahan (Food Cost Bahan)
-      const totalCost = purchaseQty * ing.unitPrice;
+      const bufferPctSmall =
+        typeof ing.bufferPercentSmall === 'number' ? ing.bufferPercentSmall : defaultBufferSmallPct;
+      const bufferPctLarge =
+        typeof ing.bufferPercentLarge === 'number' ? ing.bufferPercentLarge : defaultBufferLargePct;
+
+      const bufferSmall = kebutuhanSmall * (Math.max(0, bufferPctSmall) / 100);
+      const bufferLarge = kebutuhanLarge * (Math.max(0, bufferPctLarge) / 100);
+
+      const totalSmall = kebutuhanSmall + bufferSmall;
+      const totalLarge = kebutuhanLarge + bufferLarge;
+
+      const pembulatanSmall = totalSmall > 0 ? Math.ceil(totalSmall) : 0;
+      const pembulatanLarge = totalLarge > 0 ? Math.ceil(totalLarge) : 0;
+
+      // Total Kuantiti = Pembulatan Porsi Kecil + Pembulatan Porsi Besar
+      const totalKuantiti = pembulatanSmall + pembulatanLarge;
+
+      const purchaseQty = totalKuantiti;
+      const totalCost = totalKuantiti * ing.unitPrice;
 
       // Nutrition contribution of this ingredient for small vs large portion:
-      // Nilai gizi = (berat bersih (g) / 100) * kandungan per 100g
       const calSmall = (ing.netWeightSmall / 100) * ing.calories100g;
       const protSmall = (ing.netWeightSmall / 100) * ing.protein100g;
       const fatSmall = (ing.netWeightSmall / 100) * ing.fat100g;
@@ -441,6 +355,20 @@ export const NutritionMenuModule: React.FC = () => {
 
       return {
         ...ing,
+        menuLabel: resolveIngredientMenuLabel(ing),
+        bkSmall,
+        bkLarge,
+        kebutuhanSmall,
+        kebutuhanLarge,
+        bufferPctSmall,
+        bufferPctLarge,
+        bufferSmall,
+        bufferLarge,
+        totalSmall,
+        totalLarge,
+        pembulatanSmall,
+        pembulatanLarge,
+        totalKuantiti,
         totalNetGrams,
         totalNetKg,
         totalGrossGrams,
@@ -465,7 +393,15 @@ export const NutritionMenuModule: React.FC = () => {
         },
       };
     });
-  }, [currentIngredients, quotaSmall, quotaLarge, totalBeneficiaries, masterUnits]);
+  }, [
+    currentIngredients,
+    quotaSmall,
+    quotaLarge,
+    masterUnits,
+    defaultBufferSmallPct,
+    defaultBufferLargePct,
+    currentMenu,
+  ]);
 
   // Aggregate Total Net & Gross
   const totalNetWeightAllKg = useMemo(
@@ -540,12 +476,16 @@ export const NutritionMenuModule: React.FC = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // C. CALCULATIONS: INPUT FOOD COST MENU
+  // C. CALCULATIONS: INPUT FOOD COST MENU (2 KATEGORI PAGU ANGGARAN)
   // ---------------------------------------------------------------------------
-  // Food cost bahan = Jumlah bahan × Harga satuan
-  // Food cost per porsi = Total biaya bahan / Jumlah porsi
-  const budgetCapPerPortion = sppgConfig.smallPortionBudget || 15000; // Pagu anggaran e.g. Rp 15.000
-  const totalBudgetCap = totalBeneficiaries * budgetCapPerPortion;
+  // Porsi Kecil = Rp 8.000 (default) | Porsi Besar = Rp 10.000 (default)
+  const smallBudgetCap = sppgConfig.smallPortionBudget || 8000;
+  const largeBudgetCap = sppgConfig.largePortionBudget || 10000;
+  const totalBudgetCapSmall = quotaSmall * smallBudgetCap;
+  const totalBudgetCapLarge = quotaLarge * largeBudgetCap;
+  const totalBudgetCap = totalBudgetCapSmall + totalBudgetCapLarge;
+  const avgBudgetCapPerPortion =
+    totalBeneficiaries > 0 ? totalBudgetCap / totalBeneficiaries : largeBudgetCap;
 
   // Average food cost per portion
   const avgFoodCostPerPortion = totalBeneficiaries > 0 ? totalMenuProcurementCost / totalBeneficiaries : 0;
@@ -554,25 +494,51 @@ export const NutritionMenuModule: React.FC = () => {
   const costPerPortionSmall = ingredientsCalculated.reduce((acc, i) => acc + i.costPortionSmall, 0);
   const costPerPortionLarge = ingredientsCalculated.reduce((acc, i) => acc + i.costPortionLarge, 0);
 
-  // Percent to budget cap
-  const percentToCapAvg = (avgFoodCostPerPortion / budgetCapPerPortion) * 100;
-  const percentToCapSmall = (costPerPortionSmall / budgetCapPerPortion) * 100;
-  const percentToCapLarge = (costPerPortionLarge / budgetCapPerPortion) * 100;
+  // Percent to respective category budget cap
+  const percentToCapAvg = avgBudgetCapPerPortion > 0 ? (avgFoodCostPerPortion / avgBudgetCapPerPortion) * 100 : 0;
+  const percentToCapSmall = smallBudgetCap > 0 ? (costPerPortionSmall / smallBudgetCap) * 100 : 0;
+  const percentToCapLarge = largeBudgetCap > 0 ? (costPerPortionLarge / largeBudgetCap) * 100 : 0;
 
-  // Selisih terhadap anggaran (hemat / surplus vs over)
-  const budgetDifferenceTotal = totalBudgetCap - totalMenuProcurementCost; // Positive = hemat / surplus
-  const budgetDifferencePerPortion = budgetCapPerPortion - avgFoodCostPerPortion;
+  // Selisih terhadap anggaran masing-masing kategori & total (positif = hemat, negatif = melebihi pagu)
+  const budgetDiffSmallPerPortion = smallBudgetCap - costPerPortionSmall;
+  const budgetDiffLargePerPortion = largeBudgetCap - costPerPortionLarge;
+  const budgetDifferenceTotal = totalBudgetCap - totalMenuProcurementCost;
+  const budgetDifferencePerPortion = avgBudgetCapPerPortion - avgFoodCostPerPortion;
+
+  const handleSaveBudgetCaps = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hasPermission('menu', 'edit')) {
+      addToast('error', 'Akses Ditolak', 'Anda tidak memiliki izin mengubah pagu anggaran.');
+      return;
+    }
+    const nextSmall = Math.max(0, Math.round(Number(smallCapDraft) || 0));
+    const nextLarge = Math.max(0, Math.round(Number(largeCapDraft) || 0));
+    await updateSPPGConfig({
+      smallPortionBudget: nextSmall,
+      largePortionBudget: nextLarge,
+    });
+  };
 
   // ---------------------------------------------------------------------------
   // HANDLERS
   // ---------------------------------------------------------------------------
+  const resolveLiveMaterialPriceAndUnit = (comp: FoodCompositionItem) => {
+    const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, comp.name));
+    const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, comp.name));
+    return {
+      unitPrice: invMatch?.pricePerUnit || mbMatch?.actualPrice || comp.defaultUnitPrice,
+      purchaseUnit: invMatch?.unit || mbMatch?.unit || comp.purchaseUnit || masterUnits[0]?.code || 'kg',
+    };
+  };
+
   const handleOpenAddIngredient = () => {
     const comp = foodCompositions[0];
     if (comp) {
+      const live = resolveLiveMaterialPriceAndUnit(comp);
       setSelectedCompositionId(comp.id);
       setCustomBdd(comp.ediblePortion);
-      setCustomUnitPrice(comp.defaultUnitPrice);
-      setCustomPurchaseUnit(comp.purchaseUnit || masterUnits[0]?.code || 'kg');
+      setCustomUnitPrice(live.unitPrice);
+      setCustomPurchaseUnit(live.purchaseUnit);
       setCustomGramSmall(comp.category === 'Makanan Pokok' ? 85 : 50);
       setCustomGramLarge(comp.category === 'Makanan Pokok' ? 125 : 75);
     }
@@ -583,9 +549,10 @@ export const NutritionMenuModule: React.FC = () => {
     setSelectedCompositionId(compId);
     const comp = foodCompositions.find(c => c.id === compId);
     if (comp) {
+      const live = resolveLiveMaterialPriceAndUnit(comp);
       setCustomBdd(comp.ediblePortion);
-      setCustomUnitPrice(comp.defaultUnitPrice);
-      setCustomPurchaseUnit(comp.purchaseUnit || masterUnits[0]?.code || 'kg');
+      setCustomUnitPrice(live.unitPrice);
+      setCustomPurchaseUnit(live.purchaseUnit);
     }
   };
 
@@ -607,6 +574,7 @@ export const NutritionMenuModule: React.FC = () => {
 
     const newIng: RecipeIngredient = {
       id: `ing-${Date.now()}`,
+      menuName: customMenuName.trim() || undefined,
       name: comp.name,
       category: comp.category,
       netWeightSmall: Number(customGramSmall),
@@ -615,6 +583,8 @@ export const NutritionMenuModule: React.FC = () => {
       ediblePortionPercent: Number(customBdd),
       conversionFactorToBase: convFactor,
       purchaseUnit: chosenUnitCode,
+      bufferPercentSmall: Number(customBufferSmallPct),
+      bufferPercentLarge: Number(customBufferLargePct),
       unitPrice: Number(customUnitPrice),
       calories100g: comp.calories,
       protein100g: comp.protein,
@@ -624,21 +594,47 @@ export const NutritionMenuModule: React.FC = () => {
       referenceSource: comp.sourceReference,
     };
 
-    setMenuIngredientsMap(prev => ({
-      ...prev,
-      [selectedMenuId]: [...(prev[selectedMenuId] || []), newIng],
-    }));
+    const nextList = [...(menuIngredientsMap[selectedMenuId] || []), newIng];
+    updateMenuIngredients(selectedMenuId, nextList);
 
-    addToast('success', 'Bahan Ditambahkan', `${comp.name} berhasil ditambahkan ke ${currentMenu?.menuCode || 'Menu'}.`);
+    addToast('success', 'Bahan Ditambahkan & Tersinkron', `${comp.name} ditambahkan. Food Cost & Gizi ${currentMenu?.menuCode || 'Menu'} diperbarui real-time.`);
+    setCustomMenuName('');
     setIsAddIngredientModalOpen(false);
   };
 
+  const handleUpdateIngredientBuffer = (
+    ingId: string,
+    field: 'bufferPercentSmall' | 'bufferPercentLarge',
+    value: number
+  ) => {
+    const safeVal = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
+    const nextList = (menuIngredientsMap[selectedMenuId] || []).map(item =>
+      item.id === ingId ? { ...item, [field]: safeVal } : item
+    );
+    updateMenuIngredients(selectedMenuId, nextList);
+  };
+
   const handleDeleteIngredient = (ingId: string) => {
-    setMenuIngredientsMap(prev => ({
-      ...prev,
-      [selectedMenuId]: (prev[selectedMenuId] || []).filter(i => i.id !== ingId),
-    }));
-    addToast('info', 'Bahan Dihapus', 'Bahan resep telah dikeluarkan dari menu.');
+    const nextList = (menuIngredientsMap[selectedMenuId] || []).filter(i => i.id !== ingId);
+    updateMenuIngredients(selectedMenuId, nextList);
+    addToast('info', 'Bahan Dihapus', 'Bahan resep telah dikeluarkan dan Food Cost diperbarui.');
+  };
+
+  const handleSyncActiveMenuToRAB = async () => {
+    if (ingredientsCalculated.length === 0) {
+      addToast('warning', 'Resep Kosong', 'Tambahkan minimal 1 bahan resep sebelum sinkronisasi ke RAB.');
+      return;
+    }
+    await syncMenuNeedsToRAB(
+      selectedMenuId,
+      ingredientsCalculated.map(i => ({
+        name: i.name,
+        category: i.category,
+        quantity: i.totalKuantiti,
+        unit: i.purchaseUnit,
+        unitPrice: i.unitPrice,
+      }))
+    );
   };
 
   const handleCreateNewMenu = async (e: React.FormEvent) => {
@@ -676,7 +672,7 @@ export const NutritionMenuModule: React.FC = () => {
       fatGrams: Number(nutritionSummaryLarge.fat.toFixed(1)) || 20.0,
       fiberGrams: Number(nutritionSummaryLarge.fiber.toFixed(1)) || 7.0,
       targetPortions: totalBeneficiaries,
-      estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 13500),
+      estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 9000),
       status: 'Draft',
       notes: newMenuForm.notes || 'Standar gizi terintegrasi PLOG.',
       customFields: newMenuForm.customFields || {},
@@ -684,10 +680,7 @@ export const NutritionMenuModule: React.FC = () => {
 
     await addMenuItem(payload);
     const newId = `menu-${Date.now()}`;
-    setMenuIngredientsMap(prev => ({
-      ...prev,
-      [newId]: [...sampleIngredientsMenu1],
-    }));
+    updateMenuIngredients(newId, [...sampleIngredientsMenu1]);
     setSelectedMenuId(newId);
     setNewMenuForm(prev => ({
       ...prev,
@@ -892,20 +885,28 @@ export const NutritionMenuModule: React.FC = () => {
   // Export PLOG Report to PDF
   const handleExportPLOGPDF = () => {
     exportTableToPDF({
-      title: `LAPORAN PERENCANAAN DAN EVALUASI GIZI (PLOG)`,
+      title: `LAPORAN PERENCANAAN DAN KEBUTUHAN BAHAN RESEP (PLOG)`,
       subtitle: `Menu: ${currentMenu?.menuCode} - ${currentMenu?.stapleFood} + ${currentMenu?.animalProtein} • SPPG TMG2`,
-      headers: ['Bahan Pangan', 'Gram (K/B)', '% BDD', 'Total Bersih', 'Kebutuhan Beli', 'Harga Satuan', 'Total Biaya', 'Kalori (K/B)'],
+      headers: [
+        'MENU',
+        'BAHAN MAKANAN',
+        'PK (BB / BDD% / BK)',
+        'PK Kebutuhan + Buffer -> Bulat',
+        'PB (BB / BDD% / BK)',
+        'PB Kebutuhan + Buffer -> Bulat',
+        'TOTAL KUANTITI (K+B)',
+      ],
       rows: ingredientsCalculated.map(i => [
+        i.menuLabel,
         i.name,
-        `${i.netWeightSmall}g / ${i.netWeightLarge}g`,
-        `${i.ediblePortionPercent}%`,
-        `${i.totalNetKg.toFixed(2)} kg`,
-        `${i.purchaseQty.toFixed(2)} ${i.purchaseUnit}`,
-        formatRupiah(i.unitPrice),
-        formatRupiah(i.totalCost),
-        `${Math.round(i.nutritionSmall.calories)} / ${Math.round(i.nutritionLarge.calories)} kkal`,
+        `${i.netWeightSmall}g / ${i.ediblePortionPercent}% / ${i.bkSmall.toFixed(1)}g`,
+        `${i.kebutuhanSmall.toFixed(1)} + ${i.bufferSmall.toFixed(2)} = ${i.pembulatanSmall} ${i.purchaseUnit}`,
+        `${i.netWeightLarge}g / ${i.ediblePortionPercent}% / ${i.bkLarge.toFixed(1)}g`,
+        `${i.kebutuhanLarge.toFixed(1)} + ${i.bufferLarge.toFixed(2)} = ${i.pembulatanLarge} ${i.purchaseUnit}`,
+        `${formatNumber(i.totalKuantiti)} ${i.purchaseUnit}`,
       ]),
-      fileName: `PLOG_Laporan_Gizi_Bahan_${currentMenu?.menuCode || 'Menu'}`,
+      fileName: `PLOG_Rincian_Bahan_Resep_${currentMenu?.menuCode || 'Menu'}`,
+      orientation: 'landscape',
       sppgConfig,
       signerName: sppgConfig.nutritionOfficer,
       signerRole: 'Pengawas Gizi Dietisien SPPG TMG2',
@@ -914,27 +915,32 @@ export const NutritionMenuModule: React.FC = () => {
 
   const handleExportPLOGExcel = () => {
     const dataToExport = ingredientsCalculated.map(i => ({
-      'Menu': currentMenu?.menuCode,
-      'Nama Bahan': i.name,
-      'Kategori': i.category,
-      'Gram Bersih Porsi Kecil': i.netWeightSmall,
-      'Gram Bersih Porsi Besar': i.netWeightLarge,
-      'Total Penerima Kecil': quotaSmall,
-      'Total Penerima Besar': quotaLarge,
-      'Total Berat Bersih (kg)': Number(i.totalNetKg.toFixed(2)),
-      '% BDD (Edible Portion)': i.ediblePortionPercent,
-      'Berat Kotor (kg)': Number(i.totalGrossKg.toFixed(2)),
-      'Kebutuhan Pembelian': Number(i.purchaseQty.toFixed(2)),
-      'Satuan Pembelian': i.purchaseUnit,
-      'Harga Satuan (Rp)': i.unitPrice,
-      'Total Biaya (Rp)': i.totalCost,
-      'Kalori Kecil (kkal)': Math.round(i.nutritionSmall.calories),
-      'Kalori Besar (kkal)': Math.round(i.nutritionLarge.calories),
-      'Protein Kecil (g)': Number(i.nutritionSmall.protein.toFixed(1)),
-      'Protein Besar (g)': Number(i.nutritionLarge.protein.toFixed(1)),
-      'Sumber Referensi': i.referenceSource,
+      'MENU': i.menuLabel,
+      'BAHAN MAKANAN': i.name,
+      'PK BB (g)': i.netWeightSmall,
+      'PK BDD%': i.ediblePortionPercent,
+      'PK BK (g)': Number(i.bkSmall.toFixed(1)),
+      'PK PORSI': quotaSmall,
+      'PK KEBUTUHAN': Number(i.kebutuhanSmall.toFixed(2)),
+      'PK BUFFER (%)': i.bufferPctSmall,
+      'PK BUFFER': Number(i.bufferSmall.toFixed(2)),
+      'PK TOTAL': Number(i.totalSmall.toFixed(2)),
+      'PK PEMBULATAN': i.pembulatanSmall,
+      'PK SATUAN': i.purchaseUnit,
+      'PB BB (g)': i.netWeightLarge,
+      'PB BDD%': i.ediblePortionPercent,
+      'PB BK (g)': Number(i.bkLarge.toFixed(1)),
+      'PB PORSI': quotaLarge,
+      'PB KEBUTUHAN': Number(i.kebutuhanLarge.toFixed(2)),
+      'PB BUFFER (%)': i.bufferPctLarge,
+      'PB BUFFER': Number(i.bufferLarge.toFixed(2)),
+      'PB TOTAL': Number(i.totalLarge.toFixed(2)),
+      'PB PEMBULATAN': i.pembulatanLarge,
+      'PB SATUAN': i.purchaseUnit,
+      'TOTAL KUANTITI (PEMBULATAN K+B)': i.totalKuantiti,
+      'SATUAN': i.purchaseUnit,
     }));
-    exportToExcel(dataToExport, `PLOG_Bahan_Gizi_${currentMenu?.menuCode || 'Menu'}`, 'Perencanaan Bahan Gizi');
+    exportToExcel(dataToExport, `PLOG_Rincian_Resep_${currentMenu?.menuCode || 'Menu'}`, 'Rincian Bahan Resep');
   };
 
   return (
@@ -1045,13 +1051,21 @@ export const NutritionMenuModule: React.FC = () => {
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>Pagu Anggaran per Porsi</span>
+            <span>Pagu Anggaran (2 Kategori)</span>
             <Coins className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-2xl font-black text-emerald-600 mt-1">
-            {formatRupiah(budgetCapPerPortion)}
+          <div className="mt-1.5 flex items-baseline gap-2 flex-wrap">
+            <span className="text-base sm:text-lg font-black text-indigo-700 dark:text-indigo-300 font-mono">
+              B: {formatRupiah(largeBudgetCap)}
+            </span>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <span className="text-base sm:text-lg font-black text-sky-700 dark:text-sky-300 font-mono">
+              K: {formatRupiah(smallBudgetCap)}
+            </span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Indeks Resmi Badan Gizi Nasional</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            Porsi Besar &amp; Porsi Kecil • Total {formatRupiah(totalBudgetCap)}
+          </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -1062,9 +1076,18 @@ export const NutritionMenuModule: React.FC = () => {
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
             {formatRupiah(Math.round(avgFoodCostPerPortion))}
           </div>
-          <div className="text-[11px] text-emerald-600 font-semibold mt-0.5 flex items-center gap-1">
-            <span>Efisiensi:</span>
-            <span>+{formatRupiah(Math.round(budgetDifferencePerPortion))}/porsi</span>
+          <div
+            className={`text-[11px] font-semibold mt-0.5 flex items-center gap-1 ${
+              budgetDifferencePerPortion >= 0
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-rose-600 dark:text-rose-400'
+            }`}
+          >
+            <span>{budgetDifferencePerPortion >= 0 ? 'Efisiensi:' : 'Melebihi Pagu:'}</span>
+            <span>
+              {budgetDifferencePerPortion >= 0 ? '+' : '-'}
+              {formatRupiah(Math.abs(Math.round(budgetDifferencePerPortion)))}/porsi
+            </span>
           </div>
         </div>
       </div>
@@ -1197,17 +1220,46 @@ export const NutritionMenuModule: React.FC = () => {
       {activeTab === 'menu_bahan' && (
         <div className="space-y-4">
           {/* Explanation Banner */}
-          <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-900 flex items-start gap-3 text-xs text-sky-900 dark:text-sky-200">
-            <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-bold">
-                Rumus Perhitungan Kebutuhan Bahan Sesuai Kategori Porsi & BDD:
+          <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-900 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs text-sky-900 dark:text-sky-200">
+            <div className="flex items-start gap-3">
+              <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold">
+                  Rumus Rincian Resep Porsi Kecil &amp; Porsi Besar (Format Standar Pengadaan):
+                </div>
+                <p className="leading-relaxed">
+                  <strong>BK</strong> = BB / (BDD% / 100) • <strong>KEBUTUHAN</strong> = (BK × PORSI) dalam Satuan Beli • <strong>TOTAL</strong> = KEBUTUHAN + BUFFER • <strong>PEMBULATAN</strong> = Pembulatan ke Atas •{' '}
+                  <strong className="text-blue-900 dark:text-sky-300">TOTAL KUANTITI = Pembulatan Porsi Kecil + Pembulatan Porsi Besar</strong>.
+                </p>
               </div>
-              <p className="leading-relaxed">
-                Total Berat Bersih = ({formatNumber(quotaSmall)} Porsi Kecil × Gram Kecil) + ({formatNumber(quotaLarge)} Porsi Besar × Gram Besar).
-                <br />
-                Berat Kotor (Gross) = Total Berat Bersih / (% BDD / 100). Kebutuhan pembelian dihitung riil agar porsi saat disantap siswa tidak menyusut di bawah gramasi standar gizi.
-              </p>
+            </div>
+
+            {/* Global Buffer Controls */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0 bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-sky-200 dark:border-sky-800">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-rose-800 dark:text-rose-300">
+                <span>Buffer P. Kecil (%):</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  value={defaultBufferSmallPct}
+                  onChange={e => setDefaultBufferSmallPct(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-14 px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-center"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                <span>Buffer P. Besar (%):</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  step={0.5}
+                  value={defaultBufferLargePct}
+                  onChange={e => setDefaultBufferLargePct(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-14 px-2 py-1 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-center"
+                />
+              </label>
             </div>
           </div>
 
@@ -1218,91 +1270,231 @@ export const NutritionMenuModule: React.FC = () => {
                 <Scale className="w-4 h-4 text-blue-900 dark:text-sky-400" />
                 Rincian Bahan Resep: {currentMenu?.stapleFood} + {currentMenu?.animalProtein}
               </h3>
-              <p className="text-xs text-slate-500">
-                Gramasi bersih, persentase BDD, berat kotor, dan total kebutuhan pengadaan
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Format lengkap Menu, Bahan Makanan, Porsi Kecil ({formatNumber(quotaSmall)} porsi), Porsi Besar ({formatNumber(quotaLarge)} porsi), &amp; Total Kuantiti Pembulatan
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleOpenAddIngredient}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Tambah Bahan Resep</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSyncActiveMenuToRAB}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                title="Kirim otomatis total kuantiti bahan resep ke Rencana Anggaran Belanja (RAB) Pengadaan"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sinkron Kebutuhan ke RAB</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportPLOGPDF}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>PDF Rincian</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportPLOGExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenAddIngredient}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Bahan Resep</span>
+              </button>
+            </div>
           </div>
 
-          {/* Table of Ingredients */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+          {/* Table of Ingredients - Format Rincian Resep Sesuai Standar Spreadsheet */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full border-collapse text-[11px]">
                 <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">Nama Bahan</th>
-                    <th className="p-3">Kategori</th>
-                    <th className="p-3 text-center">Berat Bersih / Porsi (K / B)</th>
-                    <th className="p-3 text-center">% BDD</th>
-                    <th className="p-3 text-right">Total Berat Bersih</th>
-                    <th className="p-3 text-right">Berat Kotor (Gross)</th>
-                    <th className="p-3 text-center">Faktor & Satuan</th>
-                    <th className="p-3 text-right text-blue-900 dark:text-sky-300 font-black">Kebutuhan Beli</th>
-                    <th className="p-3 text-right">Harga Satuan</th>
-                    <th className="p-3 text-right">Total Biaya</th>
-                    <th className="p-3 text-center">Aksi</th>
+                  <tr className="font-extrabold tracking-wide text-center border-b border-slate-400 dark:border-slate-700">
+                    <th
+                      rowSpan={2}
+                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[140px] text-left align-middle"
+                    >
+                      MENU
+                    </th>
+                    <th
+                      rowSpan={2}
+                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[160px] text-left align-middle"
+                    >
+                      BAHAN MAKANAN
+                    </th>
+                    <th
+                      colSpan={9}
+                      className="px-2 py-1.5 border-r border-slate-400 dark:border-slate-700 bg-rose-200 text-rose-950 dark:bg-rose-900/70 dark:text-rose-100"
+                    >
+                      PORSI KECIL
+                    </th>
+                    <th
+                      colSpan={9}
+                      className="px-2 py-1.5 border-r border-slate-400 dark:border-slate-700 bg-emerald-200 text-emerald-950 dark:bg-emerald-900/70 dark:text-emerald-100"
+                    >
+                      PORSI BESAR
+                    </th>
+                    <th
+                      rowSpan={2}
+                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-sky-200 text-sky-950 dark:bg-sky-900/80 dark:text-sky-100 min-w-[105px] align-middle leading-tight"
+                    >
+                      <div>TOTAL KUANTITI</div>
+                      <div className="text-[9px] font-semibold opacity-80">(Bulat K + Bulat B)</div>
+                    </th>
+                    <th
+                      rowSpan={2}
+                      className="px-2 py-2 bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100 w-10 text-center align-middle print:hidden"
+                    >
+                      AKSI
+                    </th>
+                  </tr>
+                  <tr className="font-bold text-[10px] text-center border-b border-slate-400 dark:border-slate-700">
+                    {/* Sub-header PORSI KECIL */}
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">BB</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">BDD%</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">BK</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">PORSI</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">KEBUTUHAN</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">BUFFER</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">TOTAL</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200 font-black">PEMBULATAN</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-400 dark:border-slate-700 bg-rose-100 text-rose-950 dark:bg-rose-950/60 dark:text-rose-200">SATUAN</th>
+
+                    {/* Sub-header PORSI BESAR */}
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">BB</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">BDD%</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">BK</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">PORSI</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">KEBUTUHAN</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">BUFFER</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">TOTAL</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200 font-black">PEMBULATAN</th>
+                    <th className="px-1.5 py-1.5 border-r border-slate-400 dark:border-slate-700 bg-emerald-100 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-200">SATUAN</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
                   {ingredientsCalculated.map(item => (
                     <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">
+                      <td className="px-2.5 py-2 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-900 dark:text-white">
+                        {item.menuLabel}
+                      </td>
+                      <td className="px-2.5 py-2 border-r border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-slate-100">
                         {item.name}
-                        <div className="text-[10px] text-slate-400 font-normal font-mono">
-                          Ref: {item.referenceSource}
+                        <div className="text-[9px] text-slate-400 font-mono">
+                          {item.category} • {item.referenceSource}
                         </div>
                       </td>
-                      <td className="p-3 font-sans text-slate-600 dark:text-slate-400">
-                        {item.category}
+
+                      {/* PORSI KECIL CELLS */}
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.netWeightSmall}
                       </td>
-                      <td className="p-3 text-center font-bold">
-                        <span className="text-sky-600">{item.netWeightSmall}g</span>
-                        <span className="text-slate-400 mx-1">/</span>
-                        <span className="text-indigo-600">{item.netWeightLarge}g</span>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.ediblePortionPercent}%
                       </td>
-                      <td className="p-3 text-center font-bold">
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[11px] ${
-                            item.ediblePortionPercent < 80
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          }`}
-                        >
-                          {item.ediblePortionPercent}%
-                        </span>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.bkSmall.toFixed(1)}
                       </td>
-                      <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                        {item.totalNetKg.toFixed(2)} kg
-                        <div className="text-[10px] text-slate-400">({formatNumber(item.totalNetGrams)} g)</div>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {formatNumber(quotaSmall)}
                       </td>
-                      <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">
-                        {item.totalGrossKg.toFixed(2)} kg
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
+                        {item.kebutuhanSmall.toFixed(1)}
                       </td>
-                      <td className="p-3 text-center font-sans text-[11px] text-slate-500">
-                        {item.conversionFactorToBase} ({item.purchaseUnit})
+                      <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
+                        <div className="text-slate-800 dark:text-slate-200">{item.bufferSmall.toFixed(2)}</div>
+                        <div className="flex items-center justify-end gap-0.5 print:hidden">
+                          <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            step={0.5}
+                            aria-label={`Buffer Porsi Kecil ${item.name} (%)`}
+                            value={item.bufferPctSmall}
+                            onChange={e =>
+                              handleUpdateIngredientBuffer(item.id, 'bufferPercentSmall', Number(e.target.value))
+                            }
+                            className="w-10 px-1 py-0 text-[9px] text-right rounded border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200"
+                          />
+                          <span className="text-[9px] text-slate-400">%</span>
+                        </div>
                       </td>
-                      <td className="p-3 text-right font-black text-blue-900 dark:text-sky-400 text-sm">
-                        {item.purchaseQty.toFixed(2)} {item.purchaseUnit}
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                        {item.totalSmall.toFixed(1)}
                       </td>
-                      <td className="p-3 text-right text-slate-700 dark:text-slate-300">
-                        {formatRupiah(item.unitPrice)}
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-rose-800 dark:text-rose-300 bg-rose-50/60 dark:bg-rose-950/30">
+                        {formatNumber(item.pembulatanSmall)}
                       </td>
-                      <td className="p-3 text-right font-bold text-emerald-700 dark:text-emerald-400">
-                        {formatRupiah(item.totalCost)}
+                      <td className="px-1.5 py-2 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
+                        {item.purchaseUnit}
                       </td>
-                      <td className="p-3 text-center">
+
+                      {/* PORSI BESAR CELLS */}
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.netWeightLarge}
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.ediblePortionPercent}%
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                        {item.bkLarge.toFixed(1)}
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
+                        {formatNumber(quotaLarge)}
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
+                        {item.kebutuhanLarge.toFixed(1)}
+                      </td>
+                      <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
+                        <div className="text-slate-800 dark:text-slate-200">{item.bufferLarge.toFixed(2)}</div>
+                        <div className="flex items-center justify-end gap-0.5 print:hidden">
+                          <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            step={0.5}
+                            aria-label={`Buffer Porsi Besar ${item.name} (%)`}
+                            value={item.bufferPctLarge}
+                            onChange={e =>
+                              handleUpdateIngredientBuffer(item.id, 'bufferPercentLarge', Number(e.target.value))
+                            }
+                            className="w-10 px-1 py-0 text-[9px] text-right rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200"
+                          />
+                          <span className="text-[9px] text-slate-400">%</span>
+                        </div>
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                        {item.totalLarge.toFixed(1)}
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/30">
+                        {formatNumber(item.pembulatanLarge)}
+                      </td>
+                      <td className="px-1.5 py-2 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
+                        {item.purchaseUnit}
+                      </td>
+
+                      {/* TOTAL KUANTITI (HASIL PENAMBAHAN PEMBULATAN PORSI KECIL + PORSI BESAR) */}
+                      <td className="px-2 py-2 border-r border-slate-300 dark:border-slate-700 text-center font-mono font-black text-xs text-sky-950 dark:text-sky-200 bg-sky-50/90 dark:bg-sky-950/40">
+                        {formatNumber(item.totalKuantiti)}{' '}
+                        <span className="text-[10px] font-bold">{item.purchaseUnit}</span>
+                        <div className="text-[9px] font-normal text-slate-500 dark:text-slate-400">
+                          ({item.pembulatanSmall} + {item.pembulatanLarge})
+                        </div>
+                      </td>
+
+                      <td className="px-1.5 py-2 text-center print:hidden">
                         <button
+                          type="button"
                           onClick={() => handleDeleteIngredient(item.id)}
-                          className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                          className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition cursor-pointer"
                           title="Hapus Bahan dari Resep"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1312,26 +1504,32 @@ export const NutritionMenuModule: React.FC = () => {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t border-slate-300 dark:border-slate-700 text-xs">
-                    <td colSpan={4} className="p-3 font-sans text-right uppercase tracking-wider">
-                      TOTAL KESELURUHAN BAHAN ({ingredientsCalculated.length} Komponen):
+                  <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t-2 border-slate-400 dark:border-slate-700 text-[11px]">
+                    <td colSpan={2} className="px-2.5 py-2.5 font-sans text-right uppercase tracking-wider border-r border-slate-300 dark:border-slate-700">
+                      TOTAL ({ingredientsCalculated.length} Bahan):
                     </td>
-                    <td className="p-3 text-right text-slate-900 dark:text-white">
-                      {totalNetWeightAllKg.toFixed(2)} kg
+                    <td colSpan={7} className="px-2 py-2.5 text-right text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700 font-sans">
+                      Jml Bulat P. Kecil:
                     </td>
-                    <td className="p-3 text-right text-slate-900 dark:text-white">
-                      {totalGrossWeightAllKg.toFixed(2)} kg
+                    <td className="px-1.5 py-2.5 text-center text-rose-900 dark:text-rose-200 font-black border-r border-slate-200 dark:border-slate-700 bg-rose-100/70 dark:bg-rose-950/50">
+                      {formatNumber(ingredientsCalculated.reduce((acc, i) => acc + i.pembulatanSmall, 0))}
                     </td>
-                    <td colSpan={2} className="p-3 text-right font-sans text-slate-500">
-                      Volume Belanja Dapur
+                    <td className="px-1.5 py-2.5 border-r border-slate-300 dark:border-slate-700 text-center text-[10px] text-slate-500">
+                      unit
                     </td>
-                    <td className="p-3 text-right font-sans text-slate-500">
-                      Total Belanja:
+                    <td colSpan={7} className="px-2 py-2.5 text-right text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700 font-sans">
+                      Jml Bulat P. Besar:
                     </td>
-                    <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 text-sm font-black">
-                      {formatRupiah(totalMenuProcurementCost)}
+                    <td className="px-1.5 py-2.5 text-center text-emerald-900 dark:text-emerald-200 font-black border-r border-slate-200 dark:border-slate-700 bg-emerald-100/70 dark:bg-emerald-950/50">
+                      {formatNumber(ingredientsCalculated.reduce((acc, i) => acc + i.pembulatanLarge, 0))}
                     </td>
-                    <td></td>
+                    <td className="px-1.5 py-2.5 border-r border-slate-300 dark:border-slate-700 text-center text-[10px] text-slate-500">
+                      unit
+                    </td>
+                    <td className="px-2 py-2.5 text-center text-sky-950 dark:text-sky-100 font-black border-r border-slate-300 dark:border-slate-700 bg-sky-200/70 dark:bg-sky-900/60">
+                      {formatNumber(ingredientsCalculated.reduce((acc, i) => acc + i.totalKuantiti, 0))}
+                    </td>
+                    <td className="print:hidden" />
                   </tr>
                 </tfoot>
               </table>
@@ -1799,14 +1997,85 @@ export const NutritionMenuModule: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'food_cost' && (
         <div className="space-y-6">
-          {/* Top Indicator Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[11px] text-slate-500 uppercase font-bold">Pagu Anggaran MBG</div>
-              <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                {formatRupiah(budgetCapPerPortion)}
+          {/* Konfigurasi Pagu Anggaran Dua Kategori (Porsi Besar & Porsi Kecil) */}
+          <form
+            onSubmit={handleSaveBudgetCaps}
+            className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+          >
+            <div className="space-y-1">
+              <div className="text-xs font-extrabold uppercase tracking-wide text-slate-800 dark:text-white flex items-center gap-2">
+                <Coins className="w-4 h-4 text-emerald-600" />
+                <span>Pengaturan Pagu Anggaran MBG (2 Kategori Porsi)</span>
               </div>
-              <div className="text-[10px] text-slate-400">Total Pagu: {formatRupiah(totalBudgetCap)}</div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Total Pagu Harian = ({formatNumber(quotaLarge)} Porsi Besar × {formatRupiah(largeBudgetCap)}) + ({formatNumber(quotaSmall)} Porsi Kecil × {formatRupiah(smallBudgetCap)}) ={' '}
+                <strong className="text-slate-900 dark:text-white font-mono">
+                  {formatRupiah(totalBudgetCap)}
+                </strong>
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-indigo-700 dark:text-indigo-300 mb-1">
+                  Porsi Besar (Rp / Porsi)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  disabled={!hasPermission('menu', 'edit')}
+                  value={largeCapDraft}
+                  onChange={e => setLargeCapDraft(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-36 px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/40 text-slate-900 dark:text-white disabled:opacity-60"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-sky-700 dark:text-sky-300 mb-1">
+                  Porsi Kecil (Rp / Porsi)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  disabled={!hasPermission('menu', 'edit')}
+                  value={smallCapDraft}
+                  onChange={e => setSmallCapDraft(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-36 px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/40 text-slate-900 dark:text-white disabled:opacity-60"
+                />
+              </div>
+
+              {hasPermission('menu', 'edit') && (
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  Simpan Pagu
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Top Indicator Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-1.5">
+              <div className="text-[11px] text-slate-500 uppercase font-bold">Pagu Anggaran MBG</div>
+              <div className="flex items-center justify-between text-xs pt-0.5">
+                <span className="font-semibold text-indigo-700 dark:text-indigo-300">Porsi Besar:</span>
+                <span className="font-mono font-black text-sm text-indigo-700 dark:text-indigo-300">
+                  {formatRupiah(largeBudgetCap)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-sky-700 dark:text-sky-300">Porsi Kecil:</span>
+                <span className="font-mono font-black text-sm text-sky-700 dark:text-sky-300">
+                  {formatRupiah(smallBudgetCap)}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800">
+                Total Pagu Harian: <strong className="text-slate-700 dark:text-slate-200">{formatRupiah(totalBudgetCap)}</strong>
+              </div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -1814,7 +2083,20 @@ export const NutritionMenuModule: React.FC = () => {
               <div className="text-xl font-black text-sky-600 mt-1">
                 {formatRupiah(Math.round(costPerPortionSmall))}
               </div>
-              <div className="text-[10px] text-sky-700 font-semibold">{percentToCapSmall.toFixed(1)}% dari Pagu</div>
+              <div className="text-[10px] text-sky-700 dark:text-sky-300 font-semibold mt-0.5">
+                {percentToCapSmall.toFixed(1)}% dari Pagu {formatRupiah(smallBudgetCap)}
+              </div>
+              <div
+                className={`text-[10px] font-bold mt-1 ${
+                  budgetDiffSmallPerPortion >= 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {budgetDiffSmallPerPortion >= 0
+                  ? `Hemat +${formatRupiah(Math.round(budgetDiffSmallPerPortion))}/porsi`
+                  : `Over -${formatRupiah(Math.abs(Math.round(budgetDiffSmallPerPortion)))}/porsi`}
+              </div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -1822,29 +2104,61 @@ export const NutritionMenuModule: React.FC = () => {
               <div className="text-xl font-black text-indigo-600 mt-1">
                 {formatRupiah(Math.round(costPerPortionLarge))}
               </div>
-              <div className="text-[10px] text-indigo-700 font-semibold">{percentToCapLarge.toFixed(1)}% dari Pagu</div>
+              <div className="text-[10px] text-indigo-700 dark:text-indigo-300 font-semibold mt-0.5">
+                {percentToCapLarge.toFixed(1)}% dari Pagu {formatRupiah(largeBudgetCap)}
+              </div>
+              <div
+                className={`text-[10px] font-bold mt-1 ${
+                  budgetDiffLargePerPortion >= 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {budgetDiffLargePerPortion >= 0
+                  ? `Hemat +${formatRupiah(Math.round(budgetDiffLargePerPortion))}/porsi`
+                  : `Over -${formatRupiah(Math.abs(Math.round(budgetDiffLargePerPortion)))}/porsi`}
+              </div>
             </div>
 
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[11px] text-slate-500 uppercase font-bold">Selisih Anggaran (Hemat)</div>
-              <div className="text-xl font-black text-emerald-600 mt-1">
-                +{formatRupiah(budgetDifferenceTotal)}
+              <div className="text-[11px] text-slate-500 uppercase font-bold">
+                {budgetDifferenceTotal >= 0 ? 'Selisih Anggaran (Hemat)' : 'Selisih Anggaran (Defisit)'}
               </div>
-              <div className="text-[10px] text-emerald-700 font-semibold">
-                Surplus Operasional SPPG ({((budgetDifferenceTotal / totalBudgetCap) * 100).toFixed(1)}%)
+              <div
+                className={`text-xl font-black mt-1 ${
+                  budgetDifferenceTotal >= 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-rose-600 dark:text-rose-400'
+                }`}
+              >
+                {budgetDifferenceTotal >= 0 ? '+' : '-'}
+                {formatRupiah(Math.abs(budgetDifferenceTotal))}
+              </div>
+              <div
+                className={`text-[10px] font-semibold mt-0.5 ${
+                  budgetDifferenceTotal >= 0
+                    ? 'text-emerald-700 dark:text-emerald-300'
+                    : 'text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {budgetDifferenceTotal >= 0 ? 'Surplus Operasional SPPG' : 'Melebihi Pagu Gabungan'} (
+                {totalBudgetCap > 0 ? ((Math.abs(budgetDifferenceTotal) / totalBudgetCap) * 100).toFixed(1) : '0.0'}%)
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">
+                Serapan Total: {percentToCapAvg.toFixed(1)}% dari Pagu
               </div>
             </div>
           </div>
 
           {/* Table: Food Cost Bahan = Jumlah bahan x Harga satuan */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Rincian Food Cost Bahan: {currentMenu?.menuCode} ({totalBeneficiaries} Porsi)
+                  Rincian Food Cost Bahan: {currentMenu?.menuCode} ({formatNumber(totalBeneficiaries)} Porsi)
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Perhitungan: Food Cost Bahan = Jumlah Kebutuhan × Harga Satuan | Food Cost/Porsi = Total Biaya / Jumlah Porsi
+                  Perhitungan: Food Cost Bahan = Jumlah Kebutuhan × Harga Satuan | Pembanding Pagu: Porsi Besar {formatRupiah(largeBudgetCap)} &amp; Porsi Kecil {formatRupiah(smallBudgetCap)}
                 </p>
               </div>
             </div>
@@ -1908,6 +2222,23 @@ export const NutritionMenuModule: React.FC = () => {
                     </td>
                     <td className="p-3 text-right text-slate-900 dark:text-white font-black">
                       100.0%
+                    </td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-900/90 font-semibold font-mono border-t border-slate-200 dark:border-slate-700 text-[11px]">
+                    <td colSpan={4} className="px-3 py-2.5 font-sans text-right uppercase tracking-wider text-slate-500">
+                      BATAS PAGU ANGGARAN MBG (2 KATEGORI):
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-800 dark:text-slate-200 font-bold">
+                      {formatRupiah(totalBudgetCap)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-sky-600 dark:text-sky-400 font-bold">
+                      {formatRupiah(smallBudgetCap)} ({percentToCapSmall.toFixed(1)}%)
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-indigo-600 dark:text-indigo-400 font-bold">
+                      {formatRupiah(largeBudgetCap)} ({percentToCapLarge.toFixed(1)}%)
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-700 dark:text-slate-300 font-bold">
+                      {percentToCapAvg.toFixed(1)}%
                     </td>
                   </tr>
                 </tfoot>
@@ -2201,27 +2532,41 @@ export const NutritionMenuModule: React.FC = () => {
         maxWidth="lg"
       >
         <form onSubmit={handleSaveIngredientToMenu} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Pilih Bahan dari Komposisi Pangan (TKPI 2020 / USDA) *
-            </label>
-            <select
-              value={selectedCompositionId}
-              onChange={e => handleCompositionChange(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-            >
-              {foodCompositions.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.code} - {c.name} ({c.category}) — BDD {c.ediblePortion}%
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Nama Hidangan (Kolom MENU)
+              </label>
+              <input
+                type="text"
+                value={customMenuName}
+                onChange={e => setCustomMenuName(e.target.value)}
+                placeholder="Kosongkan untuk ikut nama menu aktif"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Pilih Bahan dari Komposisi Pangan (TKPI 2020 / USDA) *
+              </label>
+              <select
+                value={selectedCompositionId}
+                onChange={e => handleCompositionChange(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                {foodCompositions.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} - {c.name} ({c.category}) — BDD {c.ediblePortion}%
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
-                Berat Bersih Porsi Kecil (gram) *
+                BB Porsi Kecil (g) *
               </label>
               <input
                 type="number"
@@ -2234,7 +2579,7 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
-                Berat Bersih Porsi Besar (gram) *
+                BB Porsi Besar (g) *
               </label>
               <input
                 type="number"
@@ -2242,6 +2587,34 @@ export const NutritionMenuModule: React.FC = () => {
                 required
                 value={customGramLarge}
                 onChange={e => setCustomGramLarge(Number(e.target.value))}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-rose-700 dark:text-rose-300 mb-1">
+                Buffer P. Kecil (%)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                step="0.5"
+                value={customBufferSmallPct}
+                onChange={e => setCustomBufferSmallPct(Number(e.target.value))}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-300 mb-1">
+                Buffer P. Besar (%)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                step="0.5"
+                value={customBufferLargePct}
+                onChange={e => setCustomBufferLargePct(Number(e.target.value))}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>

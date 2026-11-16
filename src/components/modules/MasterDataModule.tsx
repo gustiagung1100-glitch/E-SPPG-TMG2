@@ -62,6 +62,21 @@ export const MasterDataModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'penerima' | 'bahan' | 'supplier' | 'relawan' | 'satuan'>('penerima');
   const [unitTypeFilter, setUnitTypeFilter] = useState<'ALL' | MasterUnit['type']>('ALL');
 
+  React.useEffect(() => {
+    const labels: Record<'penerima' | 'bahan' | 'supplier' | 'relawan' | 'satuan', string> = {
+      penerima: 'A. Master Penerima Manfaat',
+      bahan: 'B. Master Bahan Pangan',
+      supplier: 'C. Master Supplier',
+      relawan: 'D. Master Relawan',
+      satuan: 'E. Master Satuan & Dimensi Bahan',
+    };
+    window.dispatchEvent(
+      new CustomEvent('sppg-subtab-change', {
+        detail: { module: 'master_data', title: labels[activeTab] },
+      })
+    );
+  }, [activeTab]);
+
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'penerima' | 'bahan' | 'supplier' | 'relawan' | 'satuan' | 'konversi'>('penerima');
@@ -325,15 +340,15 @@ export const MasterDataModule: React.FC = () => {
       key: 'name',
       header: 'Nama Lembaga & Jenis',
       render: row => (
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+        <div className="space-y-1 max-w-xs">
+          <div className="font-bold text-[13px] text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
             <span>{row.name}</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-sky-300 rounded-xs">
+            <span className="text-[10px] font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200/70 dark:bg-blue-950/70 dark:text-sky-300 dark:border-blue-800 rounded-md">
               {row.level}
             </span>
           </div>
-          <div className="text-[11px] text-slate-500">{row.institutionType}</div>
-          <div className="text-[10px] text-slate-400 truncate max-w-xs">{row.address}</div>
+          <div className="text-xs text-slate-600 dark:text-slate-300 font-medium">{row.institutionType}</div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">{row.address}</div>
         </div>
       ),
     },
@@ -341,9 +356,9 @@ export const MasterDataModule: React.FC = () => {
       key: 'contacts',
       header: 'PIC & Kontak',
       render: row => (
-        <div className="text-xs space-y-0.5">
+        <div className="text-xs space-y-1">
           <div className="font-semibold text-slate-900 dark:text-white">{row.picName || row.contactPerson}</div>
-          <div className="text-[11px] text-slate-500 font-mono">{row.picPhone || row.phone}</div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{row.picPhone || row.phone}</div>
         </div>
       ),
     },
@@ -351,10 +366,12 @@ export const MasterDataModule: React.FC = () => {
       key: 'bank',
       header: 'Nomor Rekening',
       render: row => (
-        <div className="text-xs font-mono">
+        <div className="text-xs font-mono space-y-1">
           <div className="font-semibold text-slate-800 dark:text-slate-200">{row.bankName || 'Bank Jatim'}</div>
-          <div className="text-[11px] text-slate-500">{row.accountNumber || '-'}</div>
-          <div className="text-[10px] text-slate-400 font-sans">{row.bankAccountName}</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400">{row.accountNumber || '-'}</div>
+          {row.bankAccountName && (
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 font-sans">{row.bankAccountName}</div>
+          )}
         </div>
       ),
     },
@@ -362,13 +379,13 @@ export const MasterDataModule: React.FC = () => {
       key: 'portions',
       header: 'Kategori Porsi',
       render: row => (
-        <div className="text-xs font-mono">
+        <div className="text-xs font-mono space-y-1">
           <div className="font-bold text-slate-900 dark:text-white">
-            {formatNumber(row.totalPortions)} <span className="font-normal text-[10px] text-slate-400">Total</span>
+            {formatNumber(row.totalPortions)} <span className="font-normal text-[11px] text-slate-400 font-sans">Total Porsi</span>
           </div>
-          <div className="text-[11px] text-slate-500">
-            Kecil: <span className="font-semibold text-sky-600">{row.smallPortions}</span> • Besar:{' '}
-            <span className="font-semibold text-blue-900 dark:text-sky-400">{row.largePortions}</span>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">
+            Kecil: <span className="font-semibold text-sky-600 dark:text-sky-400 font-mono">{row.smallPortions}</span> · Besar:{' '}
+            <span className="font-semibold text-blue-700 dark:text-blue-400 font-mono">{row.largePortions}</span>
           </div>
         </div>
       ),
@@ -378,10 +395,10 @@ export const MasterDataModule: React.FC = () => {
       header: 'Status',
       render: row => (
         <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap ${
             row.isActive
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/70'
+              : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800/70'
           }`}
         >
           {row.isActive ? 'Aktif' : 'Nonaktif'}
@@ -393,18 +410,22 @@ export const MasterDataModule: React.FC = () => {
       header: 'Aksi',
       align: 'right',
       render: row => (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={() => handleOpenEdit('penerima', row)}
-            className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 dark:hover:bg-sky-900/60 rounded-lg transition cursor-pointer"
             title="Edit Lembaga"
+            aria-label={`Edit ${row.name}`}
           >
             <Edit className="w-4 h-4" />
           </button>
           <button
+            type="button"
             onClick={() => setDeleteData({ id: row.id, type: 'penerima' })}
-            className="p-1.5 text-rose-500 hover:text-rose-700 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 dark:hover:bg-rose-900/60 rounded-lg transition cursor-pointer"
             title="Hapus Lembaga"
+            aria-label={`Hapus ${row.name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -482,10 +503,10 @@ export const MasterDataModule: React.FC = () => {
       header: 'Status',
       render: row => (
         <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap ${
             row.isActive
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/70'
+              : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800/70'
           }`}
         >
           {row.isActive ? 'Aktif' : 'Nonaktif'}
@@ -497,18 +518,22 @@ export const MasterDataModule: React.FC = () => {
       header: 'Aksi',
       align: 'right',
       render: row => (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={() => handleOpenEdit('bahan', row)}
-            className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 dark:hover:bg-sky-900/60 rounded-lg transition cursor-pointer"
             title="Edit Bahan"
+            aria-label={`Edit ${row.name}`}
           >
             <Edit className="w-4 h-4" />
           </button>
           <button
+            type="button"
             onClick={() => setDeleteData({ id: row.id, type: 'bahan' })}
-            className="p-1.5 text-rose-500 hover:text-rose-700 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 dark:hover:bg-rose-900/60 rounded-lg transition cursor-pointer"
             title="Hapus Bahan"
+            aria-label={`Hapus ${row.name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -523,12 +548,12 @@ export const MasterDataModule: React.FC = () => {
       key: 'name',
       header: 'Nama Supplier & Kode',
       render: row => (
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-            <span>{row.name}</span>
+        <div className="space-y-1 max-w-xs">
+          <div className="font-bold text-[13px] text-slate-900 dark:text-white">
+            {row.name}
           </div>
-          <div className="text-[11px] font-mono text-slate-500">Kode: {row.code}</div>
-          <div className="text-[10px] text-slate-400 truncate max-w-xs">{row.address}</div>
+          <div className="text-xs font-mono text-slate-600 dark:text-slate-300">Kode: {row.code}</div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">{row.address}</div>
         </div>
       ),
     },
@@ -536,10 +561,10 @@ export const MasterDataModule: React.FC = () => {
       key: 'contact',
       header: 'PIC & Kontak',
       render: row => (
-        <div className="text-xs space-y-0.5">
+        <div className="text-xs space-y-1">
           <div className="font-semibold text-slate-900 dark:text-white">{row.contactPerson}</div>
           <div className="text-[11px] text-slate-500 font-mono">{row.phone}</div>
-          {row.email && <div className="text-[10px] text-slate-400">{row.email}</div>}
+          {row.email && <div className="text-[11px] text-slate-400">{row.email}</div>}
         </div>
       ),
     },
@@ -547,9 +572,9 @@ export const MasterDataModule: React.FC = () => {
       key: 'categories',
       header: 'Jenis Pasokan Pangan',
       render: row => (
-        <div className="flex flex-wrap gap-1 max-w-xs">
+        <div className="flex flex-wrap gap-1.5 max-w-xs">
           {row.suppliedCategories.map((c, idx) => (
-            <span key={idx} className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-sky-300 rounded-xs font-semibold">
+            <span key={idx} className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200/70 dark:bg-blue-950/60 dark:text-sky-300 dark:border-blue-800 rounded-md font-medium">
               {c}
             </span>
           ))}
@@ -560,10 +585,10 @@ export const MasterDataModule: React.FC = () => {
       key: 'bank',
       header: 'Rekening Pembayaran',
       render: row => (
-        <div className="text-xs font-mono">
-          <div className="font-bold text-slate-800 dark:text-slate-200">{row.bankName}</div>
+        <div className="text-xs font-mono space-y-1">
+          <div className="font-semibold text-slate-800 dark:text-slate-200">{row.bankName}</div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400">{row.accountNumber}</div>
-          <div className="text-[10px] text-slate-400 font-sans">a.n. {row.bankAccountName}</div>
+          <div className="text-[11px] text-slate-400 font-sans">a.n. {row.bankAccountName}</div>
         </div>
       ),
     },
@@ -572,10 +597,10 @@ export const MasterDataModule: React.FC = () => {
       header: 'Status',
       render: row => (
         <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap ${
             row.isActive
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/70'
+              : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800/70'
           }`}
         >
           {row.isActive ? 'Aktif' : 'Nonaktif'}
@@ -587,18 +612,22 @@ export const MasterDataModule: React.FC = () => {
       header: 'Aksi',
       align: 'right',
       render: row => (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={() => handleOpenEdit('supplier', row)}
-            className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 dark:hover:bg-sky-900/60 rounded-lg transition cursor-pointer"
             title="Edit Supplier"
+            aria-label={`Edit ${row.name}`}
           >
             <Edit className="w-4 h-4" />
           </button>
           <button
+            type="button"
             onClick={() => setDeleteData({ id: row.id, type: 'supplier' })}
-            className="p-1.5 text-rose-500 hover:text-rose-700 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 dark:hover:bg-rose-900/60 rounded-lg transition cursor-pointer"
             title="Hapus Supplier"
+            aria-label={`Hapus ${row.name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -613,10 +642,10 @@ export const MasterDataModule: React.FC = () => {
       key: 'name',
       header: 'Nama Relawan & ID',
       render: row => (
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white">{row.name}</div>
-          <div className="text-[11px] font-mono text-slate-500">ID: {row.code}</div>
-          <div className="text-[10px] text-slate-400">{row.address}</div>
+        <div className="space-y-1">
+          <div className="font-bold text-[13px] text-slate-900 dark:text-white">{row.name}</div>
+          <div className="text-xs font-mono text-slate-500">ID: {row.code}</div>
+          <div className="text-[11px] text-slate-400 dark:text-slate-500">{row.address}</div>
         </div>
       ),
     },
@@ -624,9 +653,9 @@ export const MasterDataModule: React.FC = () => {
       key: 'division',
       header: 'Divisi & Jabatan',
       render: row => (
-        <div className="text-xs space-y-0.5">
-          <div className="font-bold text-blue-900 dark:text-sky-400">Divisi {row.division}</div>
-          <div className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">{row.position}</div>
+        <div className="text-xs space-y-1">
+          <div className="font-semibold text-blue-700 dark:text-sky-400">Divisi {row.division}</div>
+          <div className="text-xs text-slate-600 dark:text-slate-300">{row.position}</div>
         </div>
       ),
     },
@@ -640,10 +669,10 @@ export const MasterDataModule: React.FC = () => {
       header: 'Status',
       render: row => (
         <span
-          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+          className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap ${
             row.isActive
-              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-              : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800/70'
+              : 'bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800/70'
           }`}
         >
           {row.isActive ? 'Aktif' : 'Nonaktif'}
@@ -655,18 +684,22 @@ export const MasterDataModule: React.FC = () => {
       header: 'Aksi',
       align: 'right',
       render: row => (
-        <div className="flex items-center justify-end gap-1.5">
+        <div className="flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={() => handleOpenEdit('relawan', row)}
-            className="p-1.5 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 dark:hover:bg-sky-900/60 rounded-lg transition cursor-pointer"
             title="Edit Relawan"
+            aria-label={`Edit ${row.name}`}
           >
             <Edit className="w-4 h-4" />
           </button>
           <button
+            type="button"
             onClick={() => setDeleteData({ id: row.id, type: 'relawan' })}
-            className="p-1.5 text-rose-500 hover:text-rose-700 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+            className="inline-flex items-center justify-center min-w-[38px] min-h-[38px] p-2.5 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 dark:hover:bg-rose-900/60 rounded-lg transition cursor-pointer"
             title="Hapus Relawan"
+            aria-label={`Hapus ${row.name}`}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -677,14 +710,16 @@ export const MasterDataModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Module Title */}
+      {/* Module Title & Primary CTA Aligned Left & Right */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Database className="w-6 h-6 text-blue-900 dark:text-sky-400" />
-            Modul Master Data Sistem E-SPPG
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-200/70 dark:bg-sky-950/60 dark:text-sky-400 dark:border-sky-800/70 shrink-0">
+              <Database className="w-5 h-5" />
+            </span>
+            <span>Modul Master Data Sistem E-SPPG</span>
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
             Data Induk Terpadu: Penerima Manfaat, Bahan Pangan, Supplier, Relawan & Satuan Konversi Dimensi
           </p>
         </div>
@@ -692,74 +727,81 @@ export const MasterDataModule: React.FC = () => {
         <button
           type="button"
           onClick={() => handleOpenAdd(activeTab as any)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition"
+          className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap shrink-0 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>{activeTab === 'satuan' ? 'Tambah Master Satuan' : 'Tambah Data Master'}</span>
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2 sm:gap-6 text-xs font-bold overflow-x-auto pb-0.5">
-        <button
-          onClick={() => setActiveTab('penerima')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 whitespace-nowrap ${
-            activeTab === 'penerima'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
+      {/* Modern Pill Tabs Bar (Horizontal Scroll + Responsive No Clipping) */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/85 dark:border-slate-800 shadow-sm">
+        <div
+          role="tablist"
+          aria-label="Kategori Master Data"
+          className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar"
         >
-          <School className="w-4 h-4" />
-          <span>A. Master Penerima Manfaat ({institutions.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('bahan')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 whitespace-nowrap ${
-            activeTab === 'bahan'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Apple className="w-4 h-4" />
-          <span>B. Master Bahan Pangan ({masterBahan.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('supplier')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 whitespace-nowrap ${
-            activeTab === 'supplier'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Truck className="w-4 h-4" />
-          <span>C. Master Supplier ({masterSuppliers.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('relawan')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 whitespace-nowrap ${
-            activeTab === 'relawan'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Users2 className="w-4 h-4" />
-          <span>D. Master Relawan ({masterVolunteers.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('satuan')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 whitespace-nowrap ${
-            activeTab === 'satuan'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Scale className="w-4 h-4" />
-          <span>E. Master Satuan & Dimensi Bahan ({masterUnits.length})</span>
-        </button>
+          {[
+            {
+              key: 'penerima' as const,
+              label: 'A. Master Penerima Manfaat',
+              count: institutions.length,
+              icon: <School className="w-4 h-4 shrink-0" />,
+            },
+            {
+              key: 'bahan' as const,
+              label: 'B. Master Bahan Pangan',
+              count: masterBahan.length,
+              icon: <Apple className="w-4 h-4 shrink-0" />,
+            },
+            {
+              key: 'supplier' as const,
+              label: 'C. Master Supplier',
+              count: masterSuppliers.length,
+              icon: <Truck className="w-4 h-4 shrink-0" />,
+            },
+            {
+              key: 'relawan' as const,
+              label: 'D. Master Relawan',
+              count: masterVolunteers.length,
+              icon: <Users2 className="w-4 h-4 shrink-0" />,
+            },
+            {
+              key: 'satuan' as const,
+              label: 'E. Master Satuan & Dimensi Bahan',
+              count: masterUnits.length,
+              icon: <Scale className="w-4 h-4 shrink-0" />,
+            },
+          ].map(tab => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveTab(tab.key)}
+                className={`inline-flex items-center gap-2 min-h-[40px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-xs dark:bg-sky-600'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-blue-50/80 dark:hover:bg-slate-800 dark:hover:text-white'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                    isActive
+                      ? 'bg-white/25 text-white'
+                      : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-slate-800 dark:text-sky-300 dark:border-slate-700'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tab A Content: Master Penerima Manfaat */}
@@ -826,24 +868,24 @@ export const MasterDataModule: React.FC = () => {
       {activeTab === 'satuan' && (
         <div className="space-y-6">
           {/* Interactive Calculator Component */}
-          <div className="bg-linear-to-r from-blue-950 to-slate-900 rounded-2xl p-6 text-white shadow-md border border-blue-900">
-            <div className="flex items-center gap-2 mb-3">
-              <Calculator className="w-5 h-5 text-sky-400" />
-              <h3 className="text-sm font-bold uppercase tracking-wider text-sky-300">
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200/85 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <Calculator className="w-5 h-5 text-blue-600 dark:text-sky-400" />
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                 Kalkulator Konversi Satuan Berbasis Dimensi & Spesifikasi Bahan
               </h3>
             </div>
-            <p className="text-xs text-slate-300 mb-4 max-w-2xl">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 max-w-2xl">
               Sistem tidak mengasumsikan 1 buah memiliki berat sama untuk semua bahan. Misalnya: 1 buah semangka (~3.000g) vs 1 butir telur (~60g) vs 1 buah pisang (~120g).
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end bg-white/10 p-4 rounded-xl backdrop-blur-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end bg-blue-50/60 dark:bg-slate-800/70 p-4 rounded-xl border border-blue-100 dark:border-slate-700">
               <div>
-                <label className="block text-xs font-bold text-sky-200 mb-1">Pilih Bahan Pangan</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">Pilih Bahan Pangan</label>
                 <select
                   value={calcMaterial}
                   onChange={e => setCalcMaterial(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-700 bg-slate-900 text-white font-bold"
+                  className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white font-semibold"
                 >
                   {materialConversions.map(c => (
                     <option key={c.materialName} value={c.materialName}>
@@ -854,7 +896,7 @@ export const MasterDataModule: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-sky-200 mb-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
                   Jumlah Satuan ({selectedConv?.unit || 'unit'})
                 </label>
                 <input
@@ -863,14 +905,14 @@ export const MasterDataModule: React.FC = () => {
                   step="0.5"
                   value={calcInputUnitQty}
                   onChange={e => setCalcInputUnitQty(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-700 bg-slate-900 text-white font-mono font-bold"
+                  className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white font-mono font-bold"
                 />
               </div>
 
-              <div className="p-3 bg-sky-500/20 border border-sky-400/40 rounded-xl text-center">
-                <span className="text-[10px] text-sky-200 uppercase font-bold block">Hasil Ekuivalen Berat:</span>
-                <span className="text-xl font-black font-mono text-white">
-                  {formatNumber(calculatedTotalGrams)} gram <span className="text-xs font-normal">({calculatedTotalKg} kg)</span>
+              <div className="p-3 bg-white dark:bg-slate-900 border border-blue-200/80 dark:border-sky-800 rounded-xl text-center">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold block">Hasil Ekuivalen Berat</span>
+                <span className="text-lg font-bold font-mono text-blue-700 dark:text-sky-400">
+                  {formatNumber(calculatedTotalGrams)} gram <span className="text-xs font-normal text-slate-500">({calculatedTotalKg} kg)</span>
                 </span>
               </div>
             </div>
@@ -970,22 +1012,22 @@ export const MasterDataModule: React.FC = () => {
                             {formatNumber(u.conversionToBase)} {u.baseUnit}
                           </td>
                           <td className="p-2 text-right font-sans">
-                            <div className="inline-flex items-center gap-1">
+                            <div className="inline-flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleOpenEdit('satuan', u)}
-                                className="p-1 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                                className="inline-flex items-center justify-center min-w-[36px] min-h-[36px] p-2 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 rounded-lg transition cursor-pointer"
                                 title="Edit Satuan"
                               >
-                                <Edit className="w-3.5 h-3.5" />
+                                <Edit className="w-4 h-4" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setDeleteData({ id: u.id, type: 'satuan' })}
-                                className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                className="inline-flex items-center justify-center min-w-[36px] min-h-[36px] p-2 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 rounded-lg transition cursor-pointer"
                                 title="Hapus Satuan"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </td>
@@ -997,7 +1039,7 @@ export const MasterDataModule: React.FC = () => {
             </div>
 
             {/* Table: Konversi Dimensi Spesifik Bahan */}
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/85 dark:border-slate-800 shadow-sm space-y-3">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -1010,7 +1052,7 @@ export const MasterDataModule: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleOpenAdd('konversi')}
-                  className="text-xs font-bold text-blue-900 dark:text-sky-400 hover:underline flex items-center gap-1 shrink-0"
+                  className="text-xs font-bold text-blue-600 dark:text-sky-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> Tambah Konversi
                 </button>
@@ -1019,40 +1061,40 @@ export const MasterDataModule: React.FC = () => {
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500 sticky top-0">
                     <tr>
-                      <th className="p-2">Komoditas Bahan</th>
-                      <th className="p-2">Satuan Dimensi</th>
-                      <th className="p-2 text-right">Berat Rata-rata</th>
-                      <th className="p-2 text-right">Aksi</th>
+                      <th className="p-2.5">Komoditas Bahan</th>
+                      <th className="p-2.5">Satuan Dimensi</th>
+                      <th className="p-2.5 text-right">Berat Rata-rata</th>
+                      <th className="p-2.5 text-right">Aksi</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                     {materialConversions.map((c, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                        <td className="p-2 font-sans font-semibold text-slate-900 dark:text-white">
+                      <tr key={idx} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40">
+                        <td className="p-3 font-sans font-semibold text-slate-900 dark:text-white">
                           {c.materialName}
-                          {c.notes && <span className="block text-[10px] text-slate-400 font-normal">{c.notes}</span>}
+                          {c.notes && <span className="block text-[10px] text-slate-400 font-normal mt-0.5">{c.notes}</span>}
                         </td>
-                        <td className="p-2 font-sans font-semibold text-blue-900 dark:text-sky-400">{c.unit}</td>
-                        <td className="p-2 text-right font-bold text-emerald-600">
+                        <td className="p-3 font-sans font-semibold text-blue-700 dark:text-sky-400">{c.unit}</td>
+                        <td className="p-3 text-right font-bold text-emerald-600">
                           {formatNumber(c.gramsPerUnit)} g
                         </td>
-                        <td className="p-2 text-right font-sans">
-                          <div className="inline-flex items-center gap-1">
+                        <td className="p-3 text-right font-sans">
+                          <div className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleOpenEdit('konversi', c)}
-                              className="p-1 text-blue-600 hover:text-blue-800 dark:text-sky-400 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                              className="inline-flex items-center justify-center min-w-[36px] min-h-[36px] p-2 text-blue-600 bg-blue-50/70 hover:bg-blue-100 hover:text-blue-800 dark:bg-sky-950/50 dark:text-sky-400 rounded-lg transition cursor-pointer"
                               title="Edit Konversi"
                             >
-                              <Edit className="w-3.5 h-3.5" />
+                              <Edit className="w-4 h-4" />
                             </button>
                             <button
                               type="button"
                               onClick={() => setDeleteData({ id: c.materialName, type: 'konversi' })}
-                              className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                              className="inline-flex items-center justify-center min-w-[36px] min-h-[36px] p-2 text-rose-600 bg-rose-50/70 hover:bg-rose-100 hover:text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 rounded-lg transition cursor-pointer"
                               title="Hapus Konversi"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </td>

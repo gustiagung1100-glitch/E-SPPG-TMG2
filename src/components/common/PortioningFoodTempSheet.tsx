@@ -179,6 +179,8 @@ export interface ResolvePortioningFoodTempParams {
   portioningRecords: PortioningInspectionRecord[];
   menuItems: MenuItem[];
   sppgConfig: SPPGConfig;
+  selectedDate?: string;
+  selectedMonth?: string;
   startDate?: string;
   endDate?: string;
   periodType?: 'harian' | 'mingguan' | 'bulanan' | 'periode';
@@ -187,7 +189,16 @@ export interface ResolvePortioningFoodTempParams {
 export function resolvePortioningFoodTempData(
   params: ResolvePortioningFoodTempParams
 ): PortioningFoodTempData {
-  const { portioningRecords, menuItems, sppgConfig, startDate, endDate, periodType } = params;
+  const {
+    portioningRecords,
+    menuItems,
+    sppgConfig,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
+    periodType,
+  } = params;
 
   const recordsByDate = new Map<string, PortioningInspectionRecord[]>();
   portioningRecords.forEach(rec => {
@@ -198,7 +209,13 @@ export function resolvePortioningFoodTempData(
   });
 
   let sortedDates = Array.from(recordsByDate.keys()).sort();
-  if (periodType === 'periode' && startDate && endDate) {
+  if (periodType === 'harian' && selectedDate) {
+    const exactDay = sortedDates.filter(d => d === selectedDate);
+    if (exactDay.length > 0) sortedDates = exactDay;
+  } else if ((periodType === 'bulanan' || periodType === 'mingguan') && selectedMonth) {
+    const monthDates = sortedDates.filter(d => d.startsWith(selectedMonth));
+    if (monthDates.length > 0) sortedDates = monthDates;
+  } else if (periodType === 'periode' && startDate && endDate) {
     const filtered = sortedDates.filter(d => d >= startDate && d <= endDate);
     if (filtered.length > 0) sortedDates = filtered;
   }

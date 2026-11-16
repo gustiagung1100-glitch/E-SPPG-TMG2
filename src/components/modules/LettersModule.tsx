@@ -820,42 +820,37 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
   return (
     <div className="space-y-6">
-      {/* Header and Identity */}
-      <div className="bg-gradient-to-r from-blue-950 via-blue-900 to-sky-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-800/60 border border-blue-400/30 text-xs font-semibold text-blue-200 mb-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
-              MODUL 14 & 15: PERSURATAN RESMI & SURAT MASUK
-            </div>
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight">
-              Administrasi Dokumen, Mailing & Disposisi
-            </h1>
-            <p className="text-sm text-blue-200 mt-1 max-w-3xl">
-              Pengelolaan 8 jenis dokumen resmi SPPG (SPD, ST, BAST, BAP Perubahan Penerima Manfaat, BAP Kekurangan Bahan, dsb.), sistem mail merge dengan template immutable, generate Google Docs, cetak PDF, serta buku register surat masuk & lembar disposisi digital BGN.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2 shrink-0">
-            <button
-              onClick={() => openCreateWithTemplate(officialDocumentTemplates[0])}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm shadow-md transition-all active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              Buat Salinan Dokumen Baru
-            </button>
-            <button
-              onClick={() => setIsRegisterIncomingOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm border border-white/20 backdrop-blur-sm transition-all active:scale-95"
-            >
-              <Inbox className="w-4 h-4" />
-              Registrasi Surat Masuk
-            </button>
-          </div>
+      {/* Clean Module Header */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-700 dark:text-sky-400">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Modul 14 & 15: Persuratan Resmi & Surat Masuk
+          </span>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-white mt-1">
+            Administrasi Dokumen, Mailing & Disposisi
+          </h1>
+          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
+            Pengelolaan 8 jenis dokumen resmi SPPG (SPD, ST, BAST, BAP Perubahan Penerima Manfaat, BAP Kekurangan Bahan, dsb.), sistem mail merge dengan template immutable, generate Google Docs, cetak PDF, serta buku register surat masuk & lembar disposisi digital BGN.
+          </p>
         </div>
 
-        {/* Decorative background shape */}
-        <div className="absolute right-0 top-0 translate-x-12 -translate-y-12 w-64 h-64 bg-sky-400/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="flex flex-wrap gap-2.5 shrink-0">
+          <button
+            onClick={() => openCreateWithTemplate(officialDocumentTemplates[0])}
+            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-semibold text-sm shadow-sm transition-all active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            Buat Salinan Dokumen Baru
+          </button>
+          <button
+            onClick={() => setIsRegisterIncomingOpen(true)}
+            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700 font-semibold text-sm shadow-xs transition-all active:scale-95"
+          >
+            <Inbox className="w-4 h-4" />
+            Registrasi Surat Masuk
+          </button>
+        </div>
       </div>
 
       {/* Summary Stat Cards */}
@@ -929,52 +924,66 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
         </div>
       </div>
 
-      {/* Main Tab Navigation */}
-      <div className="flex items-center border-b border-slate-200 dark:border-slate-800 space-x-1 sm:space-x-4">
-        <button
-          onClick={() => setActiveTab('outgoing')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'outgoing'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <Mail className="w-4 h-4" />
-          <span>14. Administrasi Dokumen & Surat Keluar</span>
-          <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold">
-            {outgoingDocuments.length}
-          </span>
-        </button>
+      {/* Main Pill Tab Navigation */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 min-w-max">
+          <button
+            onClick={() => setActiveTab('outgoing')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'outgoing'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Mail className="w-4 h-4 shrink-0" />
+            <span>14. Administrasi Dokumen & Surat Keluar</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'outgoing'
+                ? 'bg-white/25 text-white'
+                : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+            }`}>
+              {outgoingDocuments.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('incoming')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'incoming'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <Inbox className="w-4 h-4" />
-          <span>15. Buku Register Surat Masuk & Disposisi</span>
-          <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 font-bold">
-            {incomingLetters.length}
-          </span>
-        </button>
+          <button
+            onClick={() => setActiveTab('incoming')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'incoming'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Inbox className="w-4 h-4 shrink-0" />
+            <span>15. Buku Register Surat Masuk & Disposisi</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'incoming'
+                ? 'bg-white/25 text-white'
+                : 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 dark:bg-indigo-900/50 dark:text-indigo-300 dark:border-indigo-800'
+            }`}>
+              {incomingLetters.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('templates')}
-          className={`flex items-center gap-2 py-3 px-4 text-sm font-semibold border-b-2 transition-colors ${
-            activeTab === 'templates'
-              ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          <span>Katalog Template Master</span>
-          <span className="ml-1.5 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-bold">
-            {officialDocumentTemplates.length}
-          </span>
-        </button>
+          <button
+            onClick={() => setActiveTab('templates')}
+            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'templates'
+                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Layers className="w-4 h-4 shrink-0" />
+            <span>Katalog Template Master</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'templates'
+                ? 'bg-white/25 text-white'
+                : 'bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+            }`}>
+              {officialDocumentTemplates.length}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -983,7 +992,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
       {activeTab === 'outgoing' && (
         <div className="space-y-4">
           {/* Strict Rule Notice Box */}
-          <div className="bg-amber-50 dark:bg-amber-950/40 border-l-4 border-amber-500 p-4 rounded-r-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
+          <div className="bg-amber-50/90 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-800/80 p-4 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
             <Lock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-bold">Ketentuan Integritas Dokumen SPPG:</span> Template master resmi tidak dapat diubah secara langsung oleh pengguna. Sistem akan membuat salinan independen (cloned copy) untuk setiap surat yang diproses, mengisi variabel mail merge secara dinamis, dan menyimpannya ke dalam arsip resmi yang dapat diverifikasi oleh auditor Badan Gizi Nasional (BGN).

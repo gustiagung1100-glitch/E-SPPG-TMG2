@@ -33,11 +33,6 @@ import {
   getInitialCustomFieldValues,
 } from '../../lib/dynamicFormSchemas';
 import {
-  defaultInventoryItemsWithBatches,
-  defaultStockMutations,
-  defaultStockOpnameRecords,
-} from '../../lib/inventoryData';
-import {
   Boxes,
   Plus,
   Edit,
@@ -78,6 +73,7 @@ import {
   X,
   Calculator,
 } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
 
 type InventoryTab =
@@ -89,11 +85,17 @@ type InventoryTab =
 
 export const InventoryModule: React.FC = () => {
   const {
-    inventory,
+    inventory: items,
+    stockMutations: mutations,
+    stockOpnames: opnameList,
+    menuItems,
+    institutions,
     addInventoryItem,
     updateInventoryItem,
     deleteInventoryItem,
-    adjustStock,
+    addStockMutation,
+    updateStockMutation,
+    recordStockOpname,
     masterSuppliers,
     masterUnits,
     currentUser,
@@ -120,15 +122,6 @@ export const InventoryModule: React.FC = () => {
 
   // Active Sub-Tab
   const [activeTab, setActiveTab] = useState<InventoryTab>('stok_gudang');
-
-  // Master Inventory State with Batches & Initial Stock
-  const [items, setItems] = useState<InventoryItem[]>(defaultInventoryItemsWithBatches);
-
-  // Stock Mutations History (Immutable Audit Trail)
-  const [mutations, setMutations] = useState<StockMutation[]>(defaultStockMutations);
-
-  // Stock Opname Records
-  const [opnameList, setOpnameList] = useState<StockOpnameRecord[]>(defaultStockOpnameRecords);
 
   // Selected Item for Stock Card Ledger
   const [selectedStockCardItemId, setSelectedStockCardItemId] = useState<string>(items[0]?.id || 'inv-1');
@@ -167,7 +160,7 @@ export const InventoryModule: React.FC = () => {
     type: 'Barang Masuk' as MutationType,
     orderedQuantity: 50,
     quantity: 50,
-    referenceNumber: `IN-PO-26110${defaultStockMutations.length + 1}`,
+    referenceNumber: `IN-PO-26110${mutations.length + 1}`,
     batchNumber: `BATCH-261108-${Math.floor(Math.random() * 80) + 10}`,
     expiryDate: new Date(Date.now() + 86400000 * 10).toISOString().slice(0, 10),
     supplierName: masterSuppliers[0]?.name || 'Koperasi Pasar Krejengan',
@@ -296,7 +289,7 @@ export const InventoryModule: React.FC = () => {
     setIsItemModalOpen(true);
   };
 
-  const handleSaveItem = (e: React.FormEvent) => {
+  const handleSaveItem = async (e: React.FormEvent) => {
     e.preventDefault();
     const validationErr = validateDynamicFormFields(dynamicFormSchemas.inventory_item_form, {
       ...itemFormData,
@@ -307,78 +300,31 @@ export const InventoryModule: React.FC = () => {
       return;
     }
     if (editingItem) {
-      setItems(prev =>
-        prev.map(i =>
-          i.id === editingItem.id
-            ? {
-                ...i,
-                ...itemFormData,
-                initialStock: Number(itemFormData.initialStock),
-                currentStock: Number(itemFormData.currentStock),
-                minimumStock: Number(itemFormData.minimumStock),
-                pricePerUnit: Number(itemFormData.pricePerUnit),
-                customFields: itemFormData.customFields || {},
-              }
-            : i
-        )
-      );
-      addToast('success', 'Item Diperbarui', `Data bahan ${itemFormData.name} berhasil diperbarui.`);
+      await updateInventoryItem(editingItem.id, {
+        ...itemFormData,
+        initialStock: Number(itemFormData.initialStock),
+        currentStock: Number(itemFormData.currentStock),
+        minimumStock: Number(itemFormData.minimumStock),
+        pricePerUnit: Number(itemFormData.pricePerUnit),
+        customFields: itemFormData.customFields || {},
+      });
     } else {
       const stockVal = Number(itemFormData.currentStock);
-      const newItem: InventoryItem = {
-        id: `inv-${Date.now()}`,
+      await addInventoryItem({
         ...itemFormData,
         initialStock: stockVal,
         currentStock: stockVal,
         minimumStock: Number(itemFormData.minimumStock),
         pricePerUnit: Number(itemFormData.pricePerUnit),
         customFields: itemFormData.customFields || {},
-        batches: [
-          {
-            id: `b-${Date.now()}`,
-            batchNumber: `BATCH-INIT-${Math.floor(Math.random() * 80) + 10}`,
-            receivedDate: itemFormData.lastRestocked,
-            expiryDate: itemFormData.expiryDate,
-            initialQty: stockVal,
-            remainingQty: stockVal,
-            unitPrice: Number(itemFormData.pricePerUnit),
-            supplierName: itemFormData.supplierName,
-          },
-        ],
-      };
-
-      setItems(prev => [...prev, newItem]);
-
-      // Record initial stock mutation entry
-      const initMutation: StockMutation = {
-        id: `mut-${Date.now()}`,
-        itemId: newItem.id,
-        itemCode: newItem.code,
-        itemName: newItem.name,
-        date: newItem.lastRestocked,
-        timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-        type: 'Stok Awal',
-        referenceNumber: `SA-${newItem.code}`,
-        unit: newItem.unit,
-        quantityIn: newItem.initialStock,
-        quantityOut: 0,
-        balance: newItem.initialStock,
-        unitPrice: newItem.pricePerUnit,
-        totalPrice: newItem.initialStock * newItem.pricePerUnit,
-        notes: 'Pencatatan saldo stok awal item baru',
-        operatorName: currentUser.name,
-      };
-      setMutations(prev => [initMutation, ...prev]);
-
-      addToast('success', 'Bahan Terdaftar', `Item baru ${newItem.name} berhasil ditambahkan ke inventaris.`);
+      });
     }
     setIsItemModalOpen(false);
   };
 
-  const handleDeleteItem = (id: string) => {
-    setItems(prev => prev.filter(i => i.id !== id));
+  const handleDeleteItem = async (id: string) => {
+    await deleteInventoryItem(id);
     setDeleteItemId(null);
-    addToast('info', 'Item Dihapus', 'Data item bahan pangan berhasil dihapus dari inventaris.');
   };
 
   // ---------------------------------------------------------------------------
@@ -417,7 +363,7 @@ export const InventoryModule: React.FC = () => {
     setIsMutationModalOpen(true);
   };
 
-  const handleSaveMutation = (e: React.FormEvent) => {
+  const handleSaveMutation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemForMutation) return;
 
@@ -437,7 +383,6 @@ export const InventoryModule: React.FC = () => {
       return;
     }
 
-    // Validation: Barang Keluar & Retur Keluar tidak boleh melebihi stok saat ini
     const isOutflow =
       mutationForm.type === 'Barang Keluar' || mutationForm.type === 'Retur Keluar';
     if (isOutflow && qty > selectedItemForMutation.currentStock) {
@@ -451,22 +396,17 @@ export const InventoryModule: React.FC = () => {
 
     const qtyIn = isOutflow ? 0 : qty;
     const qtyOut = isOutflow ? qty : 0;
-    const newStockBalance = selectedItemForMutation.currentStock + qtyIn - qtyOut;
     const orderedQty =
       mutationForm.type === 'Barang Masuk'
         ? Number(mutationForm.orderedQuantity) || qty
         : undefined;
-    const diffQty =
-      orderedQty !== undefined ? qty - orderedQty : undefined;
+    const diffQty = orderedQty !== undefined ? qty - orderedQty : undefined;
 
-    // Create immutable mutation record
-    const newMutation: StockMutation = {
-      id: `mut-${Date.now()}`,
+    const created = await addStockMutation({
       itemId: selectedItemForMutation.id,
       itemCode: selectedItemForMutation.code,
       itemName: selectedItemForMutation.name,
       date: new Date().toISOString().slice(0, 10),
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
       type: mutationForm.type,
       referenceNumber: mutationForm.referenceNumber,
       batchNumber: mutationForm.batchNumber,
@@ -480,7 +420,6 @@ export const InventoryModule: React.FC = () => {
       quantityIn: qtyIn,
       quantityOut: qtyOut,
       differenceQuantity: diffQty,
-      balance: newStockBalance,
       unitPrice: selectedItemForMutation.pricePerUnit,
       totalPrice: qty * selectedItemForMutation.pricePerUnit,
       photoUrl: mutationForm.photoUrl || undefined,
@@ -488,69 +427,11 @@ export const InventoryModule: React.FC = () => {
       operatorName: mutationForm.operatorName,
       recipientOrDepartment: mutationForm.recipientOrDepartment,
       customFields: mutationForm.customFields || {},
-    };
+    });
 
-    setMutations(prev => [newMutation, ...prev]);
-
-    // Update currentStock and batches in items
-    setItems(prev =>
-      prev.map(i => {
-        if (i.id !== selectedItemForMutation.id) return i;
-
-        let updatedBatches = i.batches ? [...i.batches] : [];
-
-        // If Barang Masuk, add new batch
-        if (mutationForm.type === 'Barang Masuk') {
-          updatedBatches.push({
-            id: `b-${Date.now()}`,
-            batchNumber: mutationForm.batchNumber,
-            receivedDate: new Date().toISOString().slice(0, 10),
-            expiryDate: mutationForm.expiryDate,
-            initialQty: qty,
-            remainingQty: qty,
-            unitPrice: i.pricePerUnit,
-            supplierName: mutationForm.supplierName,
-          });
-        }
-
-        // If Barang Keluar, apply FEFO deduction (First Expired First Out)
-        if (isOutflow && updatedBatches.length > 0) {
-          // Sort by expiryDate ascending (FEFO)
-          updatedBatches.sort(
-            (a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime()
-          );
-          let remainingToDeduct = qty;
-          for (let b of updatedBatches) {
-            if (b.remainingQty >= remainingToDeduct) {
-              b.remainingQty -= remainingToDeduct;
-              remainingToDeduct = 0;
-              break;
-            } else {
-              remainingToDeduct -= b.remainingQty;
-              b.remainingQty = 0;
-            }
-          }
-          // Filter out zero batches if needed, or keep for audit
-        }
-
-        return {
-          ...i,
-          currentStock: newStockBalance,
-          lastRestocked:
-            mutationForm.type === 'Barang Masuk'
-              ? new Date().toISOString().slice(0, 10)
-              : i.lastRestocked,
-          batches: updatedBatches,
-        };
-      })
-    );
-
-    addToast(
-      'success',
-      'Mutasi Tercatat',
-      `${mutationForm.type} sebanyak ${qty} ${selectedItemForMutation.unit} berhasil direkam ke buku kartu stok. Stok akhir: ${newStockBalance} ${selectedItemForMutation.unit}.`
-    );
-    setIsMutationModalOpen(false);
+    if (created) {
+      setIsMutationModalOpen(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -567,74 +448,20 @@ export const InventoryModule: React.FC = () => {
     setIsOpnameModalOpen(true);
   };
 
-  const handleSaveOpname = (e: React.FormEvent) => {
+  const handleSaveOpname = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemForOpname) return;
 
-    const physStock = Number(opnameForm.physicalStock);
-    const sysStock = selectedItemForOpname.currentStock;
-    const diff = physStock - sysStock;
-    const diffValuation = diff * selectedItemForOpname.pricePerUnit;
-
-    const newOpname: StockOpnameRecord = {
-      id: `opn-${Date.now()}`,
-      opnameNumber: `OPN-TMG2-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-0${opnameList.length + 1}`,
-      date: new Date().toISOString().slice(0, 10),
+    const created = await recordStockOpname({
       itemId: selectedItemForOpname.id,
-      itemName: selectedItemForOpname.name,
-      unit: selectedItemForOpname.unit,
-      systemStock: sysStock,
-      physicalStock: physStock,
-      difference: diff,
-      unitPrice: selectedItemForOpname.pricePerUnit,
-      differenceValuation: diffValuation,
+      physicalStock: Number(opnameForm.physicalStock),
       reason: opnameForm.reason,
       inspectorName: opnameForm.inspectorName,
-      status: 'Disetujui',
-      verifiedBy: `${currentUser.name} (${currentUser.role})`,
-    };
+    });
 
-    setOpnameList(prev => [newOpname, ...prev]);
-
-    // Record stock opname mutation entry to update balance
-    const opnMutation: StockMutation = {
-      id: `mut-${Date.now()}`,
-      itemId: selectedItemForOpname.id,
-      itemCode: selectedItemForOpname.code,
-      itemName: selectedItemForOpname.name,
-      date: new Date().toISOString().slice(0, 10),
-      timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      type: 'Stok Opname',
-      referenceNumber: newOpname.opnameNumber,
-      unit: selectedItemForOpname.unit,
-      quantityIn: diff > 0 ? diff : 0,
-      quantityOut: diff < 0 ? Math.abs(diff) : 0,
-      balance: physStock, // Set exact physical balance
-      unitPrice: selectedItemForOpname.pricePerUnit,
-      totalPrice: Math.abs(diffValuation),
-      notes: `Penyesuaian stok opname: ${diff >= 0 ? '+' : ''}${diff} ${selectedItemForOpname.unit} (${opnameForm.reason})`,
-      operatorName: opnameForm.inspectorName,
-    };
-    setMutations(prev => [opnMutation, ...prev]);
-
-    // Adjust actual inventory stock
-    setItems(prev =>
-      prev.map(i =>
-        i.id === selectedItemForOpname.id
-          ? {
-              ...i,
-              currentStock: physStock,
-            }
-          : i
-      )
-    );
-
-    addToast(
-      'success',
-      'Stok Opname Disimpan',
-      `Penyesuaian fisik ${selectedItemForOpname.name} berhasil dibukukan. Saldo stok disesuaikan menjadi ${physStock} ${selectedItemForOpname.unit}.`
-    );
-    setIsOpnameModalOpen(false);
+    if (created) {
+      setIsOpnameModalOpen(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -770,14 +597,80 @@ export const InventoryModule: React.FC = () => {
     });
   };
 
-  // Weekly Usage Data (Dummy calculation for tab 5)
-  const usageSummary = [
-    { day: 'Senin, 03 Nov 2026', menu: 'Nasi Liwet, Ayam Panggang, Sayur Lodeh', portions: 2850, riceKg: 400, chickenKg: 280, vegKg: 180, fruitKg: 250, totalCost: 24650000 },
-    { day: 'Selasa, 04 Nov 2026', menu: 'Nasi Kuning, Semur Daging, Tumis Buncis', portions: 2850, riceKg: 400, chickenKg: 0, vegKg: 190, fruitKg: 280, totalCost: 31200000 },
-    { day: 'Rabu, 05 Nov 2026', menu: 'Nasi Putih, Telur Balado, Sop Wortel', portions: 2850, riceKg: 400, chickenKg: 0, vegKg: 175, fruitKg: 250, totalCost: 19800000 },
-    { day: 'Kamis, 06 Nov 2026', menu: 'Nasi Liwet, Ikan Tongkol Gurih, Capcay', portions: 2850, riceKg: 400, chickenKg: 0, vegKg: 200, fruitKg: 260, totalCost: 22400000 },
-    { day: 'Jumat, 07 Nov 2026', menu: 'Nasi Pulen, Ayam Fillet Madu, Sayur Bening', portions: 2850, riceKg: 400, chickenKg: 280, vegKg: 180, fruitKg: 250, totalCost: 24650000 },
-  ];
+  // Dynamic Weekly / Daily Usage Summary computed directly from live Barang Keluar mutations + Menu + Institutions
+  const totalRegisteredPortions = useMemo(
+    () => institutions.reduce((sum, inst) => sum + (inst.totalPortions || 0), 0) || 2850,
+    [institutions]
+  );
+
+  const usageSummary = useMemo(() => {
+    const outMutations = mutations.filter(m => m.type === 'Barang Keluar');
+    const groupedByDate = new Map<string, StockMutation[]>();
+    outMutations.forEach(m => {
+      const dateKey = m.date || m.timestamp.slice(0, 10);
+      const list = groupedByDate.get(dateKey) || [];
+      list.push(m);
+      groupedByDate.set(dateKey, list);
+    });
+
+    const sortedDates = Array.from(groupedByDate.keys()).sort((a, b) => a.localeCompare(b));
+    return sortedDates.map(dateKey => {
+      const dayMutations = groupedByDate.get(dateKey) || [];
+      const matchedMenu = menuItems.find(m => m.date === dateKey);
+      const menuLabel = matchedMenu
+        ? `${matchedMenu.stapleFood}, ${matchedMenu.animalProtein}, ${matchedMenu.vegetable}`
+        : dayMutations[0]?.notes || 'Produksi Harian Dapur SPPG';
+
+      let riceKg = 0;
+      let chickenKg = 0;
+      let vegKg = 0;
+      let fruitKg = 0;
+      let totalCost = 0;
+
+      dayMutations.forEach(m => {
+        const lower = m.itemName.toLowerCase();
+        const qty = Number(m.quantityOut || 0);
+        if (lower.includes('beras')) riceKg += qty;
+        else if (lower.includes('ayam') || lower.includes('daging') || lower.includes('telur') || lower.includes('ikan')) {
+          chickenKg += qty;
+        } else if (lower.includes('sayur') || lower.includes('wortel') || lower.includes('buncis') || lower.includes('labu')) {
+          vegKg += qty;
+        } else if (lower.includes('pisang') || lower.includes('jeruk') || lower.includes('semangka') || lower.includes('apel') || lower.includes('buah')) {
+          fruitKg += qty;
+        }
+        totalCost += Number(m.totalPrice || qty * (m.unitPrice || 0));
+      });
+
+      return {
+        dateKey,
+        day: formatIndonesianDate(dateKey),
+        menu: menuLabel,
+        portions: matchedMenu?.targetPortions || totalRegisteredPortions,
+        riceKg,
+        chickenKg,
+        vegKg,
+        fruitKg,
+        totalCost,
+        mutationCount: dayMutations.length,
+      };
+    });
+  }, [mutations, menuItems, totalRegisteredPortions]);
+
+  const usageTotals = useMemo(
+    () =>
+      usageSummary.reduce(
+        (acc, u) => ({
+          portions: acc.portions + u.portions,
+          riceKg: acc.riceKg + u.riceKg,
+          chickenKg: acc.chickenKg + u.chickenKg,
+          vegKg: acc.vegKg + u.vegKg,
+          fruitKg: acc.fruitKg + u.fruitKg,
+          totalCost: acc.totalCost + u.totalCost,
+        }),
+        { portions: 0, riceKg: 0, chickenKg: 0, vegKg: 0, fruitKg: 0, totalCost: 0 }
+      ),
+    [usageSummary]
+  );
 
   return (
     <div className="space-y-6">
@@ -788,17 +681,20 @@ export const InventoryModule: React.FC = () => {
             <Boxes className="w-6 h-6 text-sky-400" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[10px] font-black px-2 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
                 GUDANG & LOGISTIK MBG
               </span>
-              <span className="text-xs text-slate-400 font-semibold">• Sistem Mutasi & FEFO</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                <RefreshCw className="w-3 h-3" />
+                Tersinkron Real-Time ke RAB, Master Bahan & Menu
+              </span>
             </div>
             <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
               Modul Pengadaan dan Gudang (Inventory Control)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Pengelolaan Stok Awal, Masuk, Keluar, Retur, Stok Opname, Kartu Stok & Peringatan Bahan Kritis
+              Setiap perubahan harga, satuan, atau stok otomatis memperbarui Master Bahan, RAB Pengadaan, Food Cost Resep, dan Kartu Stok
             </p>
           </div>
         </div>
@@ -1448,9 +1344,7 @@ export const InventoryModule: React.FC = () => {
                           processFacilityImageUpload(
                             e,
                             url => {
-                              setMutations(prev =>
-                                prev.map(m => (m.id === row.id ? { ...m, photoUrl: url } : m))
-                              );
+                              updateStockMutation(row.id, { photoUrl: url });
                               addToast('success', 'Foto Terunggah', `Foto untuk ${row.itemName} tersimpan.`);
                             },
                             msg => addToast('error', 'Upload Gagal', msg)
@@ -1471,9 +1365,7 @@ export const InventoryModule: React.FC = () => {
                       value={row.notes}
                       onChange={e => {
                         const val = e.target.value;
-                        setMutations(prev =>
-                          prev.map(m => (m.id === row.id ? { ...m, notes: val } : m))
-                        );
+                        updateStockMutation(row.id, { notes: val });
                       }}
                       placeholder="Isi keterangan manual..."
                       className="w-full px-2 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
@@ -1746,59 +1638,70 @@ export const InventoryModule: React.FC = () => {
       {activeTab === 'rekap_penggunaan' && (
         <div className="space-y-4">
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-              <FileSpreadsheet className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-              Rekapitulasi Penggunaan Bahan Baku Dapur MBG (Minggu Berjalan)
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Akumulasi bahan pangan yang dikeluarkan dari gudang untuk produksi 2.850 porsi harian
-            </p>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                Rekapitulasi Penggunaan Bahan Baku Dapur MBG (Terhubung Mutasi Keluar)
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Dihitung otomatis secara real-time dari catatan transaksi Barang Keluar gudang dan kuota {formatNumber(totalRegisteredPortions)} porsi harian
+              </p>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">Hari & Tanggal</th>
-                    <th className="p-3">Menu Hidangan</th>
-                    <th className="p-3 text-center">Porsi MBG</th>
-                    <th className="p-3 text-center">Beras (kg)</th>
-                    <th className="p-3 text-center">Ayam (kg)</th>
-                    <th className="p-3 text-center">Sayur (kg)</th>
-                    <th className="p-3 text-center">Buah (kg)</th>
-                    <th className="p-3 text-right">Valuasi Biaya Bahan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                  {usageSummary.map((u, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">{u.day}</td>
-                      <td className="p-3 font-sans text-slate-700 dark:text-slate-300">{u.menu}</td>
-                      <td className="p-3 text-center font-bold text-blue-900 dark:text-sky-300">{formatNumber(u.portions)}</td>
-                      <td className="p-3 text-center">{u.riceKg} kg</td>
-                      <td className="p-3 text-center">{u.chickenKg > 0 ? `${u.chickenKg} kg` : '-'}</td>
-                      <td className="p-3 text-center">{u.vegKg} kg</td>
-                      <td className="p-3 text-center">{u.fruitKg} kg</td>
-                      <td className="p-3 text-right font-black text-emerald-700 dark:text-emerald-400">
-                        {formatRupiah(u.totalCost)}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-3">Hari & Tanggal</th>
+                      <th className="p-3">Menu / Keterangan Mutasi</th>
+                      <th className="p-3 text-center">Porsi MBG</th>
+                      <th className="p-3 text-center">Beras</th>
+                      <th className="p-3 text-center">Protein Hewani</th>
+                      <th className="p-3 text-center">Sayur</th>
+                      <th className="p-3 text-center">Buah</th>
+                      <th className="p-3 text-right">Valuasi Biaya Bahan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                    {usageSummary.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-6 text-center font-sans text-slate-500">
+                          Belum ada transaksi Barang Keluar tercatat di gudang. Catat mutasi Barang Keluar agar rekap pemakaian muncul otomatis.
+                        </td>
+                      </tr>
+                    ) : (
+                      usageSummary.map(u => (
+                        <tr key={u.dateKey} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">{u.day}</td>
+                          <td className="p-3 font-sans text-slate-700 dark:text-slate-300">
+                            <div>{u.menu}</div>
+                            <div className="text-[10px] text-slate-400">{u.mutationCount} transaksi barang keluar</div>
+                          </td>
+                          <td className="p-3 text-center font-bold text-blue-900 dark:text-sky-300">{formatNumber(u.portions)}</td>
+                          <td className="p-3 text-center">{u.riceKg > 0 ? `${formatNumber(u.riceKg)} kg` : '-'}</td>
+                          <td className="p-3 text-center">{u.chickenKg > 0 ? `${formatNumber(u.chickenKg)} kg` : '-'}</td>
+                          <td className="p-3 text-center">{u.vegKg > 0 ? `${formatNumber(u.vegKg)} kg` : '-'}</td>
+                          <td className="p-3 text-center">{u.fruitKg > 0 ? `${formatNumber(u.fruitKg)} kg` : '-'}</td>
+                          <td className="p-3 text-right font-black text-emerald-700 dark:text-emerald-400">
+                            {formatRupiah(u.totalCost)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t border-slate-300 dark:border-slate-700 text-xs">
+                      <td colSpan={2} className="p-3 font-sans uppercase">TOTAL AKUMULASI BARANG KELUAR:</td>
+                      <td className="p-3 text-center">{formatNumber(usageTotals.portions)} porsi</td>
+                      <td className="p-3 text-center">{formatNumber(usageTotals.riceKg)} kg</td>
+                      <td className="p-3 text-center">{formatNumber(usageTotals.chickenKg)} kg</td>
+                      <td className="p-3 text-center">{formatNumber(usageTotals.vegKg)} kg</td>
+                      <td className="p-3 text-center">{formatNumber(usageTotals.fruitKg)} kg</td>
+                      <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 text-sm font-black">
+                        {formatRupiah(usageTotals.totalCost)}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t border-slate-300 dark:border-slate-700 text-xs">
-                    <td colSpan={2} className="p-3 font-sans uppercase">TOTAL PEMAKAIAN 1 MINGGU:</td>
-                    <td className="p-3 text-center">{formatNumber(2850 * 5)} porsi</td>
-                    <td className="p-3 text-center">2.000 kg</td>
-                    <td className="p-3 text-center">560 kg</td>
-                    <td className="p-3 text-center">925 kg</td>
-                    <td className="p-3 text-center">1.290 kg</td>
-                    <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 text-sm font-black">
-                      {formatRupiah(24650000 + 31200000 + 19800000 + 22400000 + 24650000)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </tfoot>
+                </table>
+              </div>
           </div>
         </div>
       )}

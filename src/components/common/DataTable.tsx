@@ -113,31 +113,66 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] overflow-hidden print:overflow-visible print:shadow-none print:border-slate-300">
-      {/* Top Header & Toolbar */}
-      <div className="p-5 border-b border-[#E2E8F0] dark:border-slate-800 print:p-2 print:border-slate-300">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/85 dark:border-slate-800 shadow-sm overflow-hidden print:overflow-visible print:shadow-none print:border-slate-300">
+      {/* Top Card Title & Single-Row Inline Search + Export Toolbar */}
+      <div className="p-5 sm:px-6 border-b border-slate-200/80 dark:border-slate-800 print:p-2 print:border-slate-300 space-y-4">
+        {(title || subtitle) && (
           <div>
             {title && (
-              <h3 className="text-lg font-bold text-[#1F2937] dark:text-white tracking-tight">
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                 {title}
               </h3>
             )}
             {subtitle && (
-              <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {subtitle}
               </p>
             )}
           </div>
+        )}
 
-          {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
+        {/* Search Input Inline with Filters & Export Buttons (Excel / PDF / Cetak) */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 print:hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 flex-1 min-w-0">
+            <div className="relative flex-1 max-w-md min-w-[220px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder={searchPlaceholder}
+                className="w-full h-10 pl-9 pr-8 text-xs sm:text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/70 text-slate-800 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1 cursor-pointer"
+                  title="Hapus pencarian"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {filters && (
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {filters}
+              </div>
+            )}
+          </div>
+
+          {/* Action & Export Buttons aligned cleanly on the right */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {actions}
             {onExportExcel && (
               <button
                 type="button"
                 onClick={onExportExcel}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#16A34A] bg-[#16A34A]/10 hover:bg-[#16A34A]/15 dark:bg-emerald-950/60 dark:text-emerald-400 dark:hover:bg-emerald-900/50 rounded-lg transition whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/70 dark:hover:bg-emerald-900/60 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
                 title="Ekspor ke Excel (.xlsx)"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -148,7 +183,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onExportPDF}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#DC2626] bg-[#DC2626]/10 hover:bg-[#DC2626]/15 dark:bg-rose-950/60 dark:text-rose-400 dark:hover:bg-rose-900/50 rounded-lg transition whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/80 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/70 dark:hover:bg-rose-900/60 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
                 title="Ekspor ke PDF resmi"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -159,8 +194,8 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onPrint}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#1F2937] bg-[#F4F7FA] hover:bg-slate-200/80 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 border border-[#E2E8F0] dark:border-slate-700 rounded-lg transition whitespace-nowrap"
-                title="Cetak format cetak"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:border-slate-700 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
+                title="Cetak dokumen"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Cetak</span>
@@ -168,45 +203,14 @@ export function DataTable<T extends Record<string, any>>({
             )}
           </div>
         </div>
-
-        {/* Search & Custom Filter Bar */}
-        <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder={searchPlaceholder}
-              className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-[#E2E8F0] dark:border-slate-700 bg-[#F4F7FA]/70 dark:bg-slate-800/70 text-[#1F2937] dark:text-white placeholder-[#64748B] focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#0F766E]/25 focus:border-[#0F766E] transition"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#1F2937] dark:hover:text-slate-200 text-xs p-0.5"
-                title="Hapus pencarian"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {filters}
-          </div>
-        </div>
       </div>
 
       {/* Table Element */}
       <div className="overflow-x-auto max-h-[calc(100vh-22rem)] scrollbar-thin print:max-h-none print:overflow-visible">
         <table className="w-full text-left text-xs tabular-nums">
-          <thead className="sticky top-0 z-10 bg-[#F4F7FA]/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-[#E2E8F0] dark:border-slate-700/80 text-[#1F2937] dark:text-slate-200 uppercase font-bold text-[10px] tracking-wider">
+          <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-slate-200/80 dark:border-slate-700/80 text-slate-600 dark:text-slate-300 uppercase font-bold text-[11px] tracking-wider">
             <tr>
-              <th className="py-3 px-4 w-12 text-center text-[#64748B]">#</th>
+              <th className="py-3.5 px-4 w-12 text-center text-slate-500">#</th>
               {columns.map(col => {
                 const alignClass =
                   col.align === 'center'
@@ -219,21 +223,21 @@ export function DataTable<T extends Record<string, any>>({
                   <th
                     key={col.key}
                     onClick={() => col.sortable !== false && handleSort(col.key)}
-                    className={`py-3 px-4 whitespace-nowrap ${alignClass} ${
+                    className={`py-3.5 px-4 whitespace-nowrap ${alignClass} ${
                       col.sortable !== false
-                        ? 'cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700/70 select-none transition-colors'
+                        ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/70 select-none transition-colors'
                         : ''
                     } ${col.className || ''}`}
                   >
                     <div className={`inline-flex items-center gap-1.5 ${col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : ''}`}>
                       <span>{col.header}</span>
                       {col.sortable !== false && (
-                        <span className="text-[#64748B]">
+                        <span className="text-slate-400">
                           {sortKey === col.key ? (
                             sortDirection === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-[#142B4A] dark:text-teal-400 font-bold" />
+                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 font-bold" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-[#142B4A] dark:text-teal-400 font-bold" />
+                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 font-bold" />
                             )
                           ) : (
                             <ArrowUpDown className="w-3 h-3 opacity-40 hover:opacity-80" />
@@ -246,15 +250,15 @@ export function DataTable<T extends Record<string, any>>({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#E2E8F0]/70 dark:divide-slate-800/70">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
             {isLoading ? (
               Array.from({ length: 5 }).map((_, sIdx) => (
                 <tr key={`skel-${sIdx}`} aria-hidden="true">
-                  <td className="py-3.5 px-4 text-center">
+                  <td className="py-4 px-4 text-center">
                     <div className="h-3.5 w-6 mx-auto rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
                   </td>
                   {columns.map(col => (
-                    <td key={`${sIdx}-${col.key}`} className="py-3.5 px-4">
+                    <td key={`${sIdx}-${col.key}`} className="py-4 px-4">
                       <div className="h-4 w-full max-w-[160px] rounded bg-slate-200 dark:bg-slate-800 animate-pulse" />
                     </td>
                   ))}
@@ -263,7 +267,7 @@ export function DataTable<T extends Record<string, any>>({
             ) : paginatedData.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + 1} className="py-12 text-center">
-                  <p className="text-[#64748B] dark:text-slate-400">
+                  <p className="text-slate-500 dark:text-slate-400">
                     Tidak ada data yang sesuai.
                   </p>
                 </td>
@@ -274,9 +278,9 @@ export function DataTable<T extends Record<string, any>>({
                 return (
                   <tr
                     key={keyExtractor(row)}
-                    className="hover:bg-[#F4F7FA]/75 dark:hover:bg-slate-800/40 transition text-[#1F2937] dark:text-slate-200"
+                    className="hover:bg-blue-50/45 dark:hover:bg-slate-800/40 transition-colors text-slate-700 dark:text-slate-200"
                   >
-                    <td className="py-3 px-4 text-center text-[#64748B] font-mono text-[11px]">
+                    <td className="py-4 px-4 text-center text-slate-400 dark:text-slate-500 font-mono text-[11px] align-top">
                       {rowNumber}
                     </td>
                     {columns.map(col => {
@@ -290,7 +294,7 @@ export function DataTable<T extends Record<string, any>>({
                       return (
                         <td
                           key={col.key}
-                          className={`py-3 px-4 ${alignClass} ${col.className || ''}`}
+                          className={`py-4 px-4 align-middle ${alignClass} ${col.className || ''}`}
                         >
                           {col.render ? col.render(row) : (row[col.key] ?? '-')}
                         </td>
@@ -305,7 +309,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-4 border-t border-[#E2E8F0] dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B] dark:text-slate-400 print:hidden">
+      <div className="px-5 py-4 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400 print:hidden">
         <div className="flex items-center gap-3">
           <span>
             Menampilkan {totalItems === 0 ? 0 : startIndex + 1} -{' '}

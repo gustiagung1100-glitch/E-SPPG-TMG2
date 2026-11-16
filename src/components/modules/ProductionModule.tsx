@@ -15,6 +15,7 @@ import { monthlyWasteSummary } from '../../lib/productionData';
 import {
   DistributionDeliveryRecord,
   OmprengReturnRecord,
+  PortioningInspectionRecord,
 } from '../../types';
 import {
   DynamicFormEditToggleBar,
@@ -72,6 +73,7 @@ export const ProductionModule: React.FC = () => {
     addCookingRecord,
     portioningRecords,
     addPortioningRecord,
+    updatePortioningRecord,
     distributionDeliveries,
     addDistributionDelivery,
     updateDistributionDelivery,
@@ -363,6 +365,88 @@ export const ProductionModule: React.FC = () => {
     largePhoto: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=500&q=80',
     notes: 'Pemorsian menggunakan ompreng stainless steril bersegel silikon. Gramasi ditimbang teliti sampling per 25 boks.',
   });
+  const [editingPortioningId, setEditingPortioningId] = useState<string | null>(null);
+
+  const openNewPortioningModal = () => {
+    setEditingPortioningId(null);
+    setPortioningForm(f => ({
+      ...f,
+      date: new Date().toISOString().slice(0, 10),
+      menuId: menuItems[0]?.id || '',
+    }));
+    setIsPortioningModalOpen(true);
+  };
+
+  const openEditPortioningModal = (rec: PortioningInspectionRecord) => {
+    setEditingPortioningId(rec.id);
+    setPortioningForm({
+      date: rec.date,
+      time: rec.time,
+      portioningTime: rec.portioningTime,
+      officerName: rec.officerName,
+      menuId: rec.menuId || '',
+      riceRawLarge: rec.foodTemps.rice.rawWeightGrams ?? 85,
+      riceFactorLarge: rec.foodTemps.rice.conversionFactor ?? 0.4,
+      riceCookedLarge: rec.foodTemps.rice.cookedWeightGrams ?? 200,
+      riceTemp: rec.foodTemps.rice.temp,
+      ricePhoto: rec.foodTemps.rice.photoUrl || '',
+      riceS2Temp: rec.foodTemps.rice.session2Temp ?? '',
+      riceS2Photo: rec.foodTemps.rice.session2PhotoUrl || '',
+      riceS3Temp: rec.foodTemps.rice.session3Temp ?? '',
+      riceS3Photo: rec.foodTemps.rice.session3PhotoUrl || '',
+      riceRawSmall: rec.foodTemps.rice.rawWeightSmallGrams ?? 50,
+      riceFactorSmall: rec.foodTemps.rice.conversionFactorSmall ?? 1,
+      riceCookedSmall: rec.foodTemps.rice.cookedWeightSmallGrams ?? 100,
+      riceSmallS1Temp: rec.foodTemps.rice.smallPortionSession1Temp ?? '',
+      riceSmallS1Photo: rec.foodTemps.rice.smallPortionSession1PhotoUrl || '',
+      riceSmallS2Temp: rec.foodTemps.rice.smallPortionSession2Temp ?? '',
+      riceSmallS2Photo: rec.foodTemps.rice.smallPortionSession2PhotoUrl || '',
+      riceSmallS3Temp: rec.foodTemps.rice.smallPortionSession3Temp ?? '',
+      riceSmallS3Photo: rec.foodTemps.rice.smallPortionSession3PhotoUrl || '',
+      animalRaw: rec.foodTemps.animalProtein.rawWeightGrams ?? 50,
+      animalFactor: rec.foodTemps.animalProtein.conversionFactor ?? 1,
+      animalCooked: rec.foodTemps.animalProtein.cookedWeightGrams ?? 50,
+      animalTemp: rec.foodTemps.animalProtein.temp,
+      animalPhoto: rec.foodTemps.animalProtein.photoUrl || '',
+      animalS2Temp: rec.foodTemps.animalProtein.session2Temp ?? '',
+      animalS2Photo: rec.foodTemps.animalProtein.session2PhotoUrl || '',
+      animalS3Temp: rec.foodTemps.animalProtein.session3Temp ?? '',
+      animalS3Photo: rec.foodTemps.animalProtein.session3PhotoUrl || '',
+      plantRaw: rec.foodTemps.plantProtein.rawWeightGrams ?? 50,
+      plantFactor: rec.foodTemps.plantProtein.conversionFactor ?? 1,
+      plantCooked: rec.foodTemps.plantProtein.cookedWeightGrams ?? 50,
+      plantTemp: rec.foodTemps.plantProtein.temp,
+      plantPhoto: rec.foodTemps.plantProtein.photoUrl || '',
+      plantS2Temp: rec.foodTemps.plantProtein.session2Temp ?? '',
+      plantS2Photo: rec.foodTemps.plantProtein.session2PhotoUrl || '',
+      plantS3Temp: rec.foodTemps.plantProtein.session3Temp ?? '',
+      plantS3Photo: rec.foodTemps.plantProtein.session3PhotoUrl || '',
+      vegRaw: rec.foodTemps.vegetable.rawWeightGrams ?? 25,
+      vegFactor: rec.foodTemps.vegetable.conversionFactor ?? 1,
+      vegCooked: rec.foodTemps.vegetable.cookedWeightGrams ?? 25,
+      vegTemp: rec.foodTemps.vegetable.temp,
+      vegPhoto: rec.foodTemps.vegetable.photoUrl || '',
+      vegS2Temp: rec.foodTemps.vegetable.session2Temp ?? '',
+      vegS2Photo: rec.foodTemps.vegetable.session2PhotoUrl || '',
+      vegS3Temp: rec.foodTemps.vegetable.session3Temp ?? '',
+      vegS3Photo: rec.foodTemps.vegetable.session3PhotoUrl || '',
+      fruitRaw: rec.foodTemps.fruit.rawWeightGrams ?? 100,
+      fruitFactor: rec.foodTemps.fruit.conversionFactor ?? 1,
+      fruitCooked: rec.foodTemps.fruit.cookedWeightGrams ?? 100,
+      fruitTemp: rec.foodTemps.fruit.temp,
+      fruitPhoto: rec.foodTemps.fruit.photoUrl || '',
+      fruitS2Temp: rec.foodTemps.fruit.session2Temp ?? '',
+      fruitS2Photo: rec.foodTemps.fruit.session2PhotoUrl || '',
+      fruitS3Temp: rec.foodTemps.fruit.session3Temp ?? '',
+      fruitS3Photo: rec.foodTemps.fruit.session3PhotoUrl || '',
+      smallPortionGrams: rec.smallPortionWeightGrams,
+      largePortionGrams: rec.largePortionWeightGrams,
+      smallPhoto: rec.smallPortionPhoto || '',
+      largePhoto: rec.largePortionPhoto || '',
+      notes: rec.notes || '',
+    });
+    setIsPortioningModalOpen(true);
+  };
 
   const handleSavePortioning = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -373,7 +457,7 @@ export const ProductionModule: React.FC = () => {
       menuItems.find(m => m.date === portioningForm.date) ||
       menuItems[0];
 
-    await addPortioningRecord({
+    const payload = {
       date: portioningForm.date,
       time: portioningForm.time,
       portioningTime: portioningForm.portioningTime,
@@ -455,7 +539,14 @@ export const ProductionModule: React.FC = () => {
       smallPortionPhoto: portioningForm.smallPhoto,
       largePortionPhoto: portioningForm.largePhoto,
       notes: portioningForm.notes,
-    });
+    };
+
+    if (editingPortioningId) {
+      await updatePortioningRecord(editingPortioningId, payload);
+    } else {
+      await addPortioningRecord(payload);
+    }
+    setEditingPortioningId(null);
     setIsPortioningModalOpen(false);
   };
 
@@ -1221,14 +1312,26 @@ export const ProductionModule: React.FC = () => {
                 Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, dan dokumentasi foto ompreng lengkap.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsPortioningModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Input Data & Foto Pemorsian</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {portioningRecords[0] && (
+                <button
+                  type="button"
+                  onClick={() => openEditPortioningModal(portioningRecords[0])}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
+                >
+                  <Camera className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Edit Foto &amp; Gramasi Aktif</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={openNewPortioningModal}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Input Data & Foto Pemorsian</span>
+              </button>
+            </div>
           </div>
 
           {/* Gramasi & Ompreng Photos */}
@@ -2514,8 +2617,15 @@ export const ProductionModule: React.FC = () => {
       {isPortioningModalOpen && (
         <Modal
           isOpen={isPortioningModalOpen}
-          onClose={() => setIsPortioningModalOpen(false)}
-          title="Input Data Gramasi & Suhu Divisi Pemorsian"
+          onClose={() => {
+            setIsPortioningModalOpen(false);
+            setEditingPortioningId(null);
+          }}
+          title={
+            editingPortioningId
+              ? 'Edit Data Gramasi, Suhu & Foto Divisi Pemorsian'
+              : 'Input Data Gramasi & Suhu Divisi Pemorsian'
+          }
           maxWidth="xl"
         >
           <form onSubmit={handleSavePortioning} className="space-y-4 text-xs">
@@ -2606,9 +2716,14 @@ export const ProductionModule: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Porsi Kecil */}
-                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">Porsi Kecil (Target 380-410g)</span>
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">Porsi Kecil (Target 380-410g)</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Sinkron Flyer Menu
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <input
                       type="number"
                       step="1"
@@ -2618,19 +2733,35 @@ export const ProductionModule: React.FC = () => {
                     />
                     <span className="text-slate-500 font-bold">gram</span>
                   </div>
-                  <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Kecil:</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, smallPhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
+                  <div className="flex items-center gap-2.5 pt-1">
+                    {portioningForm.smallPhoto && (
+                      <img
+                        src={portioningForm.smallPhoto}
+                        alt="Preview Porsi Kecil"
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Kecil:</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, smallPhoto: url })))}
+                        className="w-full text-[10px]"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Porsi Besar */}
-                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 block mb-1">Porsi Besar (Target 560-600g)</span>
-                  <div className="flex items-center gap-2 mb-2">
+                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">Porsi Besar (Target 560-600g)</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Sinkron Flyer Menu
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <input
                       type="number"
                       step="1"
@@ -2640,13 +2771,24 @@ export const ProductionModule: React.FC = () => {
                     />
                     <span className="text-slate-500 font-bold">gram</span>
                   </div>
-                  <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Besar:</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, largePhoto: url })))}
-                    className="w-full text-[10px]"
-                  />
+                  <div className="flex items-center gap-2.5 pt-1">
+                    {portioningForm.largePhoto && (
+                      <img
+                        src={portioningForm.largePhoto}
+                        alt="Preview Porsi Besar"
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Besar:</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, largePhoto: url })))}
+                        className="w-full text-[10px]"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

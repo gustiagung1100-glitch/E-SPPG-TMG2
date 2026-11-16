@@ -150,8 +150,18 @@ export function resolveOrganolepticAutoFields(
     : undefined;
 
   const matchedDelivery = instId
-    ? distributionDeliveries.find(d => d.institutionId === instId && (!date || d.date === date)) ||
-      distributionDeliveries.find(d => d.institutionId === instId)
+    ? distributionDeliveries.find(
+        d =>
+          (!date || d.date === date) &&
+          (d.institutionId === instId ||
+            (matchedInst &&
+              d.institutionName.toLowerCase().includes(matchedInst.name.toLowerCase())))
+      ) ||
+      distributionDeliveries.find(
+        d =>
+          d.institutionId === instId ||
+          (matchedInst && d.institutionName.toLowerCase().includes(matchedInst.name.toLowerCase()))
+      )
     : undefined;
 
   const matchedAttendance = instId
@@ -161,24 +171,24 @@ export function resolveOrganolepticAutoFields(
 
   const activeDate =
     date ||
-    matchedLog?.date ||
     matchedDelivery?.date ||
+    matchedLog?.date ||
     matchedAttendance?.date ||
     new Date().toISOString().slice(0, 10);
 
   const autoPicName =
+    matchedDelivery?.picName?.trim() ||
     matchedInst?.picName?.trim() ||
     matchedInst?.contactPerson?.trim() ||
     matchedLog?.receivedBy?.trim() ||
-    matchedDelivery?.picName?.trim() ||
     'Penanggung Jawab MBG Sekolah';
 
-  const autoPlaceName = matchedInst?.name || matchedLog?.institutionName || 'Lembaga Penerima Manfaat';
+  const autoPlaceName = matchedInst?.name || matchedDelivery?.institutionName || matchedLog?.institutionName || 'Lembaga Penerima Manfaat';
 
   const autoDateLabel = formatDayCommaDate(activeDate);
 
   // Waktu pemeriksaan otomatis dari log distribusi / jadwal urutan pengantaran lembaga
-  const rawTime = matchedLog?.arrivalTime || matchedDelivery?.arrivalTime;
+  const rawTime = matchedDelivery?.arrivalTime || matchedLog?.arrivalTime;
   const orderIndex = matchedInst?.deliveryOrder ? matchedInst.deliveryOrder : 1;
   const fallbackHour = 7 + Math.min(3, Math.floor((orderIndex - 1) / 3));
   const fallbackMin = ((orderIndex - 1) % 3) * 15 + 15;

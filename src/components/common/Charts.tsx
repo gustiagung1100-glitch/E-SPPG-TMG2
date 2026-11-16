@@ -236,11 +236,13 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
   title,
   subtitle,
   data,
-  targetLabel = 'Plafon BGN (Rp 15.000)',
+  targetLabel = 'Plafon Pagu BGN',
   actualLabel = 'Realisasi Food Cost',
 }) => {
-  const maxVal = Math.max(...data.map(d => Math.max(d.actual, d.target)), 18000);
-  const minVal = 10000;
+  const targetValue = data[0]?.target || 10000;
+  const maxVal = Math.max(...data.map(d => Math.max(d.actual, d.target)), targetValue + 2000);
+  const minVal = Math.max(0, Math.min(...data.map(d => Math.min(d.actual, d.target)), targetValue) - 2000);
+  const range = Math.max(1, maxVal - minVal);
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
@@ -272,18 +274,18 @@ export const FoodCostLineChart: React.FC<LineChartProps> = ({
         <div
           className="absolute left-0 right-0 border-b border-dashed border-[#DC2626] dark:border-rose-500 z-0 flex items-center justify-end"
           style={{
-            top: `${100 - ((15000 - minVal) / (maxVal - minVal)) * 100}%`,
+            top: `${100 - ((targetValue - minVal) / range) * 100}%`,
           }}
         >
           <span className="text-[10px] text-[#DC2626] dark:text-rose-400 bg-white dark:bg-slate-900 px-1 font-mono font-semibold">
-            Plafon Rp 15.000
+            Plafon {formatRupiah(targetValue)}
           </span>
         </div>
 
         {/* Data points */}
         <div className="h-full flex items-end justify-between relative z-10">
           {data.map((item, idx) => {
-            const pct = ((item.actual - minVal) / (maxVal - minVal)) * 100;
+            const pct = ((item.actual - minVal) / range) * 100;
             const isUnderBudget = item.actual <= item.target;
 
             return (

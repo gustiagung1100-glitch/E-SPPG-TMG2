@@ -628,11 +628,13 @@ export const InstitutionsModule: React.FC = () => {
     { day: 'Jumat, 07 Nov 2026', registered: 2850, absent: 38, actualSmall: 1066, actualLarge: 1746, actualTotal: 2812, rate: '98.7%' },
   ];
 
-  // Monthly summary
+  // Monthly summary (using live two-category SPPG pagu anggaran: Porsi Kecil & Porsi Besar)
+  const smallCapBudget = sppgConfig.smallPortionBudget || 8000;
+  const largeCapBudget = sppgConfig.largePortionBudget || 10000;
   const monthlySummary = [
-    { month: 'November 2026 (Berjalan)', totalDays: 20, avgActualDaily: 2812, totalSmallMonthly: 21320, totalLargeMonthly: 34920, totalActualMonthly: 56240, budgetAbsorption: 56240 * 15000, avgRate: '98.7%' },
-    { month: 'Oktober 2026', totalDays: 22, avgActualDaily: 2805, totalSmallMonthly: 23430, totalLargeMonthly: 38280, totalActualMonthly: 61710, budgetAbsorption: 61710 * 15000, avgRate: '98.4%' },
-    { month: 'September 2026', totalDays: 21, avgActualDaily: 2798, totalSmallMonthly: 22260, totalLargeMonthly: 36498, totalActualMonthly: 58758, budgetAbsorption: 58758 * 15000, avgRate: '98.2%' },
+    { month: 'November 2026 (Berjalan)', totalDays: 20, avgActualDaily: 2812, totalSmallMonthly: 21320, totalLargeMonthly: 34920, totalActualMonthly: 56240, budgetAbsorption: 21320 * smallCapBudget + 34920 * largeCapBudget, avgRate: '98.7%' },
+    { month: 'Oktober 2026', totalDays: 22, avgActualDaily: 2805, totalSmallMonthly: 23430, totalLargeMonthly: 38280, totalActualMonthly: 61710, budgetAbsorption: 23430 * smallCapBudget + 38280 * largeCapBudget, avgRate: '98.4%' },
+    { month: 'September 2026', totalDays: 21, avgActualDaily: 2798, totalSmallMonthly: 22260, totalLargeMonthly: 36498, totalActualMonthly: 58758, budgetAbsorption: 22260 * smallCapBudget + 36498 * largeCapBudget, avgRate: '98.2%' },
   ];
 
   // Columns for Data Lembaga
@@ -877,39 +879,45 @@ export const InstitutionsModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Sub-Tabs Navigation */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold scrollbar-thin">
-        {[
-          { key: 'data_lembaga' as TabKey, label: '1. Data Lembaga & Kuota', icon: <School className="w-4 h-4" /> },
-          { key: 'presensi_harian' as TabKey, label: '2. Presensi Kehadiran Siswa', icon: <UserCheck className="w-4 h-4" /> },
-          { key: 'riwayat_kuota' as TabKey, label: '3. Riwayat Perubahan Kuota', icon: <History className="w-4 h-4" />, count: beneficiaryQuotaHistory.length },
-          { key: 'rekap_harian' as TabKey, label: '4. Rekap Distribusi Harian', icon: <Calendar className="w-4 h-4" /> },
-          { key: 'rekap_mingguan_bulanan' as TabKey, label: '5. Rekap Mingguan & Bulanan', icon: <BarChart3 className="w-4 h-4" /> },
-          { key: 'rekap_lembaga' as TabKey, label: '6. Rekap per Lembaga', icon: <Building className="w-4 h-4" /> },
-          { key: 'data_gizi_anak' as TabKey, label: '7. Data Anak & Status Gizi WHO', icon: <HeartPulse className="w-4 h-4" />, count: beneficiaryRecords.length },
-        ].map(tab => {
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`min-h-[42px] flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 cursor-pointer ${
-                isActive
-                  ? 'border-blue-900 dark:border-sky-400 text-blue-900 dark:text-sky-300 bg-blue-50/50 dark:bg-blue-950/40'
-                  : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-              {tab.count !== undefined && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* Sub-Tabs Navigation (Pill Tabs) */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 min-w-max text-xs font-semibold">
+          {[
+            { key: 'data_lembaga' as TabKey, label: '1. Data Lembaga & Kuota', icon: <School className="w-4 h-4 shrink-0" /> },
+            { key: 'presensi_harian' as TabKey, label: '2. Presensi Kehadiran Siswa', icon: <UserCheck className="w-4 h-4 shrink-0" /> },
+            { key: 'riwayat_kuota' as TabKey, label: '3. Riwayat Perubahan Kuota', icon: <History className="w-4 h-4 shrink-0" />, count: beneficiaryQuotaHistory.length },
+            { key: 'rekap_harian' as TabKey, label: '4. Rekap Distribusi Harian', icon: <Calendar className="w-4 h-4 shrink-0" /> },
+            { key: 'rekap_mingguan_bulanan' as TabKey, label: '5. Rekap Mingguan & Bulanan', icon: <BarChart3 className="w-4 h-4 shrink-0" /> },
+            { key: 'rekap_lembaga' as TabKey, label: '6. Rekap per Lembaga', icon: <Building className="w-4 h-4 shrink-0" /> },
+            { key: 'data_gizi_anak' as TabKey, label: '7. Data Anak & Status Gizi WHO', icon: <HeartPulse className="w-4 h-4 shrink-0" />, count: beneficiaryRecords.length },
+          ].map(tab => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`min-h-[40px] flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                    isActive
+                      ? 'bg-white/25 text-white'
+                      : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+                  }`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -1688,7 +1696,7 @@ export const InstitutionsModule: React.FC = () => {
                   Rekapitulasi Bulanan Penyerapan Porsi & Anggaran Makan
                 </h3>
                 <p className="text-xs text-slate-500 mb-4">
-                  Data penyerapan porsi bulanan dikalikan indeks biaya per porsi MBG (Rp 15.000 / porsi)
+                  Data penyerapan porsi bulanan dikalikan pagu anggaran per kategori porsi (Porsi Besar {formatRupiah(largeCapBudget)} &amp; Porsi Kecil {formatRupiah(smallCapBudget)})
                 </p>
 
                 <div className="overflow-x-auto">

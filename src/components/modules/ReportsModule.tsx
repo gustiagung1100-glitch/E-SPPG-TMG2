@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../../lib/store';
+import { useApp, isMatchingMaterialName } from '../../lib/store';
 import { PrintHeader } from '../common/PrintHeader';
 import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
 import {
@@ -9,6 +9,7 @@ import {
   formatRupiah,
   formatNumber,
   formatIndonesianDate,
+  parseLocalDate,
   triggerPrint,
   TableImageCell,
 } from '../../lib/exportUtils';
@@ -161,8 +162,8 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
     title: 'Informasi Food Cost & Efisiensi Menu',
     category: 'Gizi & Menu',
     codePrefix: 'FC-ANALYSIS',
-    description: 'Analisis biaya bahan baku per porsi versus plafon anggaran BGN RI (Rp 15.000 / Rp 12.500).',
-    sourceModule: 'Gizi, RAB & Master Bahan (menuId, rabId)',
+    description: 'Analisis biaya riil bahan pangan (Modul QC × harga RAB/PO) terhadap porsi aktual harian (Presensi/Distribusi) & plafon pagu BGN (Porsi Besar Rp 10.000 / Porsi Kecil Rp 8.000).',
+    sourceModule: 'Quality Control (QC), RAB & PO, Presensi/Distribusi',
     defaultOrientation: 'landscape',
     approverRole: 'Pengawas Keuangan & Ahli Gizi',
   },
@@ -298,6 +299,106 @@ interface ReportsModuleProps {
   onNavigate?: (module: ModuleKey) => void;
 }
 
+const INDONESIAN_MONTHS = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember',
+];
+
+function normalizeInstName(name?: string): string {
+  return (name || '')
+    .toLowerCase()
+    .replace(/\b(kecamatan|kec\.?|kabupaten|kab\.?|krejengan)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isSameInstitutionMatch(
+  inst: { id?: string; name?: string },
+  targetId?: string,
+  targetName?: string
+): boolean {
+  if (targetId && inst.id && inst.id === targetId) {
+    if (!targetName || !inst.name) return true;
+    const a = normalizeInstName(inst.name);
+    const b = normalizeInstName(targetName);
+    if (a === b || a.includes(b) || b.includes(a)) return true;
+  }
+  if (targetName && inst.name) {
+    const a = normalizeInstName(inst.name);
+    const b = normalizeInstName(targetName);
+    if (a && b && (a === b || a.includes(b) || b.includes(a))) return true;
+  }
+  return false;
+}
+
+function matchesMaterialFlexible(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (isMatchingMaterialName(a, b)) return true;
+  const cleanTokens = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(tok => tok.length >= 4 && !['segar', 'standar', 'lokal', 'pilihan', 'kemasan', 'karung', 'grade', 'bebas', 'campur'].includes(tok));
+  const ta = cleanTokens(a);
+  const tb = cleanTokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+  return ta.some(tok => tb.includes(tok));
+}
+
+function addDaysToIso(isoDate: string, days: number): string {
+  const parsed = parseLocalDate(isoDate) || new Date();
+  const shifted = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + days);
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatIndonesianMonthLabel(monthStr: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec((monthStr || '').trim());
+  if (!m) return monthStr || '-';
+  const year = m[1];
+  const monthIdx = Math.max(0, Math.min(11, Number(m[2]) - 1));
+  return `${INDONESIAN_MONTHS[monthIdx]} ${year}`;
+}
+
+function matchesReportPeriod(
+  recordDate: string | undefined,
+  periodType: 'harian' | 'mingguan' | 'bulanan' | 'periode',
+  selectedDate: string,
+  selectedMonth: string,
+  startDate: string,
+  endDate: string
+): boolean {
+  if (!recordDate) return false;
+  const iso = recordDate.slice(0, 10);
+  if (periodType === 'harian') {
+    return iso === selectedDate;
+  }
+  if (periodType === 'bulanan') {
+    return iso.startsWith(selectedMonth);
+  }
+  if (periodType === 'mingguan') {
+    if (selectedDate.startsWith(selectedMonth)) {
+      const weekStart = addDaysToIso(selectedDate, -6);
+      return iso >= weekStart && iso <= selectedDate;
+    }
+    return iso.startsWith(selectedMonth);
+  }
+  return (!startDate || iso >= startDate) && (!endDate || iso <= endDate);
+}
+
 export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const {
     institutions,
@@ -307,7 +408,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     beneficiaryAttendance,
     beneficiaryRecords,
     menuItems,
+    menuIngredientsMap,
     inventory,
+    stockMutations,
+    masterUnits,
     purchaseOrders,
     distributionLogs,
     pettyCashOpeningBalance,
@@ -328,6 +432,25 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     dynamicFormSchemas,
   } = useApp();
 
+  // Determine latest operational date from live cross-module records
+  const defaultOperationalDate = useMemo(() => {
+    const candidates = [
+      ...distributionDeliveries.map(d => d.date),
+      ...beneficiaryAttendance.map(a => a.date),
+      ...cookingRecords.map(c => c.date),
+      ...portioningRecords.map(p => p.date),
+      ...washingWasteRecords.map(w => w.date),
+    ].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    if (candidates.length === 0) return '2026-11-08';
+    return [...candidates].sort().pop() || '2026-11-08';
+  }, [
+    distributionDeliveries,
+    beneficiaryAttendance,
+    cookingRecords,
+    portioningRecords,
+    washingWasteRecords,
+  ]);
+
   // Selected State
   const [activeReportKey, setActiveReportKey] = useState<OfficialReportKey>(() => {
     try {
@@ -343,9 +466,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   });
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [periodType, setPeriodType] = useState<'harian' | 'mingguan' | 'bulanan' | 'periode'>('harian');
-  const [selectedDate, setSelectedDate] = useState<string>('2026-11-08');
-  const [startDate, setStartDate] = useState<string>('2026-11-01');
-  const [endDate, setEndDate] = useState<string>('2026-11-08');
+  const [selectedDate, setSelectedDate] = useState<string>(defaultOperationalDate);
+  const [selectedMonth, setSelectedMonth] = useState<string>(defaultOperationalDate.slice(0, 7));
+  const [startDate, setStartDate] = useState<string>(`${defaultOperationalDate.slice(0, 7)}-01`);
+  const [endDate, setEndDate] = useState<string>(defaultOperationalDate);
   const [selectedInstitutionId, setSelectedInstitutionId] = useState<string>('ALL');
   const [selectedPortionCategory, setSelectedPortionCategory] = useState<'ALL' | 'kecil' | 'besar'>('ALL');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
@@ -385,29 +509,82 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     return REPORT_CONFIGS.find(r => r.key === activeReportKey) || REPORT_CONFIGS[0];
   }, [activeReportKey]);
 
-  // Current active menu
-  const todayMenu = menuItems[0] || {
-    id: 'm-1',
-    date: selectedDate,
-    dayName: 'Senin',
-    cycleWeek: 1,
-    menuCode: 'MN-01',
-    stapleFood: 'Nasi Putih Organik',
-    animalProtein: 'Ayam Fillet Kecap Madu',
-    plantProtein: 'Tempe Mendoan Gurih',
-    vegetable: 'Sop Sayur Kaldu Ayam',
-    fruit: 'Pisang Cavendish Gending',
-    milkOrExtra: 'Air Mineral Higienis',
-    caloriesSmall: 580,
-    caloriesLarge: 680,
-    proteinGrams: 29.5,
-    fatGrams: 16.2,
-    carbGrams: 94.0,
-    fiberGrams: 6.5,
-    targetPortions: 1450,
-    estimatedCostPerPortion: 8187,
-    status: 'Disetujui Kepala',
-  };
+  // Current active menu (matches selectedDate, or weekday name, or first active menu)
+  const todayMenu = useMemo(() => {
+    const exactMatch = menuItems.find(m => m.date === selectedDate);
+    if (exactMatch) return exactMatch;
+    const parsed = parseLocalDate(selectedDate);
+    if (parsed) {
+      const dayRaw = new Intl.DateTimeFormat('id-ID', { weekday: 'long' }).format(parsed).toLowerCase();
+      const dayMatch = menuItems.find(m => (m.dayName || '').toLowerCase() === dayRaw);
+      if (dayMatch) return dayMatch;
+    }
+    return (
+      menuItems[0] || {
+        id: 'm-1',
+        date: selectedDate,
+        dayName: 'Senin',
+        cycleWeek: 1,
+        menuCode: 'MN-01',
+        stapleFood: 'Nasi Putih Organik',
+        animalProtein: 'Ayam Fillet Kecap Madu',
+        plantProtein: 'Tempe Mendoan Gurih',
+        vegetable: 'Sop Sayur Kaldu Ayam',
+        fruit: 'Pisang Cavendish Gending',
+        milkOrExtra: 'Air Mineral Higienis',
+        caloriesSmall: 580,
+        caloriesLarge: 680,
+        proteinGrams: 29.5,
+        fatGrams: 16.2,
+        carbGrams: 94.0,
+        fiberGrams: 6.5,
+        calciumMg: 245,
+        ironMg: 4.8,
+        targetPortions: 1450,
+        estimatedCostPerPortion: 8187,
+        status: 'Disetujui Kepala',
+      }
+    );
+  }, [menuItems, selectedDate]);
+
+  // Sinkronisasi otomatis Foto Porsi Kecil & Foto Porsi Besar dari Modul Input Gramasi & Suhu Divisi Pemorsian
+  const flyerPortioningData = useMemo(() => {
+    const pickPhotos = (rec?: typeof portioningRecords[number]) => ({
+      small:
+        rec?.smallPortionPhoto ||
+        rec?.foodTemps?.rice?.smallPortionSession1PhotoUrl ||
+        rec?.foodTemps?.rice?.smallPortionSession2PhotoUrl ||
+        rec?.foodTemps?.rice?.smallPortionSession3PhotoUrl ||
+        '',
+      large:
+        rec?.largePortionPhoto ||
+        rec?.foodTemps?.rice?.photoUrl ||
+        rec?.foodTemps?.animalProtein?.photoUrl ||
+        '',
+    });
+
+    const matched =
+      portioningRecords.find(r => r.menuId === todayMenu.id && (Boolean(pickPhotos(r).small) || Boolean(pickPhotos(r).large))) ||
+      portioningRecords.find(r => r.date === todayMenu.date && (Boolean(pickPhotos(r).small) || Boolean(pickPhotos(r).large))) ||
+      portioningRecords.find(r => r.date === selectedDate && (Boolean(pickPhotos(r).small) || Boolean(pickPhotos(r).large))) ||
+      portioningRecords.find(r => Boolean(pickPhotos(r).small) || Boolean(pickPhotos(r).large)) ||
+      portioningRecords[0];
+
+    const photos = pickPhotos(matched);
+    return {
+      record: matched,
+      smallPhoto:
+        photos.small ||
+        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+      largePhoto:
+        photos.large ||
+        'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=800&q=80',
+      smallGrams: matched?.smallPortionWeightGrams || 395,
+      largeGrams: matched?.largePortionWeightGrams || 585,
+      officerName: matched?.officerName || 'Tim Divisi Pemorsian',
+      date: matched?.date || selectedDate,
+    };
+  }, [portioningRecords, todayMenu.id, todayMenu.date, selectedDate]);
 
   // Auto-resolved Checklist Uji Organoleptik dari Master Data Penerima Manfaat
   const organolepticData = useMemo(() => {
@@ -499,6 +676,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       menuItems,
       masterVolunteers,
       sppgConfig,
+      selectedDate,
+      selectedMonth,
       startDate,
       endDate,
       periodType,
@@ -508,6 +687,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     menuItems,
     masterVolunteers,
     sppgConfig,
+    selectedDate,
+    selectedMonth,
     startDate,
     endDate,
     periodType,
@@ -519,6 +700,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       portioningRecords,
       menuItems,
       sppgConfig,
+      selectedDate,
+      selectedMonth,
       startDate,
       endDate,
       periodType,
@@ -527,49 +710,165 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     portioningRecords,
     menuItems,
     sppgConfig,
+    selectedDate,
+    selectedMonth,
     startDate,
     endDate,
     periodType,
   ]);
 
-  // Auto-resolved BAST Harian Sheets matching Log Armada & BAST Digital format
+  // Auto-resolved BAST Harian Sheets — 100% sinkron dengan Modul Tugas Divisi Distribusi, Presensi Harian & Master Lembaga
   const bastSheetsList = useMemo<BASTSheetData[]>(() => {
-    const activeInstitutions =
+    const targetInstFilter =
       selectedInstitutionId !== 'ALL'
-        ? institutions.filter(i => i.id === selectedInstitutionId)
-        : institutions.filter(i => i.isActive);
+        ? institutions.find(i => i.id === selectedInstitutionId)
+        : undefined;
 
     const kw = searchKeyword.trim().toLowerCase();
-    const filteredInsts = kw
-      ? activeInstitutions.filter(
-          i =>
-            i.name.toLowerCase().includes(kw) ||
-            (i.picName || '').toLowerCase().includes(kw) ||
-            i.id.toLowerCase().includes(kw)
-        )
-      : activeInstitutions;
 
-    return filteredInsts.map((inst, idx) => {
+    // Helper: terapkan filter kategori porsi ('ALL' | 'kecil' | 'besar')
+    const applyPortionFilter = (sheet: BASTSheetData): BASTSheetData | null => {
+      const small = sheet.smallPortions ?? 0;
+      const large = sheet.largePortions ?? 0;
+      if (selectedPortionCategory === 'kecil') {
+        if (small <= 0) return null;
+        return { ...sheet, totalPortions: small, largePortions: 0 };
+      }
+      if (selectedPortionCategory === 'besar') {
+        if (large <= 0) return null;
+        return { ...sheet, totalPortions: large, smallPortions: 0 };
+      }
+      return sheet;
+    };
+
+    const matchesKeyword = (sheet: BASTSheetData): boolean => {
+      if (!kw) return true;
+      return (
+        sheet.institutionName.toLowerCase().includes(kw) ||
+        sheet.picName.toLowerCase().includes(kw) ||
+        sheet.distributorName.toLowerCase().includes(kw) ||
+        sheet.bastNumber.toLowerCase().includes(kw) ||
+        (sheet.vehicleNumber || '').toLowerCase().includes(kw) ||
+        (sheet.institutionId || '').toLowerCase().includes(kw)
+      );
+    };
+
+    // Jika mode mingguan/bulanan/periode: tampilkan BAST berdasarkan catatan pengiriman Divisi Distribusi pada periode tsb
+    if (periodType !== 'harian') {
+      const periodDeliveries = distributionDeliveries.filter(d => {
+        if (!matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate)) {
+          return false;
+        }
+        if (targetInstFilter) {
+          return isSameInstitutionMatch(
+            { id: d.institutionId, name: d.institutionName },
+            targetInstFilter.id,
+            targetInstFilter.name
+          );
+        }
+        return true;
+      });
+
+      if (periodDeliveries.length > 0) {
+        return periodDeliveries
+          .map((delivery, idx) => {
+            const matchedInst =
+              institutions.find(inst =>
+                isSameInstitutionMatch(inst, delivery.institutionId, delivery.institutionName)
+              ) || institutions.find(inst => inst.id === delivery.institutionId);
+            const seqNum = 192 + idx;
+            const resolved = resolveBastAutoFields({
+              institutions,
+              beneficiaryAttendance,
+              masterVolunteers,
+              distributionLogs,
+              distributionDeliveries,
+              omprengReturns,
+              sppgConfig,
+              institutionId: matchedInst?.id || delivery.institutionId,
+              institutionName: delivery.institutionName,
+              date: delivery.date,
+              bastNumber: delivery.bastNumber || generateBastNumber(seqNum, delivery.date),
+              totalPortions: delivery.totalPortions,
+              smallPortions: delivery.smallPortions,
+              largePortions: delivery.largePortions,
+              picName: delivery.picName || undefined,
+              distributorName: delivery.driverName || undefined,
+              vehicleNumber: delivery.vehicleNumber,
+              deliveryStatus: delivery.status,
+              notes: delivery.notes,
+              receiveTime:
+                bastReceiveTimeOverride.trim() ||
+                (delivery.arrivalTime && delivery.arrivalTime !== '-'
+                  ? delivery.arrivalTime
+                  : delivery.departureTime),
+              returnTime: bastReturnTimeOverride.trim() || undefined,
+            });
+            return applyPortionFilter(resolved);
+          })
+          .filter((s): s is BASTSheetData => s !== null && matchesKeyword(s));
+      }
+    }
+
+    // Mode Harian (atau fallback): gabungkan semua pengiriman Divisi Distribusi pada selectedDate + lembaga aktif dari Master Data
+    const dayDeliveries = distributionDeliveries.filter(d => d.date === selectedDate);
+    const activeInstitutions = targetInstFilter
+      ? [targetInstFilter]
+      : institutions.filter(i => i.isActive);
+
+    const usedDeliveryIds = new Set<string>();
+    const combinedEntries = activeInstitutions.map((inst, idx) => {
       const instIndex = institutions.findIndex(i => i.id === inst.id);
       const seqNum = 192 + (instIndex >= 0 ? instIndex : idx);
 
-      const matchedDelivery = distributionDeliveries.find(
-        d => d.institutionId === inst.id && d.date === selectedDate
+      const matchedDelivery = dayDeliveries.find(d =>
+        isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
       );
+      if (matchedDelivery) usedDeliveryIds.add(matchedDelivery.id);
+
       const matchedDist =
-        distributionLogs.find(d => d.institutionId === inst.id && d.date === selectedDate) ||
-        distributionLogs.find(d => d.institutionId === inst.id);
+        distributionLogs.find(
+          d =>
+            d.date === selectedDate &&
+            isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
+        ) ||
+        distributionLogs.find(d =>
+          isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
+        );
+
       const matchedReturn = omprengReturns.find(
-        r => r.institutionId === inst.id && r.date === selectedDate
-      );
-      const matchedAtt = beneficiaryAttendance.find(
-        a => a.institutionId === inst.id && a.date === selectedDate
+        r =>
+          r.date === selectedDate &&
+          isSameInstitutionMatch(inst, r.institutionId, r.institutionName)
       );
 
-      const totalPortionsResolved = matchedAtt
-        ? matchedAtt.actualPortions
-        : matchedDelivery
+      const matchedAtt = beneficiaryAttendance.find(
+        a =>
+          a.date === selectedDate &&
+          isSameInstitutionMatch(inst, a.institutionId, a.institutionName)
+      );
+
+      // Prioritas sumber porsi: Tugas Divisi Distribusi -> Presensi Harian -> Legacy Log -> Master Lembaga
+      const resolvedSmall = matchedDelivery
+        ? matchedDelivery.smallPortions
+        : matchedAtt
+        ? matchedAtt.presentSmall
+        : matchedDist
+        ? matchedDist.smallPortions
+        : inst.smallPortions;
+
+      const resolvedLarge = matchedDelivery
+        ? matchedDelivery.largePortions
+        : matchedAtt
+        ? matchedAtt.presentLarge
+        : matchedDist
+        ? matchedDist.largePortions
+        : inst.largePortions;
+
+      const totalPortionsResolved = matchedDelivery
         ? matchedDelivery.totalPortions
+        : matchedAtt
+        ? matchedAtt.actualPortions
         : matchedDist
         ? matchedDist.totalPortions
         : inst.totalPortions;
@@ -578,6 +877,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         bastReceiveTimeOverride.trim() ||
         (matchedDelivery?.arrivalTime && matchedDelivery.arrivalTime !== '-'
           ? matchedDelivery.arrivalTime
+          : matchedDelivery?.departureTime && matchedDelivery.departureTime !== '-'
+          ? matchedDelivery.departureTime
           : matchedDist?.arrivalTime && matchedDist.arrivalTime !== '-'
           ? matchedDist.arrivalTime
           : matchedDist?.departureTime);
@@ -593,24 +894,81 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         beneficiaryAttendance,
         masterVolunteers,
         distributionLogs,
+        distributionDeliveries,
+        omprengReturns,
         sppgConfig,
         institutionId: inst.id,
-        institutionName: inst.name,
+        institutionName: matchedDelivery?.institutionName || inst.name,
         date: selectedDate,
         bastNumber:
           matchedDelivery?.bastNumber ||
           matchedDist?.bastNumber ||
           generateBastNumber(seqNum, selectedDate),
         totalPortions: totalPortionsResolved,
+        smallPortions: resolvedSmall,
+        largePortions: resolvedLarge,
         picName: matchedDelivery?.picName || matchedDist?.receivedBy || undefined,
         distributorName: matchedDelivery?.driverName || matchedDist?.driverName,
+        vehicleNumber: matchedDelivery?.vehicleNumber || matchedDist?.vehicleNumber,
+        deliveryStatus: matchedDelivery?.status || matchedDist?.status,
+        notes: matchedDelivery?.notes || matchedDist?.notes,
         receiveTime: receiveTimeResolved,
         returnTime: returnTimeResolved,
       });
     });
+
+    // Sertakan pengiriman Divisi Distribusi tambahan pada tanggal tsb yang belum masuk daftar lembaga aktif
+    dayDeliveries.forEach((extraDel, idx) => {
+      if (usedDeliveryIds.has(extraDel.id)) return;
+      if (
+        targetInstFilter &&
+        !isSameInstitutionMatch(
+          targetInstFilter,
+          extraDel.institutionId,
+          extraDel.institutionName
+        )
+      ) {
+        return;
+      }
+      combinedEntries.push(
+        resolveBastAutoFields({
+          institutions,
+          beneficiaryAttendance,
+          masterVolunteers,
+          distributionLogs,
+          distributionDeliveries,
+          omprengReturns,
+          sppgConfig,
+          institutionId: extraDel.institutionId,
+          institutionName: extraDel.institutionName,
+          date: extraDel.date,
+          bastNumber:
+            extraDel.bastNumber || generateBastNumber(210 + idx, extraDel.date),
+          totalPortions: extraDel.totalPortions,
+          smallPortions: extraDel.smallPortions,
+          largePortions: extraDel.largePortions,
+          picName: extraDel.picName || undefined,
+          distributorName: extraDel.driverName || undefined,
+          vehicleNumber: extraDel.vehicleNumber,
+          deliveryStatus: extraDel.status,
+          notes: extraDel.notes,
+          receiveTime:
+            bastReceiveTimeOverride.trim() ||
+            (extraDel.arrivalTime && extraDel.arrivalTime !== '-'
+              ? extraDel.arrivalTime
+              : extraDel.departureTime),
+          returnTime: bastReturnTimeOverride.trim() || undefined,
+        })
+      );
+    });
+
+    return combinedEntries
+      .map(applyPortionFilter)
+      .filter((s): s is BASTSheetData => s !== null && matchesKeyword(s));
   }, [
     institutions,
     selectedInstitutionId,
+    selectedPortionCategory,
     searchKeyword,
     distributionDeliveries,
     distributionLogs,
@@ -618,7 +976,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     beneficiaryAttendance,
     masterVolunteers,
     sppgConfig,
+    periodType,
     selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
     bastReceiveTimeOverride,
     bastReturnTimeOverride,
   ]);
@@ -628,14 +990,26 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     if (selectedInstitutionId !== 'ALL') {
       const foundByGlobal = institutions.find(i => i.id === selectedInstitutionId);
       if (foundByGlobal) {
-        const match = bastSheetsList.find(s => s.institutionName === foundByGlobal.name);
+        const match = bastSheetsList.find(s =>
+          isSameInstitutionMatch(
+            { id: s.institutionId, name: s.institutionName },
+            foundByGlobal.id,
+            foundByGlobal.name
+          )
+        );
         if (match) return match;
       }
     }
     if (bastSingleInstId) {
       const foundByLocal = institutions.find(i => i.id === bastSingleInstId);
       if (foundByLocal) {
-        const match = bastSheetsList.find(s => s.institutionName === foundByLocal.name);
+        const match = bastSheetsList.find(s =>
+          isSameInstitutionMatch(
+            { id: s.institutionId, name: s.institutionName },
+            foundByLocal.id,
+            foundByLocal.name
+          )
+        );
         if (match) return match;
       }
     }
@@ -652,10 +1026,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   // Generate Document Register Number
   const documentRegisterNumber = useMemo(() => {
     const romanMonths = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
-    const d = new Date(selectedDate);
+    const d = parseLocalDate(selectedDate) || new Date();
     const monthIndex = isNaN(d.getTime()) ? 10 : d.getMonth();
     const romanMonth = romanMonths[monthIndex];
-    const year = isNaN(d.getTime()) ? 2026 : d.getFullYear();
+    const year = isNaN(d.getFullYear()) ? 2026 : d.getFullYear();
     return `${currentConfig.codePrefix}/SPPG-TMG2/${year}/${romanMonth}/0042`;
   }, [currentConfig, selectedDate]);
 
@@ -664,16 +1038,16 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     if (periodType === 'harian') {
       return `Harian (${formatIndonesianDate(selectedDate)})`;
     } else if (periodType === 'mingguan') {
-      return `Siklus Mingguan (Minggu Ke-2 November 2026)`;
+      return `Mingguan (${formatIndonesianDate(addDaysToIso(selectedDate, -6))} - ${formatIndonesianDate(selectedDate)})`;
     } else if (periodType === 'bulanan') {
-      return `Bulanan (November 2026)`;
+      return `Bulanan (${formatIndonesianMonthLabel(selectedMonth)})`;
     } else {
-      return `Periode Kustom (${startDate} s/d ${endDate})`;
+      return `Periode Kustom (${formatIndonesianDate(startDate)} s/d ${formatIndonesianDate(endDate)})`;
     }
-  }, [periodType, selectedDate, startDate, endDate]);
+  }, [periodType, selectedDate, selectedMonth, startDate, endDate]);
 
   // ===========================================================================
-  // REPORT DATA GENERATORS (Masing-masing 20 Laporan dengan Relasi ID Unik)
+  // REPORT DATA GENERATORS (Masing-masing 20 Laporan Otomatis Antar-Modul)
   // ===========================================================================
   const reportPayload = useMemo(() => {
     let headers: string[] = [];
@@ -684,205 +1058,538 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     let metrics: Array<{ label: string; value: string; sublabel?: string; color?: string }> = [];
     let notes = '';
     let orientation: 'portrait' | 'landscape' = currentConfig.defaultOrientation;
-    let signatures: Array<{ role: string; name: string; idNum?: string }> = [
-      { role: 'Penyusun / Petugas Lapangan', name: 'Ahmad Muzakki', idNum: 'SPPG-TMG2-OP01' },
-      { role: currentConfig.approverRole, name: 'Siti Nurhaliza, S.Gz.', idNum: 'GZ-2026-9912' },
-      { role: 'Kepala SPPG Temenggungan 2', name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
-    ];
+
+    // Resolve Petugas & Koordinator secara dinamis berdasarkan kategori/divisi laporan & Master Relawan
+    const pickCoordinator = (division: string, fallbackName: string, fallbackId: string) => {
+      const coord =
+        masterVolunteers.find(
+          v => v.isActive && v.division === division && v.position.includes('Koordinator')
+        ) || masterVolunteers.find(v => v.isActive && v.division === division);
+      return {
+        name: coord?.name || fallbackName,
+        idNum: coord?.code || fallbackId,
+      };
+    };
+
+    const distCoord = pickCoordinator('Distribusi', sppgConfig.headOfSppg, `SPPG-${sppgConfig.sppgId}`);
+    const cookCoord = pickCoordinator('Pengolahan', 'Kepala Bagian Masak', 'DPR-COOK-01');
+    const prepCoord = pickCoordinator('Persiapan', 'Koordinator Persiapan', 'DPR-PREP-01');
+    const portCoord = pickCoordinator('Pemorsian', 'Koordinator Pemorsian', 'DPR-PORT-01');
+    const washCoord = pickCoordinator('Cuci Ompreng', 'Koordinator Sanitasi', 'DPR-WASH-01');
+
+    const resolveDefaultSignatures = (): Array<{ role: string; name: string; idNum?: string }> => {
+      if (currentConfig.category === 'Distribusi & Lapangan') {
+        return [
+          {
+            role: 'Petugas Lapangan / Pengemudi',
+            name: bastSheetsList[0]?.distributorName || distCoord.name,
+            idNum: distCoord.idNum,
+          },
+          { role: currentConfig.approverRole, name: distCoord.name, idNum: distCoord.idNum },
+          { role: `Kepala ${sppgConfig.sppgName}`, name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+        ];
+      }
+      if (currentConfig.category === 'Gizi & Menu') {
+        return [
+          { role: 'Tim Gizi / Pengolahan Menu', name: prepCoord.name, idNum: prepCoord.idNum },
+          {
+            role: currentConfig.approverRole,
+            name: sppgConfig.nutritionOfficer || 'Pengawas Gizi SPPG',
+            idNum: 'GZ-SPPG-01',
+          },
+          { role: `Kepala ${sppgConfig.sppgName}`, name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+        ];
+      }
+      if (currentConfig.category === 'Dapur & Keamanan Pangan') {
+        const kitchenLead =
+          activeReportKey === 'food_waste'
+            ? washCoord
+            : activeReportKey === 'suhu_makanan_pemorsian'
+            ? portCoord
+            : cookCoord;
+        return [
+          { role: 'Petugas Dapur / QC Harian', name: kitchenLead.name, idNum: kitchenLead.idNum },
+          { role: currentConfig.approverRole, name: cookCoord.name, idNum: cookCoord.idNum },
+          { role: `Kepala ${sppgConfig.sppgName}`, name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+        ];
+      }
+      return [
+        { role: 'Penyusun / Petugas Operasional', name: sppgConfig.financeOfficer || prepCoord.name, idNum: 'SPPG-OP-01' },
+        {
+          role: currentConfig.approverRole,
+          name:
+            activeReportKey === 'penerima_harian'
+              ? sppgConfig.nutritionOfficer || distCoord.name
+              : sppgConfig.financeOfficer || sppgConfig.headOfSppg,
+          idNum: `SPPG-${sppgConfig.sppgId}`,
+        },
+        { role: `Kepala ${sppgConfig.sppgName}`, name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+      ];
+    };
+
+    let signatures: Array<{ role: string; name: string; idNum?: string }> = resolveDefaultSignatures();
+
+    const targetInstFilter =
+      selectedInstitutionId !== 'ALL'
+        ? institutions.find(i => i.id === selectedInstitutionId)
+        : undefined;
 
     switch (activeReportKey) {
-      // 1. BAST Distribusi
+      // 1. BAST Distribusi — 100% Sinkron dari bastSheetsList (Divisi Distribusi + Master Lembaga + Presensi + Ompreng Return)
       case 'bast_distribusi': {
-        headers = ['No', 'Nomor BAST', 'Lembaga Penerima', 'Porsi Kecil', 'Porsi Besar', 'Total', 'Waktu Tiba', 'Suhu Tiba', 'Kondisi Segel', 'PIC Penerima'];
-        let logs = distributionLogs;
-        if (selectedInstitutionId !== 'ALL') {
-          logs = logs.filter(l => l.institutionId === selectedInstitutionId);
-        }
-        if (searchKeyword) {
-          logs = logs.filter(l => l.institutionName.toLowerCase().includes(searchKeyword.toLowerCase()) || l.id.toLowerCase().includes(searchKeyword.toLowerCase()));
-        }
+        headers = [
+          'No',
+          'Nomor BAST',
+          'Tanggal',
+          'Lembaga Penerima',
+          'Porsi Kecil',
+          'Porsi Besar',
+          'Total Porsi',
+          'Jam Tiba / Kembali',
+          'Petugas & Armada',
+          'PIC Penerima & No. HP',
+          'Status Serah Terima',
+        ];
 
-        const totPortions = logs.reduce((acc, l) => acc + l.totalPortions, 0);
-        const totSmall = logs.reduce((acc, l) => acc + l.smallPortions, 0);
-        const totLarge = logs.reduce((acc, l) => acc + l.largePortions, 0);
+        const matchedDeliveries = distributionDeliveries.filter(d =>
+          matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        const matchedLogs = distributionLogs.filter(l =>
+          matchesReportPeriod(l.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
 
-        const baseRows = logs.map((l, idx) => {
-          const matchedInst = institutions.find(inst => inst.id === l.institutionId);
-          const picLabel = l.receivedBy || matchedInst?.picName || matchedInst?.contactPerson || 'Kepala Sekolah / PIC MBG';
-          const picPhone = matchedInst?.picPhone || matchedInst?.phone;
-          return [
-            idx + 1,
-            l.bastNumber || generateBastNumber(192 + idx, l.date),
-            l.institutionName,
-            formatNumber(l.smallPortions),
-            formatNumber(l.largePortions),
-            formatNumber(l.totalPortions),
-            l.arrivalTime || '09:15 WIB',
-            l.foodTempAtArrival ? `${l.foodTempAtArrival}°C` : '63.5°C',
-            'Utuh / Tersegel',
-            picPhone ? `${picLabel} (${picPhone})` : picLabel,
-          ];
+        const totPortions = bastSheetsList.reduce((acc, s) => acc + (s.totalPortions || 0), 0);
+        const totSmall = bastSheetsList.reduce((acc, s) => acc + (s.smallPortions || 0), 0);
+        const totLarge = bastSheetsList.reduce((acc, s) => acc + (s.largePortions || 0), 0);
+        const completedCount = bastSheetsList.filter(
+          s => s.deliveryStatus === 'Selesai Serah Terima'
+        ).length;
+
+        const avgTempCandidates = matchedLogs
+          .map(l => l.foodTempAtArrival || l.foodTempAtDispatch)
+          .filter((v): v is number => typeof v === 'number' && v > 0);
+        const avgTempLabel =
+          avgTempCandidates.length > 0
+            ? `${(
+                avgTempCandidates.reduce((a, b) => a + b, 0) / avgTempCandidates.length
+              ).toFixed(1)}°C`
+            : 'Standar ≥ 60°C';
+
+        const baseRows = bastSheetsList.map((s, idx) => [
+          idx + 1,
+          s.bastNumber,
+          formatIndonesianDate(s.date),
+          s.institutionType ? `${s.institutionName} (${s.institutionType})` : s.institutionName,
+          formatNumber(s.smallPortions || 0),
+          formatNumber(s.largePortions || 0),
+          formatNumber(s.totalPortions),
+          `${s.receiveTime} WIB / ${s.returnTime ? `${s.returnTime} WIB` : 'Belum Kembali'}`,
+          s.vehicleNumber ? `${s.distributorName} (${s.vehicleNumber})` : s.distributorName,
+          `${s.picName}${s.picPhone && s.picPhone !== '-' ? ` (${s.picPhone})` : ''}`,
+          s.deliveryStatus || 'Menunggu Pengantaran',
+        ]);
+
+        const matchedSourceRecords = bastSheetsList.map(s => {
+          const del = matchedDeliveries.find(d =>
+            isSameInstitutionMatch(
+              { id: s.institutionId, name: s.institutionName },
+              d.institutionId,
+              d.institutionName
+            )
+          );
+          const log = matchedLogs.find(l =>
+            isSameInstitutionMatch(
+              { id: s.institutionId, name: s.institutionName },
+              l.institutionId,
+              l.institutionName
+            )
+          );
+          return del || log || { customFields: {} };
         });
 
         const distReportSchema = dynamicFormSchemas.distribution_report_form;
-        const dynamicBastCols = appendDynamicExportColumns(distReportSchema, headers, baseRows, logs);
+        const dynamicBastCols = appendDynamicExportColumns(
+          distReportSchema,
+          headers,
+          baseRows,
+          matchedSourceRecords
+        );
         headers = dynamicBastCols.headers;
         rows = dynamicBastCols.rows;
 
-        excelData = logs.map((l, idx) => {
-          const matchedInst = institutions.find(inst => inst.id === l.institutionId);
-          const picLabel = l.receivedBy || matchedInst?.picName || matchedInst?.contactPerson || 'PIC Sekolah';
-          return appendDynamicExcelFields(
+        excelData = bastSheetsList.map((s, idx) =>
+          appendDynamicExcelFields(
             distReportSchema,
             {
               'No': idx + 1,
-              'Nomor BAST': l.bastNumber || generateBastNumber(192 + idx, l.date),
-              'ID Lembaga': l.institutionId,
-              'Nama Lembaga': l.institutionName,
-              'Porsi Kecil': l.smallPortions,
-              'Porsi Besar': l.largePortions,
-              'Total Porsi': l.totalPortions,
-              'Waktu Tiba': l.arrivalTime || '09:15 WIB',
-              'Suhu Tiba (°C)': l.foodTempAtArrival || 63.5,
-              'Penerima': picLabel,
-              'No HP PIC': matchedInst?.picPhone || matchedInst?.phone || '-',
-              'Status': l.status,
+              'Nomor BAST': s.bastNumber,
+              'Tanggal': s.date,
+              'ID Lembaga': s.institutionId || '-',
+              'Nama Lembaga': s.institutionName,
+              'Jenis Lembaga': s.institutionType || '-',
+              'Porsi Kecil': s.smallPortions || 0,
+              'Porsi Besar': s.largePortions || 0,
+              'Total Porsi': s.totalPortions,
+              'Jam Penerimaan': s.receiveTime,
+              'Jam Pengembalian Ompreng': s.returnTime || '-',
+              'Tim Distribusi / Driver': s.distributorName,
+              'No HP Tim Distribusi': s.distributorPhone,
+              'Armada': s.vehicleNumber || '-',
+              'PIC Penerima': s.picName,
+              'No HP PIC': s.picPhone,
+              'Status Pengiriman': s.deliveryStatus || '-',
             },
-            l
-          );
-        });
+            matchedSourceRecords[idx]
+          )
+        );
 
         metrics = [
-          { label: 'Total BAST Terbit', value: `${logs.length} Lembaga`, color: 'text-blue-700' },
-          { label: 'Total Porsi Serah Terima', value: `${formatNumber(totPortions)} Porsi`, color: 'text-emerald-700' },
-          { label: 'Rasio Porsi Kecil : Besar', value: `${formatNumber(totSmall)} : ${formatNumber(totLarge)}`, color: 'text-purple-700' },
-          { label: 'Kondisi Suhu Tiba Rata-rata', value: '64.2°C', sublabel: 'Wajib > 60°C', color: 'text-amber-700' },
+          { label: 'Total BAST Terbit', value: `${bastSheetsList.length} Lembaga`, color: 'text-blue-700' },
+          {
+            label: 'Total Porsi Serah Terima',
+            value: `${formatNumber(totPortions)} Porsi`,
+            sublabel: `Kecil: ${formatNumber(totSmall)} • Besar: ${formatNumber(totLarge)}`,
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Serah Terima Div. Distribusi',
+            value: `${completedCount} / ${bastSheetsList.length} Selesai`,
+            sublabel: 'Sinkron Tugas Divisi Distribusi',
+            color: 'text-purple-700',
+          },
+          { label: 'Kondisi Suhu & Segel', value: avgTempLabel, sublabel: 'Wajib ≥ 60°C & Tersegel', color: 'text-amber-700' },
         ];
 
-        notes = 'Seluruh ompreng makanan telah diserahterimakan dalam keadaan tertutup rapat, bersegel higienis, dan suhu makanan memenuhi standar minimal 60°C.';
+        notes =
+          'Setiap BAST Distribusi diisi otomatis dari tugas Divisi Distribusi (jam tiba/kembali, armada, driver, status), Presensi Harian, dan Master Lembaga (nama PIC & nomor HP PIC).';
         break;
       }
 
       // 2. Surat Tugas
       case 'surat_tugas': {
-        headers = ['No', 'Nomor Surat Tugas', 'Nama Personel', 'Divisi / Unit', 'Uraian Tugas', 'Lokasi Penugasan', 'Masa Berlaku', 'Status Pengesahan'];
-        let docs = outgoingDocuments.filter(d => d.type === 'Surat Tugas');
-        if (searchKeyword) {
-          docs = docs.filter(d => d.recipientName.toLowerCase().includes(searchKeyword.toLowerCase()) || d.letterNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+        headers = ['No', 'Nomor Surat Tugas', 'Nama Personel', 'Divisi & Jabatan', 'Uraian Tugas', 'Lokasi Penugasan', 'Masa Berlaku', 'Status Pengesahan'];
+        const allTaskDocs = outgoingDocuments.filter(d => d.type === 'Surat Tugas');
+        const periodDocs = allTaskDocs.filter(d =>
+          matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let docs =
+          periodType === 'harian' && periodDocs.length === 0
+            ? allTaskDocs.filter(d => d.date.startsWith(selectedDate.slice(0, 7)))
+            : periodDocs;
+        if (docs.length === 0 && periodType === 'harian') {
+          docs = allTaskDocs;
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          docs = docs.filter(
+            d =>
+              d.recipientName.toLowerCase().includes(kw) ||
+              d.letterNumber.toLowerCase().includes(kw) ||
+              d.subject.toLowerCase().includes(kw)
+          );
         }
 
-        rows = docs.map((d, idx) => [
-          idx + 1,
-          d.letterNumber,
-          d.recipientName,
-          d.recipientAddress || 'Operasional SPPG',
-          d.subject,
-          'Kecamatan Krejengan',
-          formatIndonesianDate(d.date),
-          d.status,
-        ]);
+        rows = docs.map((d, idx) => {
+          const matchedVol = masterVolunteers.find(v =>
+            v.name.toLowerCase().includes(d.recipientName.toLowerCase()) ||
+            d.recipientName.toLowerCase().includes(v.name.toLowerCase())
+          );
+          const divisionInfo = matchedVol
+            ? `${matchedVol.division} — ${matchedVol.position}`
+            : d.recipientAddress || 'Operasional SPPG';
+          const locationLabel =
+            d.fieldsData?.lokasi ||
+            d.recipientInstitution ||
+            `Kecamatan ${sppgConfig.district}, ${sppgConfig.regency}`;
+          return [
+            idx + 1,
+            d.letterNumber,
+            d.recipientName,
+            divisionInfo,
+            d.subject,
+            locationLabel,
+            formatIndonesianDate(d.date),
+            d.status,
+          ];
+        });
 
-        excelData = docs.map((d, idx) => ({
-          'No': idx + 1,
-          'Nomor Surat': d.letterNumber,
-          'Nama Personel': d.recipientName,
-          'Tugas': d.subject,
-          'Tanggal': d.date,
-          'Status': d.status,
-        }));
+        excelData = docs.map((d, idx) => {
+          const matchedVol = masterVolunteers.find(v =>
+            v.name.toLowerCase().includes(d.recipientName.toLowerCase())
+          );
+          return {
+            'No': idx + 1,
+            'Nomor Surat': d.letterNumber,
+            'Nama Personel': d.recipientName,
+            'Divisi Relawan': matchedVol?.division || '-',
+            'Jabatan': matchedVol?.position || '-',
+            'No HP': matchedVol?.phone || '-',
+            'Tugas': d.subject,
+            'Tanggal': d.date,
+            'Disahkan Oleh': d.signedBy || sppgConfig.headOfSppg,
+            'Status': d.status,
+          };
+        });
+
+        const approvedDocsCount = docs.filter(
+          d => d.status === 'Disahkan' || d.status === 'Terkirim' || d.status === 'Diarsipkan'
+        ).length;
+        const activeVolunteersCount = masterVolunteers.filter(v => v.isActive).length;
 
         metrics = [
           { label: 'Total Surat Tugas', value: `${docs.length} Dokumen`, color: 'text-blue-700' },
-          { label: 'Status Pengesahan', value: '100% Sah', color: 'text-emerald-700' },
-          { label: 'Personel Bertugas', value: `${docs.length} Orang`, color: 'text-purple-700' },
-          { label: 'Basis Penugasan', value: 'SK Kepala SPPG', color: 'text-slate-700' },
+          {
+            label: 'Status Pengesahan',
+            value: docs.length > 0 ? `${approvedDocsCount}/${docs.length} Disahkan` : '0 Dokumen',
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Personel & Relawan Aktif',
+            value: `${docs.length} Tugas • ${activeVolunteersCount} Relawan`,
+            color: 'text-purple-700',
+          },
+          { label: 'Pejabat Pengesah', value: sppgConfig.headOfSppg, color: 'text-slate-700' },
         ];
-        notes = 'Surat Tugas ini berkekuatan hukum penuh dan menjadi syarat operasional penanganan MBG di lapangan.';
+        notes = 'Surat Tugas ditarik otomatis dari Modul Administrasi Surat dan diperkaya dengan divisi serta jabatan dari Master Data Relawan.';
         break;
       }
 
-      // 3. Dokumentasi Perjalanan Dinas (SPD)
+      // 3. Dokumentasi Perjalanan Dinas (SPD) - Terhubung real-time dengan FuelLogs & Tugas Divisi Distribusi
       case 'perjalanan_dinas': {
-        headers = ['No', 'Nomor SPD', 'Armada / Kendaraan', 'Pengemudi & Petugas', 'Lembaga Tujuan', 'Odo Awal / Akhir', 'Konsumsi BBM', 'Status Perjalanan'];
-        let deliveries = distributionDeliveries;
-        rows = deliveries.map((d, idx) => [
-          idx + 1,
-          `SPD-${d.id.toUpperCase()}`,
-          `${d.vehicleNumber} (${d.driverName})`,
-          d.driverName,
-          d.institutionName,
-          '14.280 / 14.315 km (35 km)',
-          'Rp 45.000 (Pertalite)',
-          d.status,
-        ]);
+        headers = ['No', 'Nomor SPD', 'Tanggal', 'Armada / Kendaraan', 'Pengemudi', 'Lembaga Tujuan & PIC', 'Odometer', 'Konsumsi & Biaya BBM', 'Status Perjalanan'];
+        let deliveries = distributionDeliveries.filter(d =>
+          matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        if (targetInstFilter) {
+          deliveries = deliveries.filter(d =>
+            isSameInstitutionMatch(
+              targetInstFilter,
+              d.institutionId,
+              d.institutionName
+            )
+          );
+        }
+        if (selectedPortionCategory === 'kecil') {
+          deliveries = deliveries.filter(d => d.smallPortions > 0);
+        } else if (selectedPortionCategory === 'besar') {
+          deliveries = deliveries.filter(d => d.largePortions > 0);
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          deliveries = deliveries.filter(
+            d =>
+              d.driverName.toLowerCase().includes(kw) ||
+              d.vehicleNumber.toLowerCase().includes(kw) ||
+              d.institutionName.toLowerCase().includes(kw) ||
+              d.picName.toLowerCase().includes(kw) ||
+              d.id.toLowerCase().includes(kw)
+          );
+        }
 
-        excelData = deliveries.map((d, idx) => ({
-          'No': idx + 1,
-          'Nomor SPD': `SPD-${d.id}`,
-          'Armada': d.vehicleNumber,
-          'Driver': d.driverName,
-          'Tujuan': d.institutionName,
-          'Total Porsi': d.totalPortions,
-          'Status': d.status,
-        }));
+        const matchedFuelIds = new Set<string>();
+        let totalFuelLiters = 0;
+        let totalFuelCost = 0;
+
+        rows = deliveries.map((d, idx) => {
+          const matchedInst = institutions.find(inst =>
+            isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
+          );
+          const matchedFuel =
+            fuelLogs.find(f => f.vehicleNumber === d.vehicleNumber && f.date === d.date) ||
+            fuelLogs.find(f => f.driverName === d.driverName && f.date === d.date) ||
+            fuelLogs.find(f => f.vehicleNumber === d.vehicleNumber);
+          if (matchedFuel && !matchedFuelIds.has(matchedFuel.id)) {
+            matchedFuelIds.add(matchedFuel.id);
+            totalFuelCost += Number(matchedFuel.nominalCost || 0);
+            totalFuelLiters += Number(matchedFuel.volumeLiters || 0);
+          }
+
+          const odoText = matchedFuel
+            ? `${formatNumber(matchedFuel.odometerKm)} km (${matchedFuel.gasStationName})`
+            : 'Belum Input Odometer';
+          const bbmText = matchedFuel
+            ? `${formatRupiah(matchedFuel.nominalCost)} (${matchedFuel.volumeLiters} L ${matchedFuel.fuelType})`
+            : 'Belum Input BBM';
+          const picLabel = d.picName || matchedInst?.picName || '-';
+
+          return [
+            idx + 1,
+            `SPD-${d.id.toUpperCase()}`,
+            formatIndonesianDate(d.date),
+            d.vehicleNumber,
+            d.driverName,
+            `${d.institutionName} (PIC: ${picLabel})`,
+            odoText,
+            bbmText,
+            d.status,
+          ];
+        });
+
+        excelData = deliveries.map((d, idx) => {
+          const matchedFuel =
+            fuelLogs.find(f => f.vehicleNumber === d.vehicleNumber && f.date === d.date) ||
+            fuelLogs.find(f => f.driverName === d.driverName && f.date === d.date) ||
+            fuelLogs.find(f => f.vehicleNumber === d.vehicleNumber);
+          return {
+            'No': idx + 1,
+            'Nomor SPD': `SPD-${d.id}`,
+            'Tanggal': d.date,
+            'Armada': d.vehicleNumber,
+            'Driver': d.driverName,
+            'Tujuan': d.institutionName,
+            'PIC Lembaga': d.picName,
+            'Total Porsi': d.totalPortions,
+            'Odometer (km)': matchedFuel?.odometerKm || 0,
+            'Volume BBM (Liter)': matchedFuel?.volumeLiters || 0,
+            'Biaya BBM (Rp)': matchedFuel?.nominalCost || 0,
+            'Status': d.status,
+          };
+        });
+
+        const periodFuelLogs = fuelLogs.filter(f =>
+          matchesReportPeriod(f.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        const fallbackFuelTotal = periodFuelLogs.reduce((s, f) => s + (f.nominalCost || 0), 0);
+        const fallbackLitersTotal = periodFuelLogs.reduce((s, f) => s + (f.volumeLiters || 0), 0);
 
         metrics = [
           { label: 'Total Rute Armada', value: `${deliveries.length} Rute`, color: 'text-blue-700' },
-          { label: 'Total Jarak Tempuh', value: '105 Km', color: 'text-emerald-700' },
-          { label: 'Realisasi BBM', value: 'Rp 135.000', color: 'text-purple-700' },
-          { label: 'Ketepatan Waktu Tiba', value: '100% On-Time', color: 'text-amber-700' },
+          { label: 'Volume BBM Tercatat', value: `${(totalFuelLiters || fallbackLitersTotal).toFixed(1)} L`, color: 'text-emerald-700' },
+          { label: 'Realisasi BBM', value: formatRupiah(totalFuelCost || fallbackFuelTotal), color: 'text-purple-700' },
+          { label: 'Log BBM Periode', value: `${periodFuelLogs.length} Trip`, color: 'text-amber-700' },
         ];
-        notes = 'Perjalanan dinas logistik berjalan aman dan tertib dengan mematuhi batas kecepatan armada tertutup maksimal 40 km/jam.';
+        notes = 'Data perjalanan dinas, rute tujuan, PIC, odometer, dan biaya BBM ditarik langsung secara real-time dari Modul Tugas Divisi Distribusi & Log BBM.';
         break;
       }
 
-      // 4. Rekap Distribusi
+      // 4. Rekap Distribusi (Terhubung Tugas Divisi Distribusi + Pengembalian Ompreng + Master Lembaga)
       case 'rekap_distribusi': {
-        headers = ['No', 'ID Kirim', 'Armada', 'Driver', 'Lembaga Tujuan', 'Porsi Muat', 'Jam Berangkat', 'Jam Tiba', 'Status'];
-        let deliveries = distributionDeliveries;
-        const baseRows = deliveries.map((d, idx) => [
-          idx + 1,
-          d.id,
-          d.vehicleNumber,
-          d.driverName,
-          d.institutionName,
-          formatNumber(d.totalPortions),
-          d.departureTime || '08:00 WIB',
-          d.arrivalTime || '08:45 WIB',
-          d.status,
-        ]);
+        headers = ['No', 'ID Kirim', 'Tanggal', 'Armada & Driver', 'Lembaga Tujuan & PIC', 'Porsi (K/B/Total)', 'Jam Berangkat / Tiba', 'Status Kirim', 'Status Ompreng Kembali'];
+        let deliveries = distributionDeliveries.filter(d =>
+          matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        if (targetInstFilter) {
+          deliveries = deliveries.filter(d =>
+            isSameInstitutionMatch(
+              targetInstFilter,
+              d.institutionId,
+              d.institutionName
+            )
+          );
+        }
+        if (selectedPortionCategory === 'kecil') {
+          deliveries = deliveries.filter(d => d.smallPortions > 0);
+        } else if (selectedPortionCategory === 'besar') {
+          deliveries = deliveries.filter(d => d.largePortions > 0);
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          deliveries = deliveries.filter(
+            d =>
+              d.institutionName.toLowerCase().includes(kw) ||
+              d.driverName.toLowerCase().includes(kw) ||
+              d.vehicleNumber.toLowerCase().includes(kw) ||
+              d.picName.toLowerCase().includes(kw) ||
+              d.id.toLowerCase().includes(kw)
+          );
+        }
+
+        let returnedCount = 0;
+        const baseRows = deliveries.map((d, idx) => {
+          const matchedInst = institutions.find(inst =>
+            isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
+          );
+          const matchedReturn = omprengReturns.find(
+            r =>
+              r.date === d.date &&
+              isSameInstitutionMatch(
+                { id: r.institutionId, name: r.institutionName },
+                matchedInst?.id || d.institutionId,
+                d.institutionName
+              )
+          );
+          if (matchedReturn) returnedCount += 1;
+
+          const effectiveTotal =
+            selectedPortionCategory === 'kecil'
+              ? d.smallPortions
+              : selectedPortionCategory === 'besar'
+              ? d.largePortions
+              : d.totalPortions;
+
+          return [
+            idx + 1,
+            d.bastNumber || d.id,
+            formatIndonesianDate(d.date),
+            `${d.vehicleNumber} • ${d.driverName}`,
+            `${d.institutionName} (${d.picName || matchedInst?.picName || '-'})`,
+            `${formatNumber(d.smallPortions)} / ${formatNumber(d.largePortions)} / ${formatNumber(effectiveTotal)}`,
+            `${d.departureTime || '-'} / ${d.arrivalTime || '-'}`,
+            d.status,
+            matchedReturn
+              ? `${matchedReturn.conditionStatus} (${matchedReturn.arrivalTime})`
+              : 'Menunggu Penjemputan',
+          ];
+        });
 
         const dispatchSchema = dynamicFormSchemas.distribution_dispatch_form;
         const dynamicDispatchCols = appendDynamicExportColumns(dispatchSchema, headers, baseRows, deliveries);
         headers = dynamicDispatchCols.headers;
         rows = dynamicDispatchCols.rows;
 
-        excelData = deliveries.map((d, idx) =>
-          appendDynamicExcelFields(
+        excelData = deliveries.map((d, idx) => {
+          const matchedReturn = omprengReturns.find(
+            r =>
+              r.date === d.date &&
+              isSameInstitutionMatch(
+                { id: r.institutionId, name: r.institutionName },
+                d.institutionId,
+                d.institutionName
+              )
+          );
+          return appendDynamicExcelFields(
             dispatchSchema,
             {
               'No': idx + 1,
               'ID Kirim': d.id,
+              'Nomor BAST': d.bastNumber,
+              'Tanggal': d.date,
               'Armada': d.vehicleNumber,
               'Driver': d.driverName,
               'Lembaga': d.institutionName,
-              'Porsi': d.totalPortions,
+              'PIC Sekolah': d.picName,
+              'Porsi Kecil': d.smallPortions,
+              'Porsi Besar': d.largePortions,
+              'Total Porsi': d.totalPortions,
               'Jam Berangkat': d.departureTime,
               'Jam Tiba': d.arrivalTime,
-              'Status': d.status,
+              'Status Kirim': d.status,
+              'Status Kembali Ompreng': matchedReturn?.conditionStatus || 'Belum Kembali',
             },
             d
-          )
-        );
+          );
+        });
 
-        const totalPortionLoaded = deliveries.reduce((acc, d) => acc + d.totalPortions, 0);
+        const totalPortionLoaded = deliveries.reduce(
+          (acc, d) =>
+            acc +
+            (selectedPortionCategory === 'kecil'
+              ? d.smallPortions
+              : selectedPortionCategory === 'besar'
+              ? d.largePortions
+              : d.totalPortions),
+          0
+        );
+        const completedCount = deliveries.filter(d => d.status === 'Selesai Serah Terima').length;
+        const uniqueVehicles = new Set(deliveries.map(d => d.vehicleNumber)).size;
+
         metrics = [
-          { label: 'Armada Aktif', value: `${deliveries.length} Unit`, color: 'text-blue-700' },
+          { label: 'Armada & Trip Aktif', value: `${uniqueVehicles} Unit • ${deliveries.length} Trip`, color: 'text-blue-700' },
           { label: 'Total Porsi Logistik', value: `${formatNumber(totalPortionLoaded)} Porsi`, color: 'text-emerald-700' },
-          { label: 'Seluruh BAST', value: 'Lengkap', color: 'text-emerald-700' },
-          { label: 'Zero Incident', value: 'Terpenuhi', color: 'text-slate-700' },
+          { label: 'BAST Serah Terima', value: `${completedCount} / ${deliveries.length} Selesai`, color: 'text-emerald-700' },
+          { label: 'Penjemputan Ompreng', value: `${returnedCount} / ${deliveries.length} Kembali`, color: 'text-purple-700' },
         ];
-        notes = 'Rekapitulasi logistik armada distribusi terkonfirmasi lengkap oleh seluruh perwakilan sekolah.';
+        notes = 'Rekapitulasi logistik armada distribusi disinkronkan langsung dari tugas pengantaran dan penjemputan ompreng Divisi Distribusi.';
         break;
       }
 
@@ -917,11 +1624,17 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           'Kesimpulan Menu MBG': organolepticData.kesimpulan,
         }));
 
+        signatures = [
+          { role: 'Driver / Pengirim SPPG', name: bastSheetsList[0]?.distributorName || distCoord.name, idNum: distCoord.idNum },
+          { role: 'Pemeriksa / PIC Sekolah', name: organolepticData.namaPemeriksa || 'PIC Sekolah', idNum: organolepticData.institutionId || '-' },
+          { role: `Mengetahui Kepala ${sppgConfig.sppgName}`, name: sppgConfig.headOfSppg, idNum: `SPPG-${sppgConfig.sppgId}` },
+        ];
+
         metrics = [
           {
             label: 'Nama Pemeriksa (PIC)',
             value: organolepticData.namaPemeriksa,
-            sublabel: 'Otomatis dari Master Penerima Manfaat',
+            sublabel: 'Otomatis dari Master Lembaga & Distribusi',
             color: 'text-blue-700',
           },
           {
@@ -944,50 +1657,166 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           },
         ];
         notes =
-          'Form Checklist Uji Organoleptik dibawa oleh sopir untuk diberikan kepada penanggung jawab (PIC) program MBG sekolah dan diambil kembali bersama pengambilan ompreng MBG ke SPPG.';
+          'Form Checklist Uji Organoleptik diisi otomatis dengan PIC, waktu tiba pengiriman, dan komponen menu aktif untuk sekolah sasaran.';
         break;
       }
 
-      // 6. Flyer Menu
+      // 6. Flyer Menu (Terhubung real-time dengan Menu, Resep PLOG & Kategori Porsi)
       case 'flyer_menu': {
-        headers = ['No', 'Komponen Hidangan', 'Nama Olahan', 'Gramasi Porsi Kecil', 'Gramasi Porsi Besar', 'Kandungan Gizi Utama', 'Standar BGN'];
-        rows = [
-          [1, 'Makanan Pokok', todayMenu.stapleFood, '100 gram', '150 gram', 'Karbohidrat Kompleks', 'Beras Organik Terfortifikasi'],
-          [2, 'Lauk Hewani', todayMenu.animalProtein, '45 gram', '60 gram', 'Protein Tinggi, Zat Besi', 'Ayam Broiler Segar Halal'],
-          [3, 'Lauk Nabati', todayMenu.plantProtein, '35 gram', '50 gram', 'Protein Nabati, Kalsium', 'Kedelai Fermentasi Non-GMO'],
-          [4, 'Sayuran', todayMenu.vegetable, '50 gram', '75 gram', 'Vitamin A, C, Serat', 'Sayur Segar Kraksaan'],
-          [5, 'Buah Segar', todayMenu.fruit, '1 buah (80g)', '1 buah (100g)', 'Kalium, Antioksidan', 'Pisang Cavendish Matang'],
-        ];
+        headers = ['No', 'Komponen Hidangan', 'Nama Olahan / Bahan', 'Gramasi Porsi Kecil', 'Gramasi Porsi Besar', 'Energi / Protein', 'Referensi TKPI'];
+        const recipeRows = menuIngredientsMap[todayMenu.id] || [];
+        if (recipeRows.length > 0) {
+          rows = recipeRows.map((ing, idx) => {
+            const weightForCalc =
+              selectedPortionCategory === 'kecil' ? ing.netWeightSmall : ing.netWeightLarge;
+            const calVal = ((weightForCalc / 100) * ing.calories100g).toFixed(0);
+            const protVal = ((weightForCalc / 100) * ing.protein100g).toFixed(1);
+            return [
+              idx + 1,
+              ing.category,
+              ing.menuName ? `${ing.menuName} (${ing.name})` : ing.name,
+              `${ing.netWeightSmall} ${ing.unit}`,
+              `${ing.netWeightLarge} ${ing.unit}`,
+              `${calVal} kkal / ${protVal} g (${selectedPortionCategory === 'kecil' ? 'P.Kecil' : 'P.Besar'})`,
+              ing.referenceSource || 'TKPI 2020',
+            ];
+          });
+        } else {
+          rows = [
+            [1, 'Makanan Pokok', todayMenu.stapleFood, '85 gram', '125 gram', 'Karbohidrat Kompleks', 'TKPI 2020'],
+            [2, 'Lauk Hewani', todayMenu.animalProtein, '45 gram', '70 gram', 'Protein Tinggi, Zat Besi', 'TKPI 2020'],
+            [3, 'Lauk Nabati', todayMenu.plantProtein, '40 gram', '60 gram', 'Protein Nabati', 'TKPI 2020'],
+            [4, 'Sayuran', todayMenu.vegetable, '60 gram', '90 gram', 'Vitamin A, C, Serat', 'TKPI 2020'],
+            [5, 'Buah Segar', todayMenu.fruit, '100 gram', '140 gram', 'Kalium, Antioksidan', 'TKPI 2020'],
+          ];
+        }
+
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          rows = rows.filter(r => r.some(c => String(c).toLowerCase().includes(kw)));
+        }
 
         excelData = rows.map(r => ({
           'Komponen': r[1],
-          'Menu': r[2],
+          'Nama Olahan': r[2],
           'Porsi Kecil': r[3],
           'Porsi Besar': r[4],
           'Gizi': r[5],
+          'Referensi': r[6],
         }));
 
+        const energyDisplay =
+          selectedPortionCategory === 'kecil'
+            ? `${todayMenu.caloriesSmall} kkal (Porsi Kecil)`
+            : selectedPortionCategory === 'besar'
+            ? `${todayMenu.caloriesLarge} kkal (Porsi Besar)`
+            : `${todayMenu.caloriesSmall} - ${todayMenu.caloriesLarge} kkal`;
+
         metrics = [
-          { label: 'Total Energi Kalori', value: `${todayMenu.caloriesSmall} - ${todayMenu.caloriesLarge} kkal`, color: 'text-blue-700' },
+          { label: 'Total Energi Kalori', value: energyDisplay, color: 'text-blue-700' },
           { label: 'Protein Harian', value: `${todayMenu.proteinGrams} gram`, color: 'text-emerald-700' },
-          { label: 'Batas Konsumsi Porsi Kecil', value: 'Maks. 10:30 WIB', color: 'text-amber-700' },
-          { label: 'Batas Konsumsi Porsi Besar', value: 'Maks. 11:30 WIB', color: 'text-purple-700' },
+          { label: 'Komponen Resep Aktif', value: `${recipeRows.length || 5} Bahan`, color: 'text-amber-700' },
+          { label: 'Menu Siklus Aktif', value: `${todayMenu.menuCode} (${todayMenu.dayName})`, color: 'text-purple-700' },
         ];
-        notes = 'Flyer menu resmi telah diterbitkan dan dipublikasikan ke seluruh grup wali murid serta papan informasi sekolah.';
+        notes = `Flyer menu resmi disinkronkan langsung dari Modul Perencanaan Menu & Resep PLOG serta foto Porsi Kecil & Porsi Besar dari Modul Input Gramasi & Suhu Divisi Pemorsian (${flyerPortioningData.date} — ${flyerPortioningData.officerName}).`;
         break;
       }
 
-      // 7. Informasi Gizi
+      // 7. Informasi Gizi (Terhubung real-time dengan Menu, Resep PLOG & Kategori Porsi)
       case 'informasi_gizi': {
         headers = ['Zat Gizi', 'Satuan', 'Kandungan Menu', 'Standar AKG BGN (Porsi Kecil)', 'Standar AKG BGN (Porsi Besar)', 'Capaian % AKG'];
+        const recipeRows = menuIngredientsMap[todayMenu.id] || [];
+        const useSmall = selectedPortionCategory === 'kecil';
+
+        const summedMacros =
+          recipeRows.length > 0
+            ? recipeRows.reduce(
+                (acc, ing) => {
+                  const wSmall = (ing.netWeightSmall || 0) / 100;
+                  const wLarge = (ing.netWeightLarge || 0) / 100;
+                  return {
+                    calSmall: acc.calSmall + wSmall * (ing.calories100g || 0),
+                    calLarge: acc.calLarge + wLarge * (ing.calories100g || 0),
+                    protSmall: acc.protSmall + wSmall * (ing.protein100g || 0),
+                    protLarge: acc.protLarge + wLarge * (ing.protein100g || 0),
+                    fatSmall: acc.fatSmall + wSmall * (ing.fat100g || 0),
+                    fatLarge: acc.fatLarge + wLarge * (ing.fat100g || 0),
+                    carbSmall: acc.carbSmall + wSmall * (ing.carb100g || 0),
+                    carbLarge: acc.carbLarge + wLarge * (ing.carb100g || 0),
+                    fiberSmall: acc.fiberSmall + wSmall * (ing.fiber100g || 0),
+                    fiberLarge: acc.fiberLarge + wLarge * (ing.fiber100g || 0),
+                  };
+                },
+                {
+                  calSmall: 0,
+                  calLarge: 0,
+                  protSmall: 0,
+                  protLarge: 0,
+                  fatSmall: 0,
+                  fatLarge: 0,
+                  carbSmall: 0,
+                  carbLarge: 0,
+                  fiberSmall: 0,
+                  fiberLarge: 0,
+                }
+              )
+            : null;
+
+        const calSmall = summedMacros && summedMacros.calSmall > 0 ? Math.round(summedMacros.calSmall) : todayMenu.caloriesSmall;
+        const calLarge = summedMacros && summedMacros.calLarge > 0 ? Math.round(summedMacros.calLarge) : todayMenu.caloriesLarge;
+        const calVal =
+          selectedPortionCategory === 'kecil'
+            ? `${calSmall} kkal`
+            : selectedPortionCategory === 'besar'
+            ? `${calLarge} kkal`
+            : `${calSmall} / ${calLarge}`;
+
+        const protVal = Number(
+          (summedMacros
+            ? useSmall
+              ? summedMacros.protSmall
+              : summedMacros.protLarge
+            : todayMenu.proteinGrams || 0
+          ).toFixed(1)
+        );
+        const fatVal = Number(
+          (summedMacros
+            ? useSmall
+              ? summedMacros.fatSmall
+              : summedMacros.fatLarge
+            : todayMenu.fatGrams || 0
+          ).toFixed(1)
+        );
+        const carbVal = Number(
+          (summedMacros
+            ? useSmall
+              ? summedMacros.carbSmall
+              : summedMacros.carbLarge
+            : todayMenu.carbGrams || 0
+          ).toFixed(1)
+        );
+        const fiberVal = Number(
+          (summedMacros && summedMacros.fiberLarge > 0
+            ? useSmall
+              ? summedMacros.fiberSmall
+              : summedMacros.fiberLarge
+            : todayMenu.fiberGrams || 6.5
+          ).toFixed(1)
+        );
+        const calcVal = todayMenu.calciumMg || 245;
+        const ironVal = todayMenu.ironMg || 4.8;
+
+        const targetCal = useSmall ? 600 : 750;
+        const activeCal = useSmall ? calSmall : calLarge;
+
         rows = [
-          ['Energi Total', 'kkal', `${todayMenu.caloriesSmall} / ${todayMenu.caloriesLarge}`, '550 - 650', '650 - 750', '100% Optimal'],
-          ['Protein', 'gram', todayMenu.proteinGrams, '22.0 - 28.0', '28.0 - 35.0', '105% (Tinggi Protein)'],
-          ['Lemak Sehat', 'gram', todayMenu.fatGrams, '15.0 - 20.0', '18.0 - 25.0', '95% Sesuai'],
-          ['Karbohidrat', 'gram', todayMenu.carbGrams, '85.0 - 105.0', '100.0 - 125.0', '98% Seimbang'],
-          ['Kalsium (Ca)', 'mg', '245.0', '200.0', '250.0', '102% Terpenuhi'],
-          ['Zat Besi (Fe)', 'mg', '4.8', '4.0', '5.5', '100% Cegah Anemia'],
-          ['Serat Pangan', 'gram', '6.5', '5.0', '7.0', '108% Cerna Sehat'],
+          ['Energi Total', 'kkal', calVal, '550 - 650', '650 - 850', `${Math.round((activeCal / targetCal) * 100)}% Terpenuhi`],
+          ['Protein', 'gram', protVal, '22.0 - 28.0', '28.0 - 35.0', `${Math.round((protVal / (useSmall ? 24 : 28)) * 100)}%`],
+          ['Lemak Sehat', 'gram', fatVal, '15.0 - 20.0', '18.0 - 25.0', `${Math.round((fatVal / (useSmall ? 17 : 20)) * 100)}%`],
+          ['Karbohidrat', 'gram', carbVal, '85.0 - 105.0', '100.0 - 125.0', `${Math.round((carbVal / (useSmall ? 90 : 100)) * 100)}%`],
+          ['Kalsium (Ca)', 'mg', calcVal.toFixed(1), '200.0', '250.0', `${Math.round((calcVal / 240) * 100)}%`],
+          ['Zat Besi (Fe)', 'mg', ironVal.toFixed(1), '4.0', '5.5', `${Math.round((ironVal / 4.8) * 100)}%`],
+          ['Serat Pangan', 'gram', fiberVal.toFixed(1), '5.0', '7.0', `${Math.round((fiberVal / 6.5) * 100)}%`],
         ];
 
         excelData = rows.map(r => ({
@@ -1000,72 +1829,466 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         }));
 
         metrics = [
-          { label: 'Kalori Menu Porsi Besar', value: `${todayMenu.caloriesLarge} kkal`, color: 'text-blue-700' },
-          { label: 'Protein Bersih', value: `${todayMenu.proteinGrams} g`, color: 'text-emerald-700' },
-          { label: 'Status Gizi', value: 'Gizi Seimbang', color: 'text-emerald-700' },
-          { label: 'Nutrisionis', value: 'Siti Nurhaliza, S.Gz.', color: 'text-slate-700' },
+          { label: useSmall ? 'Kalori Menu Porsi Kecil' : 'Kalori Menu Porsi Besar', value: `${activeCal} kkal`, color: 'text-blue-700' },
+          { label: 'Protein Bersih', value: `${protVal} g`, color: 'text-emerald-700' },
+          { label: 'Serat Pangan', value: `${fiberVal.toFixed(1)} g`, color: 'text-emerald-700' },
+          { label: 'Ahli Gizi Verifikator', value: sppgConfig.nutritionOfficer || 'Pengawas Gizi SPPG', color: 'text-slate-700' },
         ];
-        notes = 'Komposisi menu telah dihitung menggunakan Tabel Komposisi Pangan Indonesia (TKPI) dan sesuai pedoman BGN RI.';
+        notes = 'Komposisi nilai gizi dihitung real-time dari gramasi bahan pada Modul Gizi & Resep PLOG sesuai menu aktif dan kategori porsi.';
         break;
       }
 
-      // 8. Food Cost
+      // 8. Food Cost & Efisiensi Menu (Bahan & Qty dari QC, Harga dari RAB & PO, Porsi Aktual dari Presensi/Distribusi, Pagu BGN per Kategori)
       case 'food_cost': {
-        headers = ['No', 'Komponen Bahan', 'Gramasi per Porsi', 'Harga Satuan (Rp)', 'Cost Bahan per Porsi', 'Plafon BGN per Porsi', 'Rasio Food Cost (%)'];
-        rows = [
-          [1, 'Beras Organik (Karbohidrat)', '125 g', 'Rp 14.500 / kg', 'Rp 1.812', 'Rp 2.500', '72.5%'],
-          [2, 'Ayam Broiler Fillet (Hewani)', '55 g', 'Rp 38.000 / kg', 'Rp 2.090', 'Rp 3.500', '59.7%'],
-          [3, 'Tempe Kedelai (Nabati)', '45 g', 'Rp 12.000 / kg', 'Rp 540', 'Rp 1.000', '54.0%'],
-          [4, 'Sayuran Segar (Wortel, Buncis)', '65 g', 'Rp 15.000 / kg', 'Rp 975', 'Rp 1.800', '54.2%'],
-          [5, 'Pisang Cavendish (Buah)', '90 g', 'Rp 18.000 / kg', 'Rp 1.620', 'Rp 2.200', '73.6%'],
-          [6, 'Minyak Goreng, Bumbu & Madu', '20 g', 'Rp 22.000 / kg', 'Rp 1.150', 'Rp 1.500', '76.6%'],
+        headers = [
+          'No',
+          'Nama Bahan Makanan (QC)',
+          'Jumlah Total (QC)',
+          'Harga RAB',
+          'Harga PO',
+          'Harga Riil (PO/RAB)',
+          'Total Biaya Bahan',
+          'Biaya Riil / Porsi',
+          'Share (%)',
         ];
+        const targetInsts = targetInstFilter
+          ? [targetInstFilter]
+          : institutions.filter(i => i.isActive);
 
-        const totalCostPerPortion = 8187; // Total food cost
-        excelData = rows.map(r => ({
-          'Komponen': r[1],
-          'Gramasi': r[2],
-          'Harga': r[3],
-          'Cost': r[4],
-          'Plafon': r[5],
+        // 1) Hitung porsi aktual harian dari Presensi Harian / Divisi Distribusi
+        let usedAttendanceCount = 0;
+        let usedDistributionCount = 0;
+        let usedQuotaFallbackCount = 0;
+
+        const resolvePortionsForDate = (targetDate: string) => {
+          return targetInsts.reduce(
+            (acc, inst) => {
+              const att = beneficiaryAttendance.find(
+                a => a.date === targetDate && isSameInstitutionMatch(inst, a.institutionId, a.institutionName)
+              );
+              const del = distributionDeliveries.find(
+                d => d.date === targetDate && isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
+              );
+              const log = distributionLogs.find(
+                l => l.date === targetDate && isSameInstitutionMatch(inst, l.institutionId, l.institutionName)
+              );
+
+              if (att) {
+                usedAttendanceCount += 1;
+                return { small: acc.small + (att.presentSmall || 0), large: acc.large + (att.presentLarge || 0) };
+              }
+              if (del) {
+                usedDistributionCount += 1;
+                return { small: acc.small + (del.smallPortions || 0), large: acc.large + (del.largePortions || 0) };
+              }
+              if (log) {
+                usedDistributionCount += 1;
+                return { small: acc.small + (log.smallPortions || 0), large: acc.large + (log.largePortions || 0) };
+              }
+              usedQuotaFallbackCount += 1;
+              return { small: acc.small + (inst.smallPortions || 0), large: acc.large + (inst.largePortions || 0) };
+            },
+            { small: 0, large: 0 }
+          );
+        };
+
+        let resolvedTotals = { small: 0, large: 0 };
+        if (periodType === 'harian') {
+          resolvedTotals = resolvePortionsForDate(selectedDate);
+        } else {
+          const periodDates = Array.from(
+            new Set([
+              ...beneficiaryAttendance
+                .filter(a => matchesReportPeriod(a.date, periodType, selectedDate, selectedMonth, startDate, endDate))
+                .map(a => a.date),
+              ...distributionDeliveries
+                .filter(d => matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate))
+                .map(d => d.date),
+              ...distributionLogs
+                .filter(l => matchesReportPeriod(l.date, periodType, selectedDate, selectedMonth, startDate, endDate))
+                .map(l => l.date),
+            ])
+          ).sort();
+
+          if (periodDates.length > 0) {
+            for (const dt of periodDates) {
+              const daySum = resolvePortionsForDate(dt);
+              resolvedTotals = {
+                small: resolvedTotals.small + daySum.small,
+                large: resolvedTotals.large + daySum.large,
+              };
+            }
+          } else {
+            resolvedTotals = resolvePortionsForDate(selectedDate);
+          }
+        }
+
+        const portionSourceLabel =
+          usedAttendanceCount > 0 && usedDistributionCount > 0
+            ? 'Presensi Harian & Divisi Distribusi'
+            : usedAttendanceCount > 0
+            ? 'Presensi Harian'
+            : usedDistributionCount > 0
+            ? 'Divisi Distribusi'
+            : usedQuotaFallbackCount > 0
+            ? 'Kuota Lembaga'
+            : 'Data Porsi Aktif';
+
+        const quotaSmall = selectedPortionCategory === 'besar' ? 0 : resolvedTotals.small;
+        const quotaLarge = selectedPortionCategory === 'kecil' ? 0 : resolvedTotals.large;
+        const totalPortions = quotaSmall + quotaLarge;
+        const safeTotalPortions = Math.max(1, totalPortions);
+
+        // 2) Plafon Pagu BGN per Kategori Porsi (Porsi Besar Rp 10.000 & Porsi Kecil Rp 8.000)
+        const smallBudgetCap = sppgConfig.smallPortionBudget || 8000;
+        const largeBudgetCap = sppgConfig.largePortionBudget || 10000;
+        const totalPaguSmall = quotaSmall * smallBudgetCap;
+        const totalPaguLarge = quotaLarge * largeBudgetCap;
+        const totalPaguBGN = totalPaguSmall + totalPaguLarge;
+        const budgetCap =
+          selectedPortionCategory === 'besar'
+            ? largeBudgetCap
+            : selectedPortionCategory === 'kecil'
+            ? smallBudgetCap
+            : totalPortions > 0
+            ? Math.round(totalPaguBGN / totalPortions)
+            : largeBudgetCap;
+
+        // 3) Nama Bahan Makanan & Jumlah Total Bahan dari Modul Quality Control (QC)
+        const activeQcs = qualityControlRecords.filter(
+          q => q.status !== 'Ditolak' && (Number(q.receivedQuantity) || 0) > 0
+        );
+        const periodQcs = activeQcs.filter(q =>
+          matchesReportPeriod(
+            (q.inspectedAt || '').slice(0, 10),
+            periodType,
+            selectedDate,
+            selectedMonth,
+            startDate,
+            endDate
+          )
+        );
+        const usedFallbackAllQcs = periodType === 'harian' && periodQcs.length === 0;
+        let qcListForCost = usedFallbackAllQcs ? activeQcs : periodQcs;
+
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          qcListForCost = qcListForCost.filter(
+            q =>
+              q.itemName.toLowerCase().includes(kw) ||
+              q.poNumber.toLowerCase().includes(kw) ||
+              q.supplierName.toLowerCase().includes(kw)
+          );
+        }
+
+        // Agregasi bahan QC per nama bahan + satuan
+        const aggregatedMap = new Map<
+          string,
+          {
+            name: string;
+            unit: string;
+            totalQty: number;
+            poNumbers: Set<string>;
+            poIds: Set<string>;
+            suppliers: Set<string>;
+            grades: Set<string>;
+          }
+        >();
+
+        for (const q of qcListForCost) {
+          const normUnit = (q.unit || 'kg').trim().toLowerCase();
+          let existingKey: string | null = null;
+          for (const [k, grp] of aggregatedMap.entries()) {
+            if (grp.unit.toLowerCase() === normUnit && matchesMaterialFlexible(grp.name, q.itemName)) {
+              existingKey = k;
+              break;
+            }
+          }
+          const key = existingKey || `${q.itemName.trim().toLowerCase()}__${normUnit}`;
+          const curr = aggregatedMap.get(key);
+          if (curr) {
+            curr.totalQty += Number(q.receivedQuantity) || 0;
+            if (q.poNumber) curr.poNumbers.add(q.poNumber);
+            if (q.poId) curr.poIds.add(q.poId);
+            if (q.supplierName) curr.suppliers.add(q.supplierName);
+            if (q.qualityGrade) curr.grades.add(q.qualityGrade);
+          } else {
+            aggregatedMap.set(key, {
+              name: q.itemName,
+              unit: q.unit || 'kg',
+              totalQty: Number(q.receivedQuantity) || 0,
+              poNumbers: new Set(q.poNumber ? [q.poNumber] : []),
+              poIds: new Set(q.poId ? [q.poId] : []),
+              suppliers: new Set(q.supplierName ? [q.supplierName] : []),
+              grades: new Set(q.qualityGrade ? [q.qualityGrade] : []),
+            });
+          }
+        }
+
+        // 4) Resolusi Harga Bahan dari Modul Purchase Order (PO) & RAB
+        const computed = Array.from(aggregatedMap.values()).map(item => {
+          // Cari di Purchase Order (cocokkan nama bahan agar tidak salah PO)
+          const linkedPoMatch = purchaseOrders
+            .filter(po => item.poIds.has(po.id) || item.poNumbers.has(po.poNumber))
+            .flatMap(po => po.items.map(it => ({ po, it })))
+            .find(({ it }) => matchesMaterialFlexible(it.itemName, item.name));
+
+          const anyPoMatch =
+            linkedPoMatch ||
+            purchaseOrders
+              .flatMap(po => po.items.map(it => ({ po, it })))
+              .find(({ it }) => matchesMaterialFlexible(it.itemName, item.name));
+
+          const poPrice = anyPoMatch?.it.unitPrice || 0;
+
+          // Cari di RAB (prioritas link rabId PO atau kategori RAB Bahan Pangan disetujui)
+          const rabByPoLink = anyPoMatch?.it.rabId || anyPoMatch?.po.rabId
+            ? rabItems.find(r => r.id === (anyPoMatch?.it.rabId || anyPoMatch?.po.rabId))
+            : undefined;
+          const approvedFoodRab = rabItems.find(
+            r =>
+              r.category === 'RAB Bahan Pangan' &&
+              r.status === 'Disetujui' &&
+              matchesMaterialFlexible(r.itemName, item.name)
+          );
+          const anyRab = rabItems.find(r => matchesMaterialFlexible(r.itemName, item.name));
+          const rabMatch = rabByPoLink || approvedFoodRab || anyRab;
+          const rabPrice = rabMatch?.unitPrice || 0;
+
+          // Harga riil: utamakan harga PO aktual, jika belum ada gunakan harga RAB, terakhir fallback Master/Gudang
+          const invFallback = inventory.find(inv => matchesMaterialFlexible(inv.name, item.name));
+          const mbFallback = masterBahan.find(mb => matchesMaterialFlexible(mb.name, item.name));
+          const effectivePrice =
+            poPrice > 0
+              ? poPrice
+              : rabPrice > 0
+              ? rabPrice
+              : invFallback?.pricePerUnit || mbFallback?.actualPrice || 0;
+
+          const priceSourceLabel =
+            poPrice > 0 && rabPrice > 0
+              ? 'PO & RAB'
+              : poPrice > 0
+              ? 'Purchase Order'
+              : rabPrice > 0
+              ? 'RAB Bahan Pangan'
+              : effectivePrice > 0
+              ? 'Gudang/Master'
+              : 'Belum Ada Harga';
+
+          const totalCost = item.totalQty * effectivePrice;
+          const costPerPortion = totalCost / safeTotalPortions;
+
+          return {
+            name: item.name,
+            totalQty: item.totalQty,
+            unit: item.unit,
+            poList: Array.from(item.poNumbers).join(', ') || '-',
+            rabPrice,
+            poPrice,
+            effectivePrice,
+            priceSourceLabel,
+            totalCost,
+            costPerPortion,
+          };
+        });
+
+        const totalMenuCost = computed.reduce((s, c) => s + c.totalCost, 0);
+        const totalCostPerPortion = totalPortions > 0 ? Math.round(totalMenuCost / totalPortions) : 0;
+        const absorptionRatio = totalPaguBGN > 0 ? totalMenuCost / totalPaguBGN : 0;
+        const ratioPct = (absorptionRatio * 100).toFixed(1);
+        const totalEfficiency = totalPaguBGN - totalMenuCost;
+        const efficiencyPerPortion = budgetCap - totalCostPerPortion;
+
+        // Proporsi biaya riil per kategori porsi berdasarkan bobot plafon kategori (8.000 vs 10.000)
+        const realCostSmallPerPortion =
+          selectedPortionCategory === 'besar'
+            ? 0
+            : selectedPortionCategory === 'kecil'
+            ? totalCostPerPortion
+            : Math.round(smallBudgetCap * absorptionRatio);
+        const realCostLargePerPortion =
+          selectedPortionCategory === 'kecil'
+            ? 0
+            : selectedPortionCategory === 'besar'
+            ? totalCostPerPortion
+            : Math.round(largeBudgetCap * absorptionRatio);
+
+        rows = computed.map((c, idx) => {
+          const share = totalMenuCost > 0 ? ((c.totalCost / totalMenuCost) * 100).toFixed(1) : '0.0';
+          return [
+            idx + 1,
+            `${c.name} (${c.poList})`,
+            `${formatNumber(c.totalQty)} ${c.unit}`,
+            c.rabPrice > 0 ? `${formatRupiah(c.rabPrice)} / ${c.unit}` : '-',
+            c.poPrice > 0 ? `${formatRupiah(c.poPrice)} / ${c.unit}` : '-',
+            `${formatRupiah(c.effectivePrice)} (${c.priceSourceLabel})`,
+            formatRupiah(c.totalCost),
+            formatRupiah(Math.round(c.costPerPortion)),
+            `${share}%`,
+          ];
+        });
+
+        excelData = computed.map((c, idx) => ({
+          'No': idx + 1,
+          'Nama Bahan Makanan (QC)': c.name,
+          'Referensi PO': c.poList,
+          'Jumlah Total Bahan (QC)': c.totalQty,
+          'Satuan': c.unit,
+          'Harga RAB (Rp)': c.rabPrice,
+          'Harga PO (Rp)': c.poPrice,
+          'Harga Terpakai (Rp)': c.effectivePrice,
+          'Sumber Harga': c.priceSourceLabel,
+          'Total Biaya Bahan (Rp)': c.totalCost,
+          'Biaya Riil / Porsi Aktual (Rp)': Math.round(c.costPerPortion),
+          'Share Biaya (%)': totalMenuCost > 0 ? Number(((c.totalCost / totalMenuCost) * 100).toFixed(1)) : 0,
         }));
 
+        const effSign = totalEfficiency >= 0 ? '+' : '-';
+        const effPerPortionSign = efficiencyPerPortion >= 0 ? '+' : '-';
+
         metrics = [
-          { label: 'Food Cost Bahan / Porsi', value: formatRupiah(totalCostPerPortion), color: 'text-emerald-700' },
-          { label: 'Plafon Belanja BGN', value: formatRupiah(12500), color: 'text-blue-700' },
-          { label: 'Margin Efisiensi', value: formatRupiah(12500 - totalCostPerPortion), color: 'text-purple-700' },
-          { label: 'Rasio Food Cost Total', value: '65.5%', sublabel: 'Sehat (<70%)', color: 'text-slate-700' },
+          {
+            label: 'Biaya Riil / Porsi Aktual',
+            value: formatRupiah(totalCostPerPortion),
+            sublabel: `Total QC: ${formatRupiah(totalMenuCost)} (${computed.length} Bahan QC)`,
+            color: totalEfficiency >= 0 ? 'text-emerald-700' : 'text-rose-700',
+          },
+          {
+            label: 'Plafon Pagu BGN / Kategori',
+            value:
+              selectedPortionCategory === 'ALL'
+                ? `${formatRupiah(budgetCap)} (Rata2)`
+                : `${formatRupiah(budgetCap)} / Porsi`,
+            sublabel:
+              selectedPortionCategory === 'ALL'
+                ? `Besar: ${formatRupiah(largeBudgetCap)} (Riil ${formatRupiah(realCostLargePerPortion)}) • Kecil: ${formatRupiah(smallBudgetCap)} (Riil ${formatRupiah(realCostSmallPerPortion)})`
+                : selectedPortionCategory === 'besar'
+                ? `Plafon Porsi Besar • Total ${formatRupiah(totalPaguBGN)}`
+                : `Plafon Porsi Kecil • Total ${formatRupiah(totalPaguBGN)}`,
+            color: 'text-blue-700',
+          },
+          {
+            label: totalEfficiency >= 0 ? 'Efisiensi Anggaran (Hemat)' : 'Selisih Anggaran (Over)',
+            value: `${effSign}${formatRupiah(Math.abs(totalEfficiency))}`,
+            sublabel: `${effPerPortionSign}${formatRupiah(Math.abs(efficiencyPerPortion))} / porsi vs Pagu BGN`,
+            color: totalEfficiency >= 0 ? 'text-emerald-700' : 'text-rose-700',
+          },
+          {
+            label: 'Porsi Aktual & Rasio Serapan',
+            value: `${ratioPct}% (${formatNumber(totalPortions)} Porsi)`,
+            sublabel: `${formatNumber(quotaSmall)} Kecil + ${formatNumber(quotaLarge)} Besar • ${portionSourceLabel}`,
+            color: 'text-slate-700',
+          },
         ];
-        notes = 'Struktur food cost menu berada dalam ambang batas efisiensi belanja tanpa mengurangi standar gramasi gizi.';
+
+        notes = `Sumber Data: Nama & jumlah bahan dari Modul Quality Control (QC)${usedFallbackAllQcs ? ' (menampilkan seluruh stok QC aktif karena tanggal terpilih belum memiliki log QC)' : ''}; harga satuan dari Modul Purchase Order & RAB; porsi aktual dari ${portionSourceLabel} (${formatNumber(quotaSmall)} Porsi Kecil × Pagu ${formatRupiah(smallBudgetCap)} + ${formatNumber(quotaLarge)} Porsi Besar × Pagu ${formatRupiah(largeBudgetCap)} = Total Plafon ${formatRupiah(totalPaguBGN)}).`;
         break;
       }
 
-      // 9. Sampel Menu (Retention 3x24 Jam)
+      // 9. Sampel Menu (Retention Sample 3x24 Jam) — Sinkron Live dari Menu Aktif, Pengolahan, Pemorsian & Persiapan
       case 'sampel_menu': {
-        headers = ['No', 'Kode Lot Sampel', 'Waktu Pengambilan', 'Komponen Menu Terkunci', 'Wadah Steril', 'Suhu Simpan Freezer', 'Petugas QC Gizi', 'Masa Retensi', 'Status'];
-        rows = [
-          [1, 'SMPL-20261108-01', '06:30 WIB', 'Nasi Putih Organik (100g)', 'Sterile Container #A1', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
-          [2, 'SMPL-20261108-02', '06:35 WIB', 'Ayam Fillet Kecap Madu (60g)', 'Sterile Container #A2', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
-          [3, 'SMPL-20261108-03', '06:40 WIB', 'Tempe Mendoan Gurih (50g)', 'Sterile Container #A3', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
-          [4, 'SMPL-20261108-04', '06:45 WIB', 'Kuah Sop Sayur Kaldu (100ml)', 'Sterile Vial #B1', '-18.5°C', 'M. Farhan, A.Md.Gz', '3x24 Jam (s/d 11 Nov)', 'Tersimpan Baik'],
-        ];
+        headers = ['No', 'Kode Lot Sampel', 'Waktu Pengambilan', 'Komponen Menu Terkunci', 'Wadah Steril', 'Suhu Simpan Freezer', 'Petugas QC Gizi', 'Masa Retensi (3x24 Jam)', 'Status'];
+        const cookRec =
+          cookingRecords.find(r => r.date === selectedDate) ||
+          cookingRecords[0];
+        const portRec =
+          portioningRecords.find(r => r.date === selectedDate) ||
+          portioningRecords[0];
+        const prepRec =
+          prepRecords.find(r => r.date === selectedDate) ||
+          prepRecords[0];
 
-        excelData = rows.map(r => ({
-          'No': r[0],
-          'Kode Lot': r[1],
-          'Waktu': r[2],
-          'Menu': r[3],
-          'Suhu': r[5],
-          'Status': r[8],
+        const freezerTemp =
+          prepRec?.facilityTemps?.freezer1Temp ??
+          cookRec?.facilityTemps?.freezer1Temp ??
+          portRec?.facilityTemps?.freezer1Temp ??
+          -18.5;
+        const freezerTempDisplay = `${freezerTemp.toFixed(1)}°C`;
+        const dateStamp = (selectedDate || '2026-11-08').replace(/-/g, '');
+        const baseTime = portRec?.portioningTime || cookRec?.time || '06:30';
+        const qcOfficer =
+          sppgConfig.nutritionOfficer ||
+          portRec?.officerName ||
+          cookRec?.officerName ||
+          'Ahli Gizi SPPG';
+        const retentionUntil = formatIndonesianDate(addDaysToIso(selectedDate, 3));
+        const retentionLabel = `3x24 Jam (s/d ${retentionUntil})`;
+
+        const sampleComponents = [
+          {
+            code: `SMPL-${dateStamp}-01`,
+            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.stapleFood} (${portRec?.foodTemps?.rice?.cookedWeightGrams || 100}g)`,
+            container: 'Sterile Container #A1',
+            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+          },
+          {
+            code: `SMPL-${dateStamp}-02`,
+            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.animalProtein} (${portRec?.foodTemps?.animalProtein?.cookedWeightGrams || 60}g)`,
+            container: 'Sterile Container #A2',
+            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+          },
+          {
+            code: `SMPL-${dateStamp}-03`,
+            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.plantProtein} (${portRec?.foodTemps?.plantProtein?.cookedWeightGrams || 50}g)`,
+            container: 'Sterile Container #A3',
+            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+          },
+          {
+            code: `SMPL-${dateStamp}-04`,
+            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.vegetable} (${portRec?.foodTemps?.vegetable?.cookedWeightGrams || 80}g)`,
+            container: 'Sterile Vial #B1',
+            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+          },
+          {
+            code: `SMPL-${dateStamp}-05`,
+            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.fruit}${todayMenu.milkOrExtra ? ` / ${todayMenu.milkOrExtra}` : ''} (${portRec?.foodTemps?.fruit?.cookedWeightGrams || 100}g)`,
+            container: 'Sterile Container #B2',
+            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+          },
+        ].filter(item =>
+          !searchKeyword.trim() ||
+          item.menuDesc.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+          item.code.toLowerCase().includes(searchKeyword.toLowerCase())
+        );
+
+        rows = sampleComponents.map((item, idx) => [
+          idx + 1,
+          item.code,
+          item.time,
+          item.menuDesc,
+          item.container,
+          freezerTempDisplay,
+          qcOfficer,
+          retentionLabel,
+          item.status,
+        ]);
+
+        excelData = sampleComponents.map((item, idx) => ({
+          'No': idx + 1,
+          'Kode Lot': item.code,
+          'Tanggal Ambil': selectedDate,
+          'Waktu': item.time,
+          'Komponen Menu': item.menuDesc,
+          'Wadah': item.container,
+          'Suhu Freezer': freezerTempDisplay,
+          'Petugas QC Gizi': qcOfficer,
+          'Masa Retensi': retentionLabel,
+          'Status': item.status,
         }));
 
         metrics = [
-          { label: 'Total Sampel Tersegel', value: '4 Wadah', color: 'text-blue-700' },
-          { label: 'Suhu Freezer Simpan', value: '-18.5°C', color: 'text-sky-700' },
-          { label: 'Protokol Retensi', value: '3 x 24 Jam', color: 'text-purple-700' },
-          { label: 'Status Mutu', value: 'Aman Terverifikasi', color: 'text-emerald-700' },
+          { label: 'Total Sampel Tersegel', value: `${sampleComponents.length} Wadah`, sublabel: `Kode Menu: ${todayMenu.menuCode}`, color: 'text-blue-700' },
+          { label: 'Suhu Freezer Simpan', value: freezerTempDisplay, sublabel: 'Standar Beku ≤ -18°C', color: 'text-sky-700' },
+          { label: 'Protokol Retensi', value: '3 x 24 Jam', sublabel: `s/d ${retentionUntil}`, color: 'text-purple-700' },
+          { label: 'Petugas QC Gizi', value: qcOfficer, color: 'text-emerald-700' },
         ];
-        notes = 'Sampel disimpan dalam lemari pembeku khusus retensi BGN yang tidak dibuka kecuali untuk kepentingan inspeksi BPOM / BGN.';
+        notes = `Sampel menu retensi dibuat otomatis dari Master Menu (${todayMenu.menuCode}) dan pembacaan suhu freezer Divisi Persiapan/Pengolahan (${formatIndonesianDate(selectedDate)}).`;
         break;
       }
 
@@ -1364,7 +2587,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 13. Food Waste
+      // 13. Food Waste (Sinkron Periode + Cuci Ompreng + Total Porsi Tersaji)
       case 'food_waste': {
         headers = [
           'No',
@@ -1378,7 +2601,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           'Pengolahan Lanjut',
           'Foto Bukti (Cuci Ompreng)',
         ];
-        let washings = washingWasteRecords;
+        const periodWashings = washingWasteRecords.filter(w =>
+          matchesReportPeriod(w.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let washings =
+          periodType === 'harian' && periodWashings.length === 0
+            ? washingWasteRecords
+            : periodWashings;
+
         if (searchKeyword.trim()) {
           const kw = searchKeyword.toLowerCase();
           washings = washings.filter(
@@ -1389,6 +2619,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               (institutions[idx % Math.max(1, institutions.length)]?.name || '').toLowerCase().includes(kw)
           );
         }
+
+        const totalDailyPortionsBaseline = Math.max(
+          1,
+          distributionDeliveries
+            .filter(d => d.date === selectedDate)
+            .reduce((s, d) => s + d.totalPortions, 0) ||
+            institutions.filter(i => i.isActive).reduce((s, i) => s + i.totalPortions, 0) ||
+            1000
+        );
 
         const extractedPhotosPerRow = washings.map(w =>
           [
@@ -1401,11 +2640,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         );
 
         const baseRows = washings.map((w, idx) => {
-          const instName = institutions[idx % Math.max(1, institutions.length)]?.name || 'SDN Temenggungan 1';
-          const estOmpreng = Math.max(100, Math.round(w.totalWasteWeight * 40));
+          const dayPortions =
+            distributionDeliveries
+              .filter(d => d.date === w.date)
+              .reduce((s, d) => s + d.totalPortions, 0) || totalDailyPortionsBaseline;
+          const instName =
+            targetInstFilter?.name ||
+            institutions[idx % Math.max(1, institutions.length)]?.name ||
+            'Seluruh Sekolah Sasaran';
           const laukTotal = Number(((w.wasteAnimalProtein?.weight || 0) + (w.wastePlantProtein?.weight || 0)).toFixed(1));
           const sayurBuahTotal = Number(((w.wasteVegetable?.weight || 0) + (w.wasteFruit?.weight || 0)).toFixed(1));
           const photos = extractedPhotosPerRow[idx] || [];
+          const avgWasteGram = ((w.totalWasteWeight * 1000) / Math.max(1, dayPortions)).toFixed(1);
 
           if (photos.length > 0) {
             imageCells.push({
@@ -1423,7 +2669,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             `${laukTotal} kg`,
             `${sayurBuahTotal} kg`,
             `${w.totalWasteWeight} kg`,
-            `${((w.totalWasteWeight / estOmpreng) * 1000).toFixed(1)} gram`,
+            `${avgWasteGram} gram`,
             'Komposting & Maggot Ternak',
             photos.length > 0 ? `${photos.length} Foto (${photos.map(p => p.label).join(', ')})` : 'Belum ada foto',
           ];
@@ -1505,7 +2751,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             {
               'No': idx + 1,
               'Tanggal': w.date,
-              'Lembaga': institutions[idx % Math.max(1, institutions.length)]?.name || 'SDN Temenggungan 1',
+              'Lembaga': targetInstFilter?.name || 'Seluruh Sekolah Sasaran',
               'Petugas': w.officerName,
               'Total Waste (kg)': w.totalWasteWeight,
               'Sisa Nasi (kg)': w.wasteRice.weight,
@@ -1519,11 +2765,31 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         });
 
         const totWaste = washings.reduce((acc, w) => acc + w.totalWasteWeight, 0);
+        const totalServedAcrossLogs =
+          washings.reduce((sum, w) => {
+            const dPort = distributionDeliveries
+              .filter(d => d.date === w.date)
+              .reduce((s, d) => s + d.totalPortions, 0);
+            return sum + (dPort || totalDailyPortionsBaseline);
+          }, 0) || totalDailyPortionsBaseline;
+        const avgWastePerPortionGrams = (totWaste * 1000) / Math.max(1, totalServedAcrossLogs);
+        const consumptionRatePct = Math.max(0, Math.min(100, 100 - (avgWastePerPortionGrams / 350) * 100));
         const totalUploadedPhotos = extractedPhotosPerRow.reduce((acc, list) => acc + list.length, 0);
+
         metrics = [
           { label: 'Total Food Waste Tercatat', value: `${totWaste.toFixed(1)} kg`, color: 'text-amber-700' },
-          { label: 'Rata-rata Sisa per Porsi', value: '12.4 gram', sublabel: 'Sangat Rendah (<25g)', color: 'text-emerald-700' },
-          { label: 'Daya Habis Konsumsi', value: '97.2%', color: 'text-blue-700' },
+          {
+            label: 'Rata-rata Sisa per Porsi',
+            value: `${avgWastePerPortionGrams.toFixed(1)} gram`,
+            sublabel: avgWastePerPortionGrams < 25 ? 'Sangat Rendah (<25g)' : 'Perlu Evaluasi Menu',
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Daya Habis Konsumsi',
+            value: `${consumptionRatePct.toFixed(1)}%`,
+            sublabel: `Dari ${formatNumber(totalServedAcrossLogs)} porsi tersaji`,
+            color: 'text-blue-700',
+          },
           {
             label: 'Foto Divisi Cuci Ompreng',
             value: `${totalUploadedPhotos} Foto`,
@@ -1532,21 +2798,37 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           },
         ];
         notes =
-          'Sisa makanan diolah secara ramah lingkungan menjadi pakan maggot BSF dan pupuk organik kerja sama warga desa. Kolom foto menampilkan dokumentasi resmi hasil unggahan Divisi Cuci Ompreng per kategori sisa makanan.';
+          'Sisa makanan dihitung otomatis dari penimbangan Divisi Cuci Ompreng dibagi total porsi distribusi harian. Kolom foto menampilkan dokumentasi resmi hasil unggahan Divisi Cuci Ompreng.';
         break;
       }
 
       // 15. RAB Bahan dan Operasional
       case 'rab': {
-        headers = ['No', 'Kode RAB', 'Kategori Pengeluaran', 'Uraian Kebutuhan', 'Volume', 'Satuan', 'Estimasi Harga', 'Total Anggaran', 'Realisasi PO', 'Status'];
-        let rabs = rabItems;
-        if (searchKeyword) {
-          rabs = rabs.filter(r => r.itemName.toLowerCase().includes(searchKeyword.toLowerCase()) || r.budgetCode.toLowerCase().includes(searchKeyword.toLowerCase()));
+        headers = ['No', 'Kode RAB', 'Tanggal Rencana', 'Kategori Pengeluaran', 'Uraian Kebutuhan', 'Volume', 'Satuan', 'Estimasi Harga', 'Total Anggaran', 'Realisasi PO', 'Status'];
+        const periodRabs = rabItems.filter(r =>
+          matchesReportPeriod(r.planDate, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let rabs =
+          periodType === 'harian' && periodRabs.length === 0
+            ? rabItems.filter(r => r.planDate.startsWith(selectedDate.slice(0, 7)))
+            : periodRabs;
+        if (rabs.length === 0 && periodType === 'harian') {
+          rabs = rabItems;
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          rabs = rabs.filter(
+            r =>
+              r.itemName.toLowerCase().includes(kw) ||
+              r.budgetCode.toLowerCase().includes(kw) ||
+              r.category.toLowerCase().includes(kw)
+          );
         }
 
         const baseRows = rabs.map((r, idx) => [
           idx + 1,
           r.budgetCode,
+          formatIndonesianDate(r.planDate),
           r.category,
           r.itemName,
           formatNumber(r.volume),
@@ -1568,6 +2850,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             {
               'No': idx + 1,
               'Kode RAB': r.budgetCode,
+              'Tanggal Rencana': r.planDate,
               'Kategori': r.category,
               'Item': r.itemName,
               'Volume': r.volume,
@@ -1589,25 +2872,46 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           { label: 'Sisa Pagu Tersedia', value: formatRupiah(totalBudget - totalRealized), color: 'text-purple-700' },
           { label: 'Tingkat Penyerapan', value: `${totalBudget ? ((totalRealized / totalBudget) * 100).toFixed(1) : 0}%`, color: 'text-slate-700' },
         ];
-        notes = 'RAB telah disetujui Kepala SPPG Temenggungan 2 sesuai aturan pertanggungjawaban dana operasional MBG.';
+        notes = `RAB disinkronkan real-time dengan Modul Pengadaan & Persetujuan ${sppgConfig.headOfSppg}.`;
         break;
       }
 
       // 16. Purchase Order Harian
       case 'purchase_order': {
         headers = ['No', 'Nomor PO', 'Tanggal', 'Nama Rekanan Supplier', 'Item Bahan Pangan', 'Jumlah Pesan', 'Harga Satuan', 'Total Nilai PO', 'Status Pesanan'];
-        let pos = purchaseOrders;
-        if (searchKeyword) {
-          pos = pos.filter(p => p.supplierName.toLowerCase().includes(searchKeyword.toLowerCase()) || p.poNumber.toLowerCase().includes(searchKeyword.toLowerCase()));
+        const periodPos = purchaseOrders.filter(p =>
+          matchesReportPeriod(p.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let pos =
+          periodType === 'harian' && periodPos.length === 0
+            ? purchaseOrders.filter(p => p.date.startsWith(selectedDate.slice(0, 7)))
+            : periodPos;
+        if (pos.length === 0 && periodType === 'harian') {
+          pos = purchaseOrders;
+        }
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          pos = pos.filter(
+            p =>
+              p.supplierName.toLowerCase().includes(kw) ||
+              p.poNumber.toLowerCase().includes(kw) ||
+              p.items.some(i => i.itemName.toLowerCase().includes(kw))
+          );
         }
 
         rows = pos.map((p, idx) => {
           const firstItem = p.items[0];
+          const matchedSupplier = masterSuppliers.find(
+            s => s.id === p.supplierId || s.name.toLowerCase() === p.supplierName.toLowerCase()
+          );
+          const supplierLabel = matchedSupplier?.contactPerson
+            ? `${p.supplierName} (${matchedSupplier.contactPerson})`
+            : p.supplierName;
           return [
             idx + 1,
             p.poNumber,
             formatIndonesianDate(p.date),
-            p.supplierName,
+            supplierLabel,
             p.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join(', ') || 'Bahan Pangan MBG',
             `${p.items.reduce((acc, i) => acc + i.quantity, 0)} ${firstItem?.unit || 'kg'}`,
             formatRupiah(firstItem?.unitPrice || 0),
@@ -1621,16 +2925,33 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           'Nomor PO': p.poNumber,
           'Tanggal': p.date,
           'Supplier': p.supplierName,
+          'Kontak': p.supplierContact,
+          'Item': p.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join('; '),
           'Total Nilai': p.totalAmount,
           'Status': p.status,
+          'Status QC': p.qcStatus,
         }));
 
         const totalPOAmount = pos.reduce((acc, p) => acc + p.totalAmount, 0);
+        const completedPoCount = pos.filter(
+          p =>
+            p.status === 'Selesai diterima' ||
+            p.status === 'Diterima di Gudang' ||
+            p.qcStatus === 'Diterima' ||
+            p.qcStatus === 'Lolos Penuh'
+        ).length;
+        const poDonePct = pos.length > 0 ? Math.round((completedPoCount / pos.length) * 100) : 0;
+
         metrics = [
           { label: 'Total PO Diterbitkan', value: `${pos.length} Pesanan`, color: 'text-blue-700' },
           { label: 'Akumulasi Nilai PO', value: formatRupiah(totalPOAmount), color: 'text-emerald-700' },
           { label: 'Supplier Terlibat', value: `${new Set(pos.map(p => p.supplierName)).size} Rekanan`, color: 'text-purple-700' },
-          { label: 'Status Pengiriman', value: '96% Tuntas', color: 'text-slate-700' },
+          {
+            label: 'Status Penerimaan PO',
+            value: `${completedPoCount}/${pos.length} (${poDonePct}%)`,
+            sublabel: 'Sinkron QC Gudang',
+            color: 'text-slate-700',
+          },
         ];
         notes = 'Seluruh PO diterbitkan dengan klausul wajib lolos QC penerimaan gudang sebelum pembayaran kasir diproses.';
         break;
@@ -1639,9 +2960,21 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       // 17. Quality Control Barang/Bahan
       case 'quality_control': {
         headers = ['No', 'No. QC', 'Nomor PO', 'Supplier', 'Bahan Pangan', 'Dipesan', 'Diterima', 'Selisih', 'Grade Mutu', 'Suhu Datang', 'Keterangan', 'Status QC', 'Petugas QC'];
-        let qcs = qualityControlRecords;
-        if (searchKeyword) {
-          qcs = qcs.filter(q => q.itemName.toLowerCase().includes(searchKeyword.toLowerCase()) || q.supplierName.toLowerCase().includes(searchKeyword.toLowerCase()));
+        const periodQcs = qualityControlRecords.filter(q =>
+          matchesReportPeriod((q.inspectedAt || '').slice(0, 10), periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let qcs =
+          periodType === 'harian' && periodQcs.length === 0
+            ? qualityControlRecords
+            : periodQcs;
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          qcs = qcs.filter(
+            q =>
+              q.itemName.toLowerCase().includes(kw) ||
+              q.supplierName.toLowerCase().includes(kw) ||
+              q.poNumber.toLowerCase().includes(kw)
+          );
         }
 
         rows = qcs.map((q, idx) => {
@@ -1660,7 +2993,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             `${q.receivedQuantity} ${q.unit}`,
             diffLabel,
             q.qualityGrade,
-            q.receivingTemp ? `${q.receivingTemp}°C` : '4.0°C',
+            q.receivingTemp ? `${q.receivingTemp}°C` : 'Suhu Ruang',
             q.notes || '-',
             q.status,
             q.inspectorName,
@@ -1679,7 +3012,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             'Diterima': q.receivedQuantity,
             'Selisih': diff,
             'Grade': q.qualityGrade,
-            'Suhu': q.receivingTemp,
+            'Suhu': q.receivingTemp ?? '-',
             'Keterangan': q.notes || '-',
             'Status': q.status,
             'Inspektur': q.inspectorName,
@@ -1689,11 +3022,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         const totalOrdered = qcs.reduce((acc, q) => acc + q.orderedQuantity, 0);
         const totalReceived = qcs.reduce((acc, q) => acc + q.receivedQuantity, 0);
         const totalDiff = totalReceived - totalOrdered;
+        const passedQcCount = qcs.filter(
+          q => q.status === 'Diterima' || q.status === 'Lolos Penuh'
+        ).length;
+
         metrics = [
           { label: 'Total QC Dilakukan', value: `${qcs.length} Batch`, color: 'text-blue-700' },
           { label: 'Dipesan vs Diterima', value: `${formatNumber(totalOrdered)} / ${formatNumber(totalReceived)}`, sublabel: `Selisih: ${totalDiff > 0 ? '+' : ''}${totalDiff}`, color: 'text-emerald-700' },
-          { label: 'Total Bahan Masuk Gudang', value: `${formatNumber(totalReceived)} Kg/Satuan`, color: 'text-purple-700' },
-          { label: 'Kepatuhan Rantai Dingin', value: 'Suhu < 4°C Terpenuhi', color: 'text-amber-700' },
+          { label: 'Total Bahan Masuk Gudang', value: `${formatNumber(totalReceived)} Satuan`, color: 'text-purple-700' },
+          { label: 'Lolos Mutu Penuh', value: `${passedQcCount} / ${qcs.length} Batch`, color: 'text-amber-700' },
         ];
         notes = 'Bahan baku yang lolos QC otomatis menambahkan kuantitas kartu stok gudang bahan mentah SPPG sesuai perhitungan selisih penerimaan riil.';
         break;
@@ -1703,15 +3040,21 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       case 'kartu_stok': {
         headers = ['No', 'Kode Bahan', 'Nama Bahan Pangan', 'Kategori', 'Stok Minimum', 'Stok Saat Ini', 'Satuan', 'Estimasi Nilai Stok', 'Status Ketersediaan'];
         let items = inventory;
-        if (searchKeyword) {
-          items = items.filter(i => i.name.toLowerCase().includes(searchKeyword.toLowerCase()) || i.category.toLowerCase().includes(searchKeyword.toLowerCase()));
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          items = items.filter(
+            i =>
+              i.name.toLowerCase().includes(kw) ||
+              i.category.toLowerCase().includes(kw) ||
+              i.code.toLowerCase().includes(kw)
+          );
         }
 
         const baseRows = items.map((i, idx) => {
           const isLow = i.currentStock <= i.minimumStock;
           return [
             idx + 1,
-            i.id,
+            i.code || i.id,
             i.name,
             i.category,
             formatNumber(i.minimumStock),
@@ -1732,96 +3075,198 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             invSchema,
             {
               'No': idx + 1,
-              'Kode': i.id,
+              'Kode': i.code || i.id,
               'Bahan Pangan': i.name,
               'Kategori': i.category,
               'Stok': i.currentStock,
               'Min Stok': i.minimumStock,
               'Satuan': i.unit,
+              'Harga Satuan': i.pricePerUnit,
+              'Lokasi': i.storageLocation,
             },
             i
           )
         );
 
         const totalStockVal = items.reduce((acc, i) => acc + i.currentStock * (i.pricePerUnit || 15000), 0);
+        const periodMutations = stockMutations.filter(m =>
+          matchesReportPeriod(m.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        const activeMuts = periodMutations.length > 0 ? periodMutations : stockMutations;
+        const totalInMuts = activeMuts.filter(m => m.quantityIn > 0).length;
+        const totalOutMuts = activeMuts.filter(m => m.quantityOut > 0).length;
+
         metrics = [
           { label: 'Total Item Terdaftar', value: `${items.length} SKU`, color: 'text-blue-700' },
           { label: 'Total Valuasi Stok Gudang', value: formatRupiah(totalStockVal), color: 'text-emerald-700' },
           { label: 'Stok Kritis / Menipis', value: `${items.filter(i => i.currentStock <= i.minimumStock).length} Item`, color: 'text-amber-700' },
-          { label: 'Metode Pengeluaran', value: 'FIFO (First In First Out)', color: 'text-purple-700' },
+          { label: 'Log Mutasi Periode', value: `${totalInMuts} Masuk • ${totalOutMuts} Keluar`, color: 'text-purple-700' },
         ];
-        notes = 'Seluruh mutasi keluar masuk bahan dicatat secara digital dengan prinsip FIFO guna mencegah kedaluwarsa.';
+        notes = 'Seluruh mutasi keluar masuk bahan dicatat secara terpusat di Kartu Stok Gudang dengan metode FEFO.';
         break;
       }
 
-      // 19. Data Penerima Manfaat Harian
+      // 19. Data Penerima Manfaat Harian (Sinkron Presensi Harian + Tugas Divisi Distribusi + Master Lembaga + Kategori Porsi)
       case 'penerima_harian': {
-        headers = ['No', 'ID Lembaga', 'Nama Sekolah / Madrasah', 'Kategori Sekolah', 'Porsi Kecil (Kls 1-3)', 'Porsi Besar (Kls 4-9)', 'Total Porsi MBG', 'Kepala Sekolah / PIC', 'Status Layanan'];
-        let insts = institutions;
-        if (selectedInstitutionId !== 'ALL') {
-          insts = insts.filter(i => i.id === selectedInstitutionId);
+        headers = ['No', 'ID Lembaga', 'Nama Sekolah / Madrasah', 'Kategori', 'Kuota K / B', 'Hadir Aktual (K / B)', 'Total Porsi Aktual', 'Tidak Hadir', 'PIC & Status Sinkron'];
+        let insts = targetInstFilter ? [targetInstFilter] : institutions.filter(i => i.isActive);
+        if (selectedPortionCategory === 'kecil') {
+          insts = insts.filter(i => i.smallPortions > 0);
+        } else if (selectedPortionCategory === 'besar') {
+          insts = insts.filter(i => i.largePortions > 0);
         }
-        if (searchKeyword) {
-          insts = insts.filter(i => i.name.toLowerCase().includes(searchKeyword.toLowerCase()) || i.address.toLowerCase().includes(searchKeyword.toLowerCase()));
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          insts = insts.filter(
+            i =>
+              i.name.toLowerCase().includes(kw) ||
+              i.address.toLowerCase().includes(kw) ||
+              (i.picName || '').toLowerCase().includes(kw)
+          );
         }
 
-        const baseRows = insts.map((i, idx) => [
-          idx + 1,
-          i.id,
-          i.name,
-          i.institutionType,
-          formatNumber(i.smallPortions),
-          formatNumber(i.largePortions),
-          formatNumber(i.totalPortions),
-          i.picName || 'Kepala Sekolah',
-          'Aktif Terlayani',
-        ]);
+        const dayAttendance = beneficiaryAttendance.filter(a => a.date === selectedDate);
+        const dayDeliveries = distributionDeliveries.filter(d => d.date === selectedDate);
+        let totalActualServed = 0;
+        let totalAbsentCount = 0;
+        let totalQuotaFiltered = 0;
+
+        const baseRows = insts.map((i, idx) => {
+          const att = dayAttendance.find(a =>
+            isSameInstitutionMatch(i, a.institutionId, a.institutionName)
+          );
+          const del = dayDeliveries.find(d =>
+            isSameInstitutionMatch(i, d.institutionId, d.institutionName)
+          );
+          const presentSmall = att
+            ? att.presentSmall
+            : del
+            ? del.smallPortions
+            : i.smallPortions;
+          const presentLarge = att
+            ? att.presentLarge
+            : del
+            ? del.largePortions
+            : i.largePortions;
+          const actualTotal =
+            selectedPortionCategory === 'kecil'
+              ? presentSmall
+              : selectedPortionCategory === 'besar'
+              ? presentLarge
+              : att
+              ? att.actualPortions
+              : del
+              ? del.totalPortions
+              : i.totalPortions;
+          const quotaForInst =
+            selectedPortionCategory === 'kecil'
+              ? i.smallPortions
+              : selectedPortionCategory === 'besar'
+              ? i.largePortions
+              : i.totalPortions;
+          const absentTotal = att
+            ? selectedPortionCategory === 'kecil'
+              ? att.absentSmall
+              : selectedPortionCategory === 'besar'
+              ? att.absentLarge
+              : att.totalAbsent
+            : Math.max(0, quotaForInst - actualTotal);
+
+          totalActualServed += actualTotal;
+          totalAbsentCount += absentTotal;
+          totalQuotaFiltered += quotaForInst;
+
+          const picResolved = del?.picName || i.picName || i.contactPerson || 'PIC';
+          const sourceLabel = att
+            ? 'Presensi Real-Time'
+            : del
+            ? `Distribusi (${del.status})`
+            : 'Kuota Master';
+
+          return [
+            idx + 1,
+            i.id,
+            i.name,
+            i.institutionType,
+            `${formatNumber(i.smallPortions)} / ${formatNumber(i.largePortions)}`,
+            `${formatNumber(presentSmall)} / ${formatNumber(presentLarge)}`,
+            formatNumber(actualTotal),
+            absentTotal > 0 ? `${absentTotal} siswa` : '0',
+            `${picResolved} (${sourceLabel})`,
+          ];
+        });
 
         const instSchema = dynamicFormSchemas.institution_form;
         const dynamicInstCols = appendDynamicExportColumns(instSchema, headers, baseRows, insts);
         headers = dynamicInstCols.headers;
         rows = dynamicInstCols.rows;
 
-        excelData = insts.map((i, idx) =>
-          appendDynamicExcelFields(
+        excelData = insts.map((i, idx) => {
+          const att = dayAttendance.find(a =>
+            isSameInstitutionMatch(i, a.institutionId, a.institutionName)
+          );
+          const del = dayDeliveries.find(d =>
+            isSameInstitutionMatch(i, d.institutionId, d.institutionName)
+          );
+          return appendDynamicExcelFields(
             instSchema,
             {
               'No': idx + 1,
               'ID Lembaga': i.id,
               'Nama Lembaga': i.name,
               'Kategori': i.institutionType,
-              'Porsi Kecil': i.smallPortions,
-              'Porsi Besar': i.largePortions,
-              'Total Porsi': i.totalPortions,
-              'PIC': i.picName,
+              'Kuota Kecil': i.smallPortions,
+              'Kuota Besar': i.largePortions,
+              'Hadir Kecil': att ? att.presentSmall : del ? del.smallPortions : i.smallPortions,
+              'Hadir Besar': att ? att.presentLarge : del ? del.largePortions : i.largePortions,
+              'Total Porsi Aktual': att ? att.actualPortions : del ? del.totalPortions : i.totalPortions,
+              'Absen': att ? att.totalAbsent : 0,
+              'PIC': del?.picName || i.picName,
+              'No HP PIC': i.picPhone || i.phone,
             },
             i
-          )
-        );
-
-        const totalBeneficiaries = insts.reduce((acc, i) => acc + i.totalPortions, 0);
-        const totalInstKecil = insts.reduce((acc, i) => acc + i.smallPortions, 0);
-        const totalInstBesar = insts.reduce((acc, i) => acc + i.largePortions, 0);
+          );
+        });
 
         metrics = [
           { label: 'Lembaga Penerima Terlayani', value: `${insts.length} Sekolah`, color: 'text-blue-700' },
-          { label: 'Total Penerima Manfaat', value: `${formatNumber(totalBeneficiaries)} Siswa`, color: 'text-emerald-700' },
-          { label: 'Rincian Porsi Kecil', value: `${formatNumber(totalInstKecil)} Anak`, color: 'text-purple-700' },
-          { label: 'Rincian Porsi Besar', value: `${formatNumber(totalInstBesar)} Siswa`, color: 'text-amber-700' },
+          {
+            label: 'Porsi Aktual Disajikan',
+            value: `${formatNumber(totalActualServed)} Porsi`,
+            sublabel: `Dari ${formatNumber(totalQuotaFiltered)} kuota`,
+            color: 'text-emerald-700',
+          },
+          { label: 'Siswa Tidak Hadir', value: `${formatNumber(totalAbsentCount)} Siswa`, color: 'text-amber-700' },
+          {
+            label: 'Presensi & Distribusi Tgl Ini',
+            value: `${dayAttendance.length} Presensi • ${dayDeliveries.length} Kirim`,
+            color: 'text-purple-700',
+          },
         ];
-        notes = 'Daftar penerima manfaat telah divalidasi dengan data pokok pendidikan (Dapodik / EMIS Kemenag).';
+        notes = 'Daftar penerima manfaat otomatis menyatukan Kuota Master Lembaga, Presensi Kehadiran Harian, dan realisasi pengiriman Divisi Distribusi.';
         break;
       }
 
       // 20. Laporan Kas Petty Cash Operasional SPPG
       case 'keuangan': {
         headers = ['No', 'Tanggal', 'No. Voucher', 'Jenis Mutasi', 'Kategori Kas', 'Uraian Transaksi', 'Pihak Terkait', 'Jumlah (Rp)', 'Petugas'];
-        let txs = [...pettyCashTransactions].sort((a, b) => a.date.localeCompare(b.date));
-        if (searchKeyword) {
+        const periodTxs = pettyCashTransactions.filter(t =>
+          matchesReportPeriod(t.date, periodType, selectedDate, selectedMonth, startDate, endDate)
+        );
+        let txs =
+          periodType === 'harian' && periodTxs.length === 0
+            ? [...pettyCashTransactions]
+            : [...periodTxs];
+        txs.sort((a, b) => a.date.localeCompare(b.date));
+
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
           txs = txs.filter(
             t =>
-              t.description.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-              t.voucherNumber.toLowerCase().includes(searchKeyword.toLowerCase())
+              t.description.toLowerCase().includes(kw) ||
+              t.voucherNumber.toLowerCase().includes(kw) ||
+              t.category.toLowerCase().includes(kw) ||
+              t.counterparty.toLowerCase().includes(kw)
           );
         }
 
@@ -1869,7 +3314,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           { label: 'Total Pengeluaran (-)', value: formatRupiah(totalOut), color: 'text-rose-700' },
           { label: 'Saldo Akhir Petty Cash', value: formatRupiah(endingBalance), color: 'text-blue-700' },
         ];
-        notes = 'Laporan disinkronkan secara otomatis dari Buku Kas Petty Cash operasional SPPG.';
+        notes = 'Laporan disinkronkan secara otomatis dari Buku Kas Petty Cash operasional SPPG termasuk pencairan insentif PIC & relawan.';
         break;
       }
 
@@ -1890,8 +3335,25 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           'Status WHO',
         ];
         let records = [...beneficiaryRecords];
-        if (selectedInstitutionId && selectedInstitutionId !== 'ALL') {
-          records = records.filter(r => r.institutionId === selectedInstitutionId);
+        if (periodType !== 'harian') {
+          const periodMatched = records.filter(r =>
+            matchesReportPeriod(r.measurementDate, periodType, selectedDate, selectedMonth, startDate, endDate)
+          );
+          if (periodMatched.length > 0) records = periodMatched;
+        }
+        if (targetInstFilter) {
+          records = records.filter(r =>
+            isSameInstitutionMatch(
+              targetInstFilter,
+              r.institutionId,
+              r.institutionName
+            )
+          );
+        }
+        if (selectedPortionCategory === 'kecil') {
+          records = records.filter(r => r.ageMonths <= 108);
+        } else if (selectedPortionCategory === 'besar') {
+          records = records.filter(r => r.ageMonths > 108);
         }
         if (searchKeyword.trim()) {
           const kw = searchKeyword.toLowerCase();
@@ -1977,20 +3439,36 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     activeReportKey,
     currentConfig,
     documentRegisterNumber,
+    periodType,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
     selectedInstitutionId,
+    selectedPortionCategory,
     searchKeyword,
+    bastSheetsList,
     distributionLogs,
     outgoingDocuments,
     distributionDeliveries,
+    omprengReturns,
+    fuelLogs,
     prepRecords,
     cookingRecords,
     portioningRecords,
     todayMenu,
+    menuIngredientsMap,
+    inventory,
+    stockMutations,
+    masterBahan,
+    masterSuppliers,
+    masterVolunteers,
+    masterUnits,
     rabItems,
     purchaseOrders,
     qualityControlRecords,
-    inventory,
     institutions,
+    beneficiaryAttendance,
     beneficiaryRecords,
     pettyCashOpeningBalance,
     pettyCashTransactions,
@@ -1998,6 +3476,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     sppgConfig,
     dynamicFormSchemas,
     organolepticData,
+    plogOrganolepticData,
     cookingFoodTempData,
     portioningFoodTempData,
   ]);
@@ -2274,20 +3753,21 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             {(periodType === 'mingguan' || periodType === 'bulanan') && (
               <input
                 type="month"
-                defaultValue="2026-11"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
                 className="w-full text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             )}
           </div>
 
-          {/* 4. Filter Lembaga & Pencarian */}
+          {/* 4. Filter Lembaga, Kategori Porsi & Pencarian */}
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-700">Filter Lembaga / Kata Kunci:</label>
-            <div className="flex gap-2">
+            <label className="text-xs font-semibold text-slate-700">Lembaga, Porsi &amp; Kata Kunci:</label>
+            <div className="flex gap-1.5">
               <select
                 value={selectedInstitutionId}
                 onChange={e => setSelectedInstitutionId(e.target.value)}
-                className="w-1/2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                className="w-2/5 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
               >
                 <option value="ALL">Semua Lembaga</option>
                 {institutions.map(inst => (
@@ -2296,14 +3776,24 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   </option>
                 ))}
               </select>
-              <div className="relative w-1/2">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-3 text-slate-400" />
+              <select
+                value={selectedPortionCategory}
+                onChange={e => setSelectedPortionCategory(e.target.value as 'ALL' | 'kecil' | 'besar')}
+                className="w-1/4 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl px-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                title="Filter Kategori Porsi"
+              >
+                <option value="ALL">Semua Porsi</option>
+                <option value="kecil">Porsi Kecil</option>
+                <option value="besar">Porsi Besar</option>
+              </select>
+              <div className="relative w-1/3">
+                <Search className="w-3.5 h-3.5 absolute left-2 top-3 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Cari..."
                   value={searchKeyword}
                   onChange={e => setSearchKeyword(e.target.value)}
-                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl pl-7 pr-2 py-2 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
             </div>
@@ -2419,7 +3909,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                       value={
                         selectedInstitutionId !== 'ALL'
                           ? selectedInstitutionId
-                          : bastSingleInstId || institutions[0]?.id || ''
+                          : bastSingleInstId || activeBastSingleSheet?.institutionId || institutions[0]?.id || ''
                       }
                       disabled={bastShowAllInstitutions && selectedInstitutionId === 'ALL'}
                       onChange={e => {
@@ -2428,13 +3918,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                       }}
                       className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium disabled:opacity-60"
                     >
-                      {institutions
-                        .filter(i => i.isActive)
-                        .map(inst => (
-                          <option key={inst.id} value={inst.id}>
-                            {inst.name} — PIC: {inst.picName || inst.contactPerson}
-                          </option>
-                        ))}
+                      {bastSheetsList.map((sheet, sIdx) => (
+                        <option key={`${sheet.institutionId || sheet.institutionName}-${sIdx}`} value={sheet.institutionId || ''}>
+                          {sheet.institutionName} ({formatNumber(sheet.totalPortions)} porsi) — PIC: {sheet.picName}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -3270,6 +4758,86 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               </p>
             </div>
 
+            {/* Ringkasan Eksekutif Khusus Laporan Food Cost & Efisiensi (Tampil di Kertas & Cetak) */}
+            {activeReportKey === 'food_cost' && reportPayload.metrics.length > 0 && (
+              <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                {reportPayload.metrics.map((m, mIdx) => (
+                  <div
+                    key={mIdx}
+                    className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/80"
+                  >
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      {m.label}
+                    </div>
+                    <div className={`text-sm font-black mt-0.5 ${m.color || 'text-slate-900'}`}>
+                      {m.value}
+                    </div>
+                    {m.sublabel && (
+                      <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                        {m.sublabel}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Dokumentasi Foto Porsi Kecil & Besar Otomatis dari Divisi Pemorsian (Khusus Laporan Flyer Menu) */}
+            {activeReportKey === 'flyer_menu' && (
+              <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/40 flex items-center gap-3">
+                  <img
+                    src={flyerPortioningData.smallPhoto}
+                    alt="Foto Porsi Kecil Divisi Pemorsian"
+                    onClick={() =>
+                      setPreviewPhoto({
+                        label: 'Foto Porsi Kecil (Divisi Pemorsian)',
+                        url: flyerPortioningData.smallPhoto,
+                        caption: `Gramasi: ~${flyerPortioningData.smallGrams}g • Tanggal: ${flyerPortioningData.date} • Petugas: ${flyerPortioningData.officerName}`,
+                      })
+                    }
+                    className="w-24 h-20 object-cover rounded-lg border border-blue-200 cursor-pointer shrink-0 hover:opacity-90"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase text-blue-800">
+                      Foto Porsi Kecil (Otomatis Pemorsian)
+                    </div>
+                    <div className="text-sm font-black text-slate-900 mt-0.5">
+                      ~{flyerPortioningData.smallGrams} gram / ompreng
+                    </div>
+                    <div className="text-[11px] text-slate-600 mt-0.5">
+                      {todayMenu.caloriesSmall} kkal • PAUD/TK &amp; SD Kelas 1–3
+                    </div>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center gap-3">
+                  <img
+                    src={flyerPortioningData.largePhoto}
+                    alt="Foto Porsi Besar Divisi Pemorsian"
+                    onClick={() =>
+                      setPreviewPhoto({
+                        label: 'Foto Porsi Besar (Divisi Pemorsian)',
+                        url: flyerPortioningData.largePhoto,
+                        caption: `Gramasi: ~${flyerPortioningData.largeGrams}g • Tanggal: ${flyerPortioningData.date} • Petugas: ${flyerPortioningData.officerName}`,
+                      })
+                    }
+                    className="w-24 h-20 object-cover rounded-lg border border-emerald-200 cursor-pointer shrink-0 hover:opacity-90"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase text-emerald-800">
+                      Foto Porsi Besar (Otomatis Pemorsian)
+                    </div>
+                    <div className="text-sm font-black text-slate-900 mt-0.5">
+                      ~{flyerPortioningData.largeGrams} gram / ompreng
+                    </div>
+                    <div className="text-[11px] text-slate-600 mt-0.5">
+                      {todayMenu.caloriesLarge} kkal • SD 4–6, SMP, SMA &amp; Santri
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Main Data Table */}
             <div className="overflow-x-auto rounded-lg border border-slate-200 mt-2">
               <table className="w-full text-xs text-left border-collapse">
@@ -3335,7 +4903,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <div key={idx} className="flex flex-col items-center justify-between h-36 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-300">
                   <div>
                     <span className="text-slate-500 block">
-                      {idx === 2 ? `Krejengan, ${formatIndonesianDate(selectedDate)}` : 'Mengetahui / Memeriksa,'}
+                      {idx === 2 ? `${sppgConfig.district}, ${formatIndonesianDate(selectedDate)}` : 'Mengetahui / Memeriksa,'}
                     </span>
                     <strong className="text-slate-800 block mt-0.5">{sig.role}</strong>
                   </div>
@@ -3343,7 +4911,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   <div>
                     <strong className="text-slate-900 block underline font-bold">{sig.name}</strong>
                     <span className="text-slate-500 font-mono text-[11px] block mt-0.5">
-                      {sig.idNum ? `NIP/ID: ${sig.idNum}` : `ID: SPPG-TMG2-${sppgConfig.sppgId}`}
+                      {sig.idNum ? `NIP/ID: ${sig.idNum}` : `ID: SPPG-${sppgConfig.sppgId}`}
                     </span>
                   </div>
                 </div>
@@ -3352,8 +4920,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
             {/* Footer Watermark / Legal disclaimer */}
             <div className="mt-6 pt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-              <span>Sistem Informasi Pemenuhan Gizi (E-SPPG TMG2) • ID GFBQSYXD</span>
-              <span>Dokumen Negara Resmi • Program MBG BGN Republik Indonesia</span>
+              <span>Sistem Informasi Pemenuhan Gizi (E-SPPG TMG2) • ID {sppgConfig.sppgId}</span>
+              <span>Dokumen Negara Resmi • {sppgConfig.programName} {sppgConfig.nationalAgency}</span>
             </div>
             </div>
           )}
@@ -3526,7 +5094,49 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   <div className="text-center my-4">
                     <h3 className="font-bold text-sm text-slate-900 uppercase">{reportPayload.title}</h3>
                     <p className="text-[11px] text-slate-500 font-mono">No: {reportPayload.code}</p>
+                    <p className="text-[11px] text-slate-600">Pelaksanaan: {periodLabelString}</p>
                   </div>
+
+                  {activeReportKey === 'food_cost' && reportPayload.metrics.length > 0 && (
+                    <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                      {reportPayload.metrics.map((m, mIdx) => (
+                        <div key={mIdx} className="p-2 rounded border border-slate-200 bg-slate-50">
+                          <div className="text-[9px] font-bold uppercase text-slate-500">{m.label}</div>
+                          <div className={`text-xs font-black mt-0.5 ${m.color || 'text-slate-900'}`}>{m.value}</div>
+                          {m.sublabel && <div className="text-[9px] text-slate-500 mt-0.5 leading-snug">{m.sublabel}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeReportKey === 'flyer_menu' && (
+                    <div className="mb-3 grid grid-cols-2 gap-3 text-[11px]">
+                      <div className="p-2.5 rounded-lg border border-blue-200 bg-blue-50/40 flex items-center gap-2.5">
+                        <img
+                          src={flyerPortioningData.smallPhoto}
+                          alt="Foto Porsi Kecil"
+                          className="w-20 h-16 object-cover rounded border border-blue-200 shrink-0"
+                        />
+                        <div>
+                          <div className="text-[9px] font-bold uppercase text-blue-800">Foto Porsi Kecil (Pemorsian)</div>
+                          <div className="font-black text-slate-900">~{flyerPortioningData.smallGrams}g • {todayMenu.caloriesSmall} kkal</div>
+                          <div className="text-[10px] text-slate-600">PAUD/TK &amp; SD Kelas 1–3</div>
+                        </div>
+                      </div>
+                      <div className="p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/40 flex items-center gap-2.5">
+                        <img
+                          src={flyerPortioningData.largePhoto}
+                          alt="Foto Porsi Besar"
+                          className="w-20 h-16 object-cover rounded border border-emerald-200 shrink-0"
+                        />
+                        <div>
+                          <div className="text-[9px] font-bold uppercase text-emerald-800">Foto Porsi Besar (Pemorsian)</div>
+                          <div className="font-black text-slate-900">~{flyerPortioningData.largeGrams}g • {todayMenu.caloriesLarge} kkal</div>
+                          <div className="text-[10px] text-slate-600">SD 4–6, SMP, SMA &amp; Santri</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Table */}
                   <table className="w-full text-left border-collapse border border-slate-300 my-4 text-[11px]">
@@ -3549,6 +5159,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                       ))}
                     </tbody>
                   </table>
+
+                  {reportPayload.notes && (
+                    <div className="mt-3 p-2.5 bg-blue-50/70 rounded border border-blue-200 text-[10px] text-slate-700">
+                      <strong className="text-blue-950">Catatan Verifikasi: </strong>
+                      {reportPayload.notes}
+                    </div>
+                  )}
 
                   {/* Signatures */}
                   <div className="grid grid-cols-3 gap-4 pt-6 mt-6 border-t border-slate-200 text-center text-[11px]">

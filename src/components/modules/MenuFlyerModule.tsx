@@ -85,22 +85,73 @@ export const MenuFlyerModule: React.FC = () => {
     );
   }, [menuItems, selectedMenuId]);
 
-  // Find portioning inspection record for this menu date
+  const [selectedPortioningId, setSelectedPortioningId] = useState<string>('AUTO');
+
+  // Helper resolusi foto Porsi Kecil & Besar dari record Divisi Pemorsian
+  const getPortioningPhotos = (rec?: PortioningInspectionRecord) => {
+    const small =
+      rec?.smallPortionPhoto ||
+      rec?.foodTemps?.rice?.smallPortionSession1PhotoUrl ||
+      rec?.foodTemps?.rice?.smallPortionSession2PhotoUrl ||
+      rec?.foodTemps?.rice?.smallPortionSession3PhotoUrl ||
+      '';
+    const large =
+      rec?.largePortionPhoto ||
+      rec?.foodTemps?.rice?.photoUrl ||
+      rec?.foodTemps?.animalProtein?.photoUrl ||
+      '';
+    return { small, large };
+  };
+
+  // Cari log Divisi Pemorsian terbaik untuk menu terpilih (prioritas: menuId cocok -> tanggal menu cocok -> log terbaru dengan foto)
+  const autoMatchedPortioning: PortioningInspectionRecord | undefined = useMemo(() => {
+    if (portioningRecords.length === 0) return undefined;
+    const byMenuWithPhoto = portioningRecords.find(p => {
+      const photos = getPortioningPhotos(p);
+      return p.menuId === activeMenu.id && (Boolean(photos.small) || Boolean(photos.large));
+    });
+    if (byMenuWithPhoto) return byMenuWithPhoto;
+
+    const byDateWithPhoto = portioningRecords.find(p => {
+      const photos = getPortioningPhotos(p);
+      return p.date === activeMenu.date && (Boolean(photos.small) || Boolean(photos.large));
+    });
+    if (byDateWithPhoto) return byDateWithPhoto;
+
+    return (
+      portioningRecords.find(p => p.menuId === activeMenu.id) ||
+      portioningRecords.find(p => p.date === activeMenu.date) ||
+      portioningRecords.find(p => {
+        const photos = getPortioningPhotos(p);
+        return Boolean(photos.small) || Boolean(photos.large);
+      }) ||
+      portioningRecords[0]
+    );
+  }, [portioningRecords, activeMenu.id, activeMenu.date]);
+
   const activePortioning: PortioningInspectionRecord | undefined = useMemo(() => {
-    return portioningRecords.find(p => p.date === activeMenu.date) || portioningRecords[0];
-  }, [portioningRecords, activeMenu.date]);
+    if (selectedPortioningId !== 'AUTO') {
+      const picked = portioningRecords.find(p => p.id === selectedPortioningId);
+      if (picked) return picked;
+    }
+    return autoMatchedPortioning;
+  }, [selectedPortioningId, portioningRecords, autoMatchedPortioning]);
+
+  const portioningPhotos = useMemo(() => getPortioningPhotos(activePortioning), [activePortioning]);
 
   // Default fallback high quality ompreng photos
   const defaultSmallPortionPhoto =
-    activePortioning?.smallPortionPhoto ||
+    portioningPhotos.small ||
     'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
   const defaultLargePortionPhoto =
-    activePortioning?.largePortionPhoto ||
+    portioningPhotos.large ||
     'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=800&q=80';
 
   // State for the two photos: Porsi Kecil and Porsi Besar
   const [smallPhotoUrl, setSmallPhotoUrl] = useState<string>(defaultSmallPortionPhoto);
   const [largePhotoUrl, setLargePhotoUrl] = useState<string>(defaultLargePortionPhoto);
+  const [smallPhotoSource, setSmallPhotoSource] = useState<'portioning' | 'custom'>('portioning');
+  const [largePhotoSource, setLargePhotoSource] = useState<'portioning' | 'custom'>('portioning');
   const [smallPhotoCaption, setSmallPhotoCaption] = useState<string>('Ompreng Porsi Kecil (PAUD & SD 1-3)');
   const [largePhotoCaption, setLargePhotoCaption] = useState<string>('Ompreng Porsi Besar (SD 4-6, SMP, SMA, Santri)');
 
@@ -142,15 +193,32 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Sync photos when active menu/portioning changes
+  // Saat menu atau sumber record Pemorsian dipilih ulang, kembalikan ke mode sinkron otomatis Divisi Pemorsian
   useEffect(() => {
-    if (activePortioning?.smallPortionPhoto) {
-      setSmallPhotoUrl(activePortioning.smallPortionPhoto);
+    setSmallPhotoSource('portioning');
+    setLargePhotoSource('portioning');
+    setSmallPhotoUrl(defaultSmallPortionPhoto);
+    setLargePhotoUrl(defaultLargePortionPhoto);
+  }, [selectedMenuId, selectedPortioningId]);
+
+  // Sinkronisasi otomatis real-time saat foto Porsi Kecil/Besar di Divisi Pemorsian berubah atau baru diinput
+  useEffect(() => {
+    if (portioningPhotos.small) {
+      setSmallPhotoSource('portioning');
+      setSmallPhotoUrl(portioningPhotos.small);
+    } else if (smallPhotoSource === 'portioning') {
+      setSmallPhotoUrl(defaultSmallPortionPhoto);
     }
-    if (activePortioning?.largePortionPhoto) {
-      setLargePhotoUrl(activePortioning.largePortionPhoto);
+  }, [portioningPhotos.small, defaultSmallPortionPhoto]);
+
+  useEffect(() => {
+    if (portioningPhotos.large) {
+      setLargePhotoSource('portioning');
+      setLargePhotoUrl(portioningPhotos.large);
+    } else if (largePhotoSource === 'portioning') {
+      setLargePhotoUrl(defaultLargePortionPhoto);
     }
-  }, [activePortioning, selectedMenuId]);
+  }, [portioningPhotos.large, defaultLargePortionPhoto]);
 
   // Trigger background removal when small photo changes
   useEffect(() => {
@@ -185,6 +253,7 @@ export const MenuFlyerModule: React.FC = () => {
       const reader = new FileReader();
       reader.onload = () => {
         const resultUrl = reader.result as string;
+        setSmallPhotoSource('custom');
         setSmallPhotoUrl(resultUrl);
         if (autoRemoveBg) {
           processSmallPhotoCutout(resultUrl, cutoutTolerance);
@@ -201,6 +270,7 @@ export const MenuFlyerModule: React.FC = () => {
       const reader = new FileReader();
       reader.onload = () => {
         const resultUrl = reader.result as string;
+        setLargePhotoSource('custom');
         setLargePhotoUrl(resultUrl);
         if (autoRemoveBg) {
           processLargePhotoCutout(resultUrl, cutoutTolerance);
@@ -210,8 +280,10 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Reset photos to original kitchen portioning data
+  // Reset / Sinkronkan ulang foto dari input Divisi Pemorsian
   const handleResetPhotos = () => {
+    setSmallPhotoSource('portioning');
+    setLargePhotoSource('portioning');
     setSmallPhotoUrl(defaultSmallPortionPhoto);
     setLargePhotoUrl(defaultLargePortionPhoto);
     if (autoRemoveBg) {
@@ -407,31 +479,70 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  2. Input Dua Foto Porsi (Kecil & Besar)
+                  2. Foto Porsi (Otomatis dari Divisi Pemorsian)
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={handleResetPhotos}
                 className="text-[10px] text-blue-800 dark:text-sky-400 hover:underline flex items-center gap-1 font-bold"
-                title="Kembalikan ke foto dokumentasi awal pemorsian dapur"
+                title="Ambil ulang foto porsi kecil & besar terbaru dari Divisi Pemorsian"
               >
-                <RotateCcw className="w-3 h-3" /> Reset Foto
+                <RotateCcw className="w-3 h-3" /> Sinkron Pemorsian
               </button>
+            </div>
+
+            {/* Pemilih & Status Sumber Data Divisi Pemorsian */}
+            <div className="p-3 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  Sumber: Input Gramasi &amp; Suhu Divisi Pemorsian
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700">
+                  {activePortioning ? activePortioning.date : 'Fallback'}
+                </span>
+              </div>
+
+              <select
+                value={selectedPortioningId}
+                onChange={e => setSelectedPortioningId(e.target.value)}
+                className="w-full text-[11px] font-medium rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-800 dark:text-slate-200"
+              >
+                <option value="AUTO">
+                  Otomatis (Sesuai Menu / Input Terbaru Divisi Pemorsian)
+                </option>
+                {portioningRecords.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.date} ({p.time}) • Kecil {p.smallPortionWeightGrams}g / Besar {p.largePortionWeightGrams}g — {p.officerName}
+                  </option>
+                ))}
+              </select>
+
+              {activePortioning && (
+                <div className="text-[10px] text-emerald-800 dark:text-emerald-300 leading-snug">
+                  Petugas: <strong>{activePortioning.officerName}</strong> ({activePortioning.portioningTime}) • Gramasi:{' '}
+                  <strong>{activePortioning.smallPortionWeightGrams}g</strong> (Kecil) &amp;{' '}
+                  <strong>{activePortioning.largePortionWeightGrams}g</strong> (Besar)
+                </div>
+              )}
             </div>
 
             {/* Photo Input A: PORSI KECIL */}
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
                   <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    👶 Foto Porsi Kecil (PAUD & SD 1-3)
+                    👶 Foto Porsi Kecil (PAUD &amp; SD 1-3)
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    Standar: ~{activePortioning?.smallPortionWeightGrams || 395}g (Ompreng Kecil)
+                    Standar: ~{activePortioning?.smallPortionWeightGrams || 395}g •{' '}
+                    <span className={smallPhotoSource === 'portioning' ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : 'text-amber-700 dark:text-amber-400 font-semibold'}>
+                      {smallPhotoSource === 'portioning' ? 'Otomatis dari Div. Pemorsian' : 'Override Manual'}
+                    </span>
                   </span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 text-[10px] font-bold">
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 text-[10px] font-bold shrink-0">
                   Kategori A
                 </span>
               </div>
@@ -445,7 +556,7 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                 <div className="flex-1 space-y-1.5 min-w-0">
                   <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition shadow-2xs">
                     <Upload className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400" />
-                    <span>Upload Foto Porsi Kecil</span>
+                    <span>Ganti Foto Manual</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -466,16 +577,19 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
 
             {/* Photo Input B: PORSI BESAR */}
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
                   <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                     🧑‍🎓 Foto Porsi Besar (SD 4-6, SMP, SMA, Santri)
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    Standar: ~{activePortioning?.largePortionWeightGrams || 585}g (Ompreng Besar)
+                    Standar: ~{activePortioning?.largePortionWeightGrams || 585}g •{' '}
+                    <span className={largePhotoSource === 'portioning' ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : 'text-amber-700 dark:text-amber-400 font-semibold'}>
+                      {largePhotoSource === 'portioning' ? 'Otomatis dari Div. Pemorsian' : 'Override Manual'}
+                    </span>
                   </span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold shrink-0">
                   Kategori B
                 </span>
               </div>
@@ -489,7 +603,7 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                 <div className="flex-1 space-y-1.5 min-w-0">
                   <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition shadow-2xs">
                     <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Upload Foto Porsi Besar</span>
+                    <span>Ganti Foto Manual</span>
                     <input
                       type="file"
                       accept="image/*"

@@ -74,6 +74,7 @@ import {
   FileEdit,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
 
@@ -158,7 +159,7 @@ export const ProcurementModule: React.FC = () => {
     addPurchaseOrder,
     updatePurchaseOrder,
     inventory,
-    adjustStock,
+    masterBahan,
     masterSuppliers,
     masterUnits,
     currentUser,
@@ -169,11 +170,17 @@ export const ProcurementModule: React.FC = () => {
     addRABItem,
     updateRABItem,
     approveRABItem,
+    syncCriticalInventoryToRAB,
     qualityControlRecords,
     addQualityControlRecord,
     updateQualityControlRecord,
     dynamicFormSchemas,
   } = useApp();
+
+  const criticalInventoryCount = useMemo(
+    () => inventory.filter(i => i.currentStock <= i.minimumStock).length,
+    [inventory]
+  );
 
   const unitOptions = useMemo(
     () =>
@@ -486,10 +493,6 @@ export const ProcurementModule: React.FC = () => {
     };
 
     await addPurchaseOrder(newPO);
-    await updateRABItem(targetRABForPO.id, {
-      poCreatedQuantity: (targetRABForPO.poCreatedQuantity || 0) + poFormQuantity,
-      poCreatedAmount: (targetRABForPO.poCreatedAmount || 0) + subtotal,
-    });
 
     addToast(
       'success',
@@ -926,14 +929,25 @@ export const ProcurementModule: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           {activeTab === 'rab' && hasPermission('procurement', 'create') && (
-            <button
-              type="button"
-              onClick={handleOpenCreateRAB}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Buat RAB Baru</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => syncCriticalInventoryToRAB()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition"
+                title="Buat pengajuan RAB otomatis dari bahan Gudang yang berada di bawah stok minimum"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sinkron Stok Kritis Gudang ({criticalInventoryCount})</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenCreateRAB}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Buat RAB Baru</span>
+              </button>
+            </>
           )}
 
           {activeTab === 'purchase_order' && hasPermission('procurement', 'create') && (
@@ -1015,47 +1029,54 @@ export const ProcurementModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 3 Main PLOK Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold scrollbar-thin">
-        {[
-          {
-            key: 'rab' as SubModuleTab,
-            label: 'A. Rencana Anggaran Belanja (RAB)',
-            icon: <Coins className="w-4 h-4" />,
-            badge: `${rabList.length} Item`,
-          },
-          {
-            key: 'purchase_order' as SubModuleTab,
-            label: 'B. Purchase Order (PO Terikat RAB)',
-            icon: <ShoppingCart className="w-4 h-4" />,
-            badge: `${purchaseOrders.length} PO`,
-          },
-          {
-            key: 'quality_control' as SubModuleTab,
-            label: 'C. Quality Control (QC) & Stok Gudang',
-            icon: <PackageCheck className="w-4 h-4" />,
-            badge: `${qcList.length} Record`,
-          },
-        ].map(tab => {
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 ${
-                isActive
-                  ? 'border-blue-900 dark:border-sky-400 text-blue-900 dark:text-sky-300 bg-blue-50/50 dark:bg-blue-950/40'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                {tab.badge}
-              </span>
-            </button>
-          );
-        })}
+      {/* 3 Main PLOK Pill Tabs */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 min-w-max text-xs sm:text-sm font-semibold">
+          {[
+            {
+              key: 'rab' as SubModuleTab,
+              label: 'A. Rencana Anggaran Belanja (RAB)',
+              icon: <Coins className="w-4 h-4 shrink-0" />,
+              badge: `${rabList.length} Item`,
+            },
+            {
+              key: 'purchase_order' as SubModuleTab,
+              label: 'B. Purchase Order (PO Terikat RAB)',
+              icon: <ShoppingCart className="w-4 h-4 shrink-0" />,
+              badge: `${purchaseOrders.length} PO`,
+            },
+            {
+              key: 'quality_control' as SubModuleTab,
+              label: 'C. Quality Control (QC) & Stok Gudang',
+              icon: <PackageCheck className="w-4 h-4 shrink-0" />,
+              badge: `${qcList.length} Record`,
+            },
+          ].map(tab => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`min-h-[40px] flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                  isActive
+                    ? 'bg-white/25 text-white'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+                }`}>
+                  {tab.badge}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -1923,6 +1944,64 @@ export const ProcurementModule: React.FC = () => {
               onClose={() => setIsModalRabSchemaEdit(false)}
             />
           )}
+
+          <div className="bg-sky-50/80 dark:bg-sky-950/40 p-3 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1.5">
+            <label className="block text-[11px] font-bold text-blue-950 dark:text-sky-300">
+              Isi Otomatis dari Data Gudang / Master Bahan (Single-Entry)
+            </label>
+            <select
+              defaultValue=""
+              onChange={e => {
+                const val = e.target.value;
+                if (!val) return;
+                if (val.startsWith('inv:')) {
+                  const inv = inventory.find(i => i.id === val.slice(4));
+                  if (inv) {
+                    const suggestedVol = Math.max(inv.minimumStock * 2 - inv.currentStock, 50);
+                    setRabForm(prev => ({
+                      ...prev,
+                      category: 'RAB Bahan Pangan',
+                      itemName: inv.name,
+                      unit: inv.unit,
+                      unitPrice: inv.pricePerUnit,
+                      volume: suggestedVol,
+                      notes: `Tersinkron dari Gudang (${inv.code} • Stok saat ini: ${inv.currentStock} / Min: ${inv.minimumStock} ${inv.unit})`,
+                    }));
+                  }
+                } else if (val.startsWith('mb:')) {
+                  const mb = masterBahan.find(m => m.id === val.slice(3));
+                  if (mb) {
+                    setRabForm(prev => ({
+                      ...prev,
+                      category: 'RAB Bahan Pangan',
+                      itemName: mb.name,
+                      unit: mb.unit,
+                      unitPrice: mb.actualPrice,
+                      volume: Math.max(mb.minimumStock, 50),
+                      notes: `Tersinkron dari Master Bahan (${mb.code})`,
+                    }));
+                  }
+                }
+              }}
+              className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+            >
+              <option value="">-- Opsional: Pilih bahan untuk auto-isi nama, satuan & harga terbaru --</option>
+              <optgroup label="Stok Gudang Real-Time (Inventory)">
+                {inventory.map(inv => (
+                  <option key={inv.id} value={`inv:${inv.id}`}>
+                    [{inv.code}] {inv.name} — Stok: {formatNumber(inv.currentStock)}/{formatNumber(inv.minimumStock)} {inv.unit} ({formatRupiah(inv.pricePerUnit)}/{inv.unit})
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Master Bahan Pangan">
+                {masterBahan.map(mb => (
+                  <option key={mb.id} value={`mb:${mb.id}`}>
+                    [{mb.code}] {mb.name} ({formatRupiah(mb.actualPrice)}/{mb.unit})
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
 
           <DynamicFormRenderer
             schema={dynamicFormSchemas.procurement_rab_form}

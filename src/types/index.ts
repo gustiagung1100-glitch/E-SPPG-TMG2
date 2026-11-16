@@ -332,14 +332,17 @@ export interface MenuItem {
 // Submodul PLOG: Perencanaan Menu, Bahan, Gizi, Food Cost, & Jobdesk Divisi
 export interface RecipeIngredient {
   id: string;
+  menuName?: string; // Nama hidangan pada kolom MENU
   name: string;
   category: string;
-  netWeightSmall: number; // gram per porsi kecil (TK/SD 1-3)
-  netWeightLarge: number; // gram per porsi besar (SD 4-6/SMP/SMA)
+  netWeightSmall: number; // BB porsi kecil (gram per porsi TK/SD 1-3)
+  netWeightLarge: number; // BB porsi besar (gram per porsi SD 4-6/SMP/SMA)
   unit: string;
   ediblePortionPercent: number; // % BDD (Bagian Dapat Dimakan / Edible Portion, e.g. 100%, 75%, 68%)
   conversionFactorToBase: number; // e.g. 1000g = 1 kg (factor 0.001)
   purchaseUnit: string;   // 'kg', 'butir', 'ikat', 'liter'
+  bufferPercentSmall?: number; // Persentase buffer cadangan porsi kecil (%)
+  bufferPercentLarge?: number; // Persentase buffer cadangan porsi besar (%)
   unitPrice: number;      // Harga acuan/aktual per purchaseUnit (Rp)
   // Nilai gizi per 100g bahan
   calories100g: number;

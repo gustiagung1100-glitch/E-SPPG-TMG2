@@ -10,13 +10,22 @@
   }
 
   body {
-    @apply text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-950;
+    @apply text-slate-800 dark:text-slate-100 bg-[#F3F7FC] dark:bg-slate-950;
   }
 
   /* Professional Tabular Numerals for ERP Tables & Metric Cards */
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
+}
+
+/* Smooth horizontal scrollbars hidden cleanly where needed */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Enterprise Thin Scrollbars */

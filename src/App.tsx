@@ -11,7 +11,6 @@ import { ModuleKey } from './types';
 import { canRoleAccessModule, getDefaultModuleForRole } from './lib/routeGuard';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
-import { Breadcrumb } from './components/layout/Breadcrumb';
 import { ToastContainer } from './components/common/Toast';
 import { DashboardSkeleton, ModuleSkeleton } from './components/common/SkeletonLoader';
 import { AuthGuard } from './components/auth/AuthGuard';
@@ -185,7 +184,7 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col antialiased selection:bg-sky-500 selection:text-white transition-colors duration-200">
+    <div className="min-h-screen bg-[#F3F7FC] dark:bg-slate-950 flex flex-col antialiased selection:bg-blue-600 selection:text-white transition-colors duration-200">
       <div className="flex flex-1 min-h-0">
         {/* Left Sidebar */}
         <Sidebar
@@ -200,25 +199,22 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-          {/* Top Header */}
+          {/* Unified Single Slim Top Header */}
           <Header
             onToggleSidebar={handleToggleSidebar}
             isMobileSidebarOpen={isMobileSidebarOpen}
             isDesktopSidebarHidden={isDesktopSidebarHidden}
             activeModuleTitle={moduleTitles[activeModule]}
+            subItemTitle={activeSubTabTitle}
+            onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role, roleModuleAccess))}
             onNavigateModule={navigateToModule}
+            onRefresh={() => {
+              window.dispatchEvent(new CustomEvent('sppg-refresh'));
+            }}
           />
 
-          {/* Main Body */}
-          <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-            {/* Breadcrumb Navigation */}
-            <Breadcrumb
-              activeModule={activeModule}
-              activeModuleTitle={moduleTitles[activeModule]}
-              subItemTitle={activeSubTabTitle}
-              onNavigateHome={() => navigateToModule(getDefaultModuleForRole(currentUser.role, roleModuleAccess))}
-            />
-
+          {/* Main Body with Spacious Layout */}
+          <main className="flex-1 p-4 sm:p-6 lg:p-7 max-w-7xl w-full mx-auto">
             {/* Dynamic Module Component with Smooth Page Transition & Skeleton Loading */}
             <div key={activeModule} className="page-transition-enter">
               {isDataHydrating ? (
@@ -229,16 +225,14 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
             </div>
           </main>
 
-          {/* Clean ERP Footer */}
-          <footer className="py-4 px-6 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 mt-auto">
+          {/* Clean Minimal Footer */}
+          <footer className="py-3.5 px-6 border-t border-slate-200/80 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-slate-900 mt-auto">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-2 max-w-7xl mx-auto">
               <div>
-                <strong>E-SPPG TMG2</strong> © 2026 Yayasan Hafshawaty • SPPG Probolinggo Krejengan Temenggungan 2
+                <strong>E-SPPG TMG2</strong> © 2026 Yayasan Hafshawaty · SPPG Probolinggo Krejengan Temenggungan 2
               </div>
-              <div className="flex items-center gap-3 text-[11px] font-mono">
-                <span>ID: GFBQSYXD</span>
-                <span>•</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Program Makan Bergizi Gratis (MBG) BGN</span>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Program Makan Bergizi Gratis (MBG) BGN
               </div>
             </div>
           </footer>
