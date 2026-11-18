@@ -174,6 +174,8 @@ export const defaultCookingRecords: CookingInspectionRecord[] = [
         notes: 'Pisang Cavendish dipotong bersih dan dilap higienis food grade.',
       },
     },
+    smallPortionOmprengPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+    largePortionOmprengPhoto: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=500&q=80',
     facilityTemps: {
       ...defaultFacilityTemperatures,
       cookingRoomTemp: 27.0,

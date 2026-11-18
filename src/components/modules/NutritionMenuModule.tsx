@@ -16,6 +16,7 @@ import {
 } from '../../lib/exportUtils';
 import {
   MenuItem,
+  MenuItemGrammage,
   RecipeIngredient,
   FoodCompositionItem,
   NutritionTargetConfig,
@@ -39,6 +40,8 @@ import {
   defaultFoodCompositions,
   defaultNutritionTarget,
   sampleIngredientsMenu1,
+  buildDefaultGrammagesForMenu,
+  resolveMenuGrammages,
 } from '../../lib/plogData';
 import {
   UtensilsCrossed,
@@ -83,6 +86,7 @@ import {
 
 type SubModuleTab =
   | 'menu_bahan'
+  | 'gramasi_item'
   | 'kandungan_gizi'
   | 'food_cost'
   | 'jobdesk_divisi';
@@ -120,7 +124,8 @@ export const NutritionMenuModule: React.FC = () => {
 
   useEffect(() => {
     const labels: Record<SubModuleTab, string> = {
-      menu_bahan: 'Menu & Kebutuhan Bahan (BDD)',
+      menu_bahan: 'Perencanaan Menu oleh PLOG & Bahan (BDD)',
+      gramasi_item: 'Gramasi Item Menu (Porsi Kecil & Besar)',
       kandungan_gizi: 'Evaluasi Kandungan Gizi (TKPI)',
       food_cost: 'Analisis Food Cost & Pagu BGN',
       jobdesk_divisi: 'Jobdesk Divisi & SOP',
@@ -247,6 +252,63 @@ export const NutritionMenuModule: React.FC = () => {
   const currentIngredients = useMemo(() => {
     return menuIngredientsMap[selectedMenuId] || [];
   }, [menuIngredientsMap, selectedMenuId]);
+
+  // ---------------------------------------------------------------------------
+  // SUBMODUL B: GRAMASI ITEM MENU (PORSI KECIL VS PORSI BESAR)
+  // Otomatis mengambil item hidangan dari Menu Baru di "Perencanaan Menu oleh PLOG"
+  // ---------------------------------------------------------------------------
+  const resolvedItemGrammages = useMemo((): MenuItemGrammage[] => {
+    return resolveMenuGrammages(currentMenu, currentIngredients);
+  }, [currentMenu, currentIngredients]);
+
+  const [grammageDrafts, setGrammageDrafts] = useState<MenuItemGrammage[]>([]);
+  const [editingGrammageItem, setEditingGrammageItem] = useState<MenuItemGrammage | null>(null);
+  const [grammageEditForm, setGrammageEditForm] = useState<{
+    categoryLabel: string;
+    itemName: string;
+    smallGrams: number;
+    largeGrams: number;
+    notes: string;
+  }>({
+    categoryLabel: 'Makanan Pokok',
+    itemName: '',
+    smallGrams: 100,
+    largeGrams: 150,
+    notes: '',
+  });
+  const [isAddGrammageModalOpen, setIsAddGrammageModalOpen] = useState(false);
+  const [newGrammageForm, setNewGrammageForm] = useState<{
+    categoryLabel: string;
+    itemName: string;
+    smallGrams: number;
+    largeGrams: number;
+    notes: string;
+  }>({
+    categoryLabel: 'Pelengkap / Tambahan',
+    itemName: '',
+    smallGrams: 25,
+    largeGrams: 40,
+    notes: '',
+  });
+
+  useEffect(() => {
+    setGrammageDrafts(resolvedItemGrammages);
+  }, [resolvedItemGrammages]);
+
+  const hasUnsavedGrammageChanges = useMemo(() => {
+    if (grammageDrafts.length !== resolvedItemGrammages.length) return true;
+    return grammageDrafts.some((d, idx) => {
+      const orig = resolvedItemGrammages[idx];
+      if (!orig) return true;
+      return (
+        d.itemName !== orig.itemName ||
+        d.categoryLabel !== orig.categoryLabel ||
+        Number(d.smallGrams) !== Number(orig.smallGrams) ||
+        Number(d.largeGrams) !== Number(orig.largeGrams) ||
+        (d.notes || '') !== (orig.notes || '')
+      );
+    });
+  }, [grammageDrafts, resolvedItemGrammages]);
 
   // ---------------------------------------------------------------------------
   // A. CALCULATIONS: PERENCANAAN MENU DAN BAHAN (FORMAT RINCIAN RESEP PORSI KECIL & BESAR)
@@ -654,17 +716,30 @@ export const NutritionMenuModule: React.FC = () => {
       ? newMenuForm.dayName
       : dayNames[parsedDay.getDay()];
 
-    const payload: Omit<MenuItem, 'id'> = {
-      date: newMenuForm.date,
-      dayName: computedDayName,
-      cycleWeek: newMenuForm.cycleWeek,
-      menuCode: newMenuForm.menuCode,
+    const tempMenuStub: Pick<
+      MenuItem,
+      'id' | 'stapleFood' | 'animalProtein' | 'plantProtein' | 'vegetable' | 'fruit' | 'milkOrExtra'
+    > = {
+      id: `menu-tmp-${Date.now()}`,
       stapleFood: newMenuForm.stapleFood || 'Nasi Putih Pulen',
       animalProtein: newMenuForm.animalProtein || 'Lauk Hewani Pilihan',
       plantProtein: newMenuForm.plantProtein || 'Lauk Nabati Pilihan',
       vegetable: newMenuForm.vegetable || 'Sayuran Segar',
       fruit: newMenuForm.fruit || 'Buah Pilihan',
       milkOrExtra: newMenuForm.milkOrExtra,
+    };
+
+    const payload: Omit<MenuItem, 'id'> = {
+      date: newMenuForm.date,
+      dayName: computedDayName,
+      cycleWeek: newMenuForm.cycleWeek,
+      menuCode: newMenuForm.menuCode,
+      stapleFood: tempMenuStub.stapleFood,
+      animalProtein: tempMenuStub.animalProtein,
+      plantProtein: tempMenuStub.plantProtein,
+      vegetable: tempMenuStub.vegetable,
+      fruit: tempMenuStub.fruit,
+      milkOrExtra: tempMenuStub.milkOrExtra,
       caloriesSmall: Math.round(nutritionSummarySmall.calories || 620),
       caloriesLarge: Math.round(nutritionSummaryLarge.calories || 870),
       proteinGrams: Number(nutritionSummaryLarge.protein.toFixed(1)) || 28.5,
@@ -675,13 +750,18 @@ export const NutritionMenuModule: React.FC = () => {
       estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 9000),
       status: 'Draft',
       notes: newMenuForm.notes || 'Standar gizi terintegrasi PLOG.',
+      itemGrammages: buildDefaultGrammagesForMenu(tempMenuStub, sampleIngredientsMenu1),
       customFields: newMenuForm.customFields || {},
     };
 
-    await addMenuItem(payload);
-    const newId = `menu-${Date.now()}`;
-    updateMenuIngredients(newId, [...sampleIngredientsMenu1]);
-    setSelectedMenuId(newId);
+    const createdMenu = await addMenuItem(payload);
+    const normalizedGrammages = (payload.itemGrammages || []).map(g => ({
+      ...g,
+      id: `${createdMenu.id}-gram-${g.categoryKey}`,
+    }));
+    await updateMenuItem(createdMenu.id, { itemGrammages: normalizedGrammages });
+    updateMenuIngredients(createdMenu.id, [...sampleIngredientsMenu1]);
+    setSelectedMenuId(createdMenu.id);
     setNewMenuForm(prev => ({
       ...prev,
       menuCode: `MBG-TMG2-H${Math.floor(Math.random() * 80) + 25}`,
@@ -694,7 +774,181 @@ export const NutritionMenuModule: React.FC = () => {
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
     }));
     setIsCreateMenuModalOpen(false);
-    addToast('success', 'Menu Baru Dibuat', `Menu ${newMenuForm.menuCode} berhasil ditambahkan.`);
+    addToast(
+      'success',
+      'Menu Baru Dibuat & Tersinkron',
+      `Menu ${payload.menuCode} beserta ${normalizedGrammages.length} item menu pada Gramasi Item Menu berhasil dibuat.`
+    );
+  };
+
+  // Handlers Submodul B: Gramasi Item Menu (Manual Edit & Sinkron PLOG)
+  const handleInlineGrammageChange = (
+    itemId: string,
+    field: 'smallGrams' | 'largeGrams' | 'itemName',
+    value: string | number
+  ) => {
+    setGrammageDrafts(prev =>
+      prev.map(row => {
+        if (row.id !== itemId) return row;
+        if (field === 'itemName') {
+          return { ...row, itemName: String(value), isManuallyEdited: true };
+        }
+        const safeNum = Math.max(0, Number(value) || 0);
+        return { ...row, [field]: safeNum, isManuallyEdited: true };
+      })
+    );
+  };
+
+  const handleSaveAllGrammageDrafts = async () => {
+    if (!currentMenu) return;
+    const cleaned = grammageDrafts.map(g => ({
+      ...g,
+      itemName: g.itemName.trim() || 'Item Menu',
+      smallGrams: Math.max(0, Number(g.smallGrams) || 0),
+      largeGrams: Math.max(0, Number(g.largeGrams) || 0),
+    }));
+    await updateMenuItem(currentMenu.id, { itemGrammages: cleaned });
+    addToast(
+      'success',
+      'Gramasi Item Menu Disimpan',
+      `Berat gramasi Porsi Kecil & Porsi Besar untuk ${currentMenu.menuCode} berhasil diperbarui.`
+    );
+  };
+
+  const handleOpenEditGrammageModal = (row: MenuItemGrammage) => {
+    setEditingGrammageItem(row);
+    setGrammageEditForm({
+      categoryLabel: row.categoryLabel,
+      itemName: row.itemName,
+      smallGrams: row.smallGrams,
+      largeGrams: row.largeGrams,
+      notes: row.notes || '',
+    });
+  };
+
+  const handleSaveEditGrammageModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentMenu || !editingGrammageItem) return;
+    const nextList = grammageDrafts.map(item =>
+      item.id === editingGrammageItem.id
+        ? {
+            ...item,
+            categoryLabel: grammageEditForm.categoryLabel.trim() || item.categoryLabel,
+            itemName: grammageEditForm.itemName.trim() || item.itemName,
+            smallGrams: Math.max(0, Number(grammageEditForm.smallGrams) || 0),
+            largeGrams: Math.max(0, Number(grammageEditForm.largeGrams) || 0),
+            notes: grammageEditForm.notes.trim(),
+            isManuallyEdited: true,
+          }
+        : item
+    );
+    setGrammageDrafts(nextList);
+    await updateMenuItem(currentMenu.id, { itemGrammages: nextList });
+    setEditingGrammageItem(null);
+    addToast(
+      'success',
+      'Item Menu Diedit',
+      `Gramasi "${grammageEditForm.itemName}" berhasil disimpan secara manual.`
+    );
+  };
+
+  const handleAddManualGrammageItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentMenu || !newGrammageForm.itemName.trim()) return;
+    const added: MenuItemGrammage = {
+      id: `${currentMenu.id}-gram-custom-${Date.now()}`,
+      categoryKey: 'custom',
+      categoryLabel: newGrammageForm.categoryLabel.trim() || 'Pelengkap / Tambahan',
+      itemName: newGrammageForm.itemName.trim(),
+      smallGrams: Math.max(0, Number(newGrammageForm.smallGrams) || 0),
+      largeGrams: Math.max(0, Number(newGrammageForm.largeGrams) || 0),
+      notes: newGrammageForm.notes.trim() || 'Item menu tambahan (manual)',
+      isManuallyEdited: true,
+    };
+    const nextList = [...grammageDrafts, added];
+    setGrammageDrafts(nextList);
+    await updateMenuItem(currentMenu.id, { itemGrammages: nextList });
+    setNewGrammageForm({
+      categoryLabel: 'Pelengkap / Tambahan',
+      itemName: '',
+      smallGrams: 25,
+      largeGrams: 40,
+      notes: '',
+    });
+    setIsAddGrammageModalOpen(false);
+    addToast('success', 'Item Menu Ditambahkan', `"${added.itemName}" ditambahkan ke daftar gramasi menu.`);
+  };
+
+  const handleDeleteGrammageItem = async (itemId: string) => {
+    if (!currentMenu) return;
+    const nextList = grammageDrafts.filter(g => g.id !== itemId);
+    setGrammageDrafts(nextList);
+    await updateMenuItem(currentMenu.id, { itemGrammages: nextList });
+    addToast('info', 'Item Dihapus', 'Item menu tambahan berhasil dihapus dari daftar gramasi.');
+  };
+
+  const handleSyncGrammagesFromPLOG = async () => {
+    if (!currentMenu) return;
+    const freshDefaults = buildDefaultGrammagesForMenu(currentMenu, currentIngredients);
+    const customOnly = grammageDrafts.filter(g => g.categoryKey === 'custom');
+    const nextList = [...freshDefaults, ...customOnly];
+    setGrammageDrafts(nextList);
+    await updateMenuItem(currentMenu.id, { itemGrammages: nextList });
+    addToast(
+      'success',
+      'Tersinkron dari Menu PLOG',
+      `Daftar item menu ${currentMenu.menuCode} disinkronkan ulang dari Perencanaan Menu oleh PLOG.`
+    );
+  };
+
+  const handleExportGrammagePDF = () => {
+    const totalSmall = grammageDrafts.reduce((s, i) => s + (Number(i.smallGrams) || 0), 0);
+    const totalLarge = grammageDrafts.reduce((s, i) => s + (Number(i.largeGrams) || 0), 0);
+    exportTableToPDF({
+      title: 'DAFTAR GRAMASI ITEM MENU (PORSI KECIL & PORSI BESAR)',
+      subtitle: `Menu: ${currentMenu?.menuCode || '-'} (${currentMenu?.dayName || '-'}, ${formatIndonesianDate(currentMenu?.date || '')}) • SPPG TMG2`,
+      headers: [
+        'No',
+        'Kategori Hidangan',
+        'Nama Item Menu (PLOG)',
+        'Porsi Kecil (gram)',
+        'Porsi Besar (gram)',
+        'Selisih (B-K)',
+        'Status',
+      ],
+      rows: [
+        ...grammageDrafts.map((g, idx) => [
+          idx + 1,
+          g.categoryLabel,
+          g.itemName,
+          `${g.smallGrams} gram`,
+          `${g.largeGrams} gram`,
+          `${g.largeGrams - g.smallGrams >= 0 ? '+' : ''}${g.largeGrams - g.smallGrams} gram`,
+          g.isManuallyEdited ? 'Diedit Manual' : 'Sinkron PLOG',
+        ]),
+        ['', 'TOTAL GRAMASI PER SAJIAN', `${grammageDrafts.length} Item Menu`, `${totalSmall} gram`, `${totalLarge} gram`, `+${totalLarge - totalSmall} gram`, ''],
+      ],
+      fileName: `Gramasi_Item_Menu_${currentMenu?.menuCode || 'MBG'}`,
+      orientation: 'landscape',
+      sppgConfig,
+      signerName: sppgConfig.nutritionOfficer,
+      signerRole: 'Pengawas Gizi Dietisien SPPG TMG2',
+    });
+  };
+
+  const handleExportGrammageExcel = () => {
+    const rows = grammageDrafts.map((g, idx) => ({
+      No: idx + 1,
+      'Kode Menu': currentMenu?.menuCode || '-',
+      'Kategori Hidangan': g.categoryLabel,
+      'Nama Item Menu': g.itemName,
+      'Gramasi Porsi Kecil (gram)': g.smallGrams,
+      'Gramasi Porsi Besar (gram)': g.largeGrams,
+      'Selisih (gram)': g.largeGrams - g.smallGrams,
+      'Sumber Data': g.isManuallyEdited ? 'Diedit Manual' : 'Sinkron Menu PLOG',
+      Catatan: g.notes || '-',
+    }));
+    exportToExcel(rows, `Gramasi_Item_Menu_${currentMenu?.menuCode || 'MBG'}`, 'Gramasi Item Menu');
   };
 
   const handleExportMenusPDF = () => {
@@ -1162,31 +1416,38 @@ export const NutritionMenuModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 4 Main Sub-Modules Tabs */}
+      {/* 5 Main Sub-Modules Tabs */}
       <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold scrollbar-thin">
         {[
           {
             key: 'menu_bahan' as SubModuleTab,
-            label: 'A. Perencanaan Menu dan Bahan',
-            icon: <Scale className="w-4 h-4" />,
+            label: 'A. Perencanaan Menu oleh PLOG & Bahan',
+            icon: <UtensilsCrossed className="w-4 h-4" />,
             badge: `${ingredientsCalculated.length} Bahan`,
           },
           {
+            key: 'gramasi_item' as SubModuleTab,
+            label: 'B. Gramasi Item Menu',
+            icon: <Scale className="w-4 h-4" />,
+            badge: `${grammageDrafts.length} Item`,
+            badgeColor: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+          },
+          {
             key: 'kandungan_gizi' as SubModuleTab,
-            label: 'B. Input Kandungan Gizi (TKPI & Evaluasi AKG)',
+            label: 'C. Input Kandungan Gizi (TKPI & Evaluasi AKG)',
             icon: <Apple className="w-4 h-4" />,
             badge: nutritionTarget.isConfigured ? 'Target AKG Aktif' : 'Belum Dikonfigurasi',
             badgeColor: nutritionTarget.isConfigured ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
           },
           {
             key: 'food_cost' as SubModuleTab,
-            label: 'C. Input Food Cost Menu & Anggaran',
+            label: 'D. Input Food Cost Menu & Anggaran',
             icon: <Coins className="w-4 h-4" />,
             badge: `${percentToCapAvg.toFixed(1)}% Pagu`,
           },
           {
             key: 'jobdesk_divisi' as SubModuleTab,
-            label: 'D. Jobdesk Divisi & SOP Foto',
+            label: 'E. Jobdesk Divisi & SOP Foto',
             icon: <Layers className="w-4 h-4" />,
             badge: `${jobdesks.length} Divisi`,
           },
@@ -1585,6 +1846,23 @@ export const NutritionMenuModule: React.FC = () => {
                   </span>
                 ),
               },
+              {
+                key: 'gramasiAction',
+                header: 'Gramasi Item',
+                render: row => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedMenuId(row.id);
+                      setActiveTab('gramasi_item');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[11px] font-bold transition cursor-pointer"
+                  >
+                    <Scale className="w-3 h-3" />
+                    <span>Atur Gramasi</span>
+                  </button>
+                ),
+              },
               ...buildDynamicTableColumns<MenuItem>(dynamicFormSchemas.menu_form),
             ]}
           />
@@ -1592,7 +1870,339 @@ export const NutritionMenuModule: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* SUBMODUL B: INPUT & EVALUASI KANDUNGAN GIZI */}
+      {/* SUBMODUL B: GRAMASI ITEM MENU (PORSI KECIL VS PORSI BESAR)                */}
+      {/* ========================================================================= */}
+      {activeTab === 'gramasi_item' && (() => {
+        const totalSmallGrams = grammageDrafts.reduce((acc, g) => acc + (Number(g.smallGrams) || 0), 0);
+        const totalLargeGrams = grammageDrafts.reduce((acc, g) => acc + (Number(g.largeGrams) || 0), 0);
+        const ratioPct = totalLargeGrams > 0 ? ((totalSmallGrams / totalLargeGrams) * 100).toFixed(0) : '0';
+        const editedCount = grammageDrafts.filter(g => g.isManuallyEdited).length;
+
+        const categoryBadgeColor = (catKey: MenuItemGrammage['categoryKey']) => {
+          switch (catKey) {
+            case 'stapleFood':
+              return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
+            case 'animalProtein':
+              return 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300';
+            case 'plantProtein':
+              return 'bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300';
+            case 'vegetable':
+              return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
+            case 'fruit':
+              return 'bg-lime-100 text-lime-800 dark:bg-lime-950/60 dark:text-lime-300';
+            case 'milkOrExtra':
+              return 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300';
+            default:
+              return 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300';
+          }
+        };
+
+        return (
+          <div className="space-y-5">
+            {/* Info & Sync Banner */}
+            <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-900 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs text-sky-900 dark:text-sky-200">
+              <div className="flex items-start gap-3">
+                <Scale className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold">
+                    Sinkronisasi Otomatis Item Menu dari Perencanaan Menu oleh PLOG
+                  </div>
+                  <p className="leading-relaxed opacity-90">
+                    Daftar item menu di bawah ini otomatis mengambil masing-masing item hidangan yang diinput pada <strong>Menu Baru (Sub-menu Perencanaan Menu oleh PLOG)</strong>, membedakan berat <strong>Porsi Kecil (gram)</strong> dan <strong>Porsi Besar (gram)</strong>, serta dapat diedit langsung maupun melalui tombol <strong>Edit</strong> secara manual.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <select
+                  value={selectedMenuId}
+                  onChange={e => setSelectedMenuId(e.target.value)}
+                  className="px-3 py-2 text-xs font-bold rounded-xl border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                >
+                  {menuItems.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.menuCode} — {m.stapleFood} + {m.animalProtein} ({m.dayName})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Summary Metric Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-sky-200 dark:border-sky-900/60 shadow-xs">
+                <div className="text-[11px] text-sky-700 dark:text-sky-300 uppercase font-bold flex items-center justify-between">
+                  <span>Total Gramasi Porsi Kecil</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300">
+                    TK/PAUD &amp; SD 1-3
+                  </span>
+                </div>
+                <div className="text-2xl font-black text-sky-700 dark:text-sky-300 mt-1 font-mono">
+                  {formatNumber(totalSmallGrams)} <span className="text-sm font-bold">gram / porsi</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Rasio {ratioPct}% dari Porsi Besar • Total {formatNumber(Math.round((totalSmallGrams * quotaSmall) / 1000))} kg ({formatNumber(quotaSmall)} porsi)
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 shadow-xs">
+                <div className="text-[11px] text-indigo-700 dark:text-indigo-300 uppercase font-bold flex items-center justify-between">
+                  <span>Total Gramasi Porsi Besar</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300">
+                    SD 4-6, SMP, SMA
+                  </span>
+                </div>
+                <div className="text-2xl font-black text-indigo-700 dark:text-indigo-300 mt-1 font-mono">
+                  {formatNumber(totalLargeGrams)} <span className="text-sm font-bold">gram / porsi</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Standar sajian penuh 100% • Total {formatNumber(Math.round((totalLargeGrams * quotaLarge) / 1000))} kg ({formatNumber(quotaLarge)} porsi)
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+                  <span>Status Item Menu ({currentMenu?.menuCode})</span>
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white mt-1 font-mono">
+                  {grammageDrafts.length} <span className="text-sm font-bold text-slate-500">Item Menu</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {editedCount > 0
+                    ? `${editedCount} item telah diedit manual • ${grammageDrafts.length - editedCount} item sinkron PLOG`
+                    : 'Seluruh item tersinkron otomatis dengan Menu PLOG'}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <UtensilsCrossed className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                  Rincian Gramasi Item Menu: {currentMenu?.menuCode} ({currentMenu?.dayName})
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Klik angka gram langsung untuk edit cepat, atau klik tombol <strong>Edit</strong> untuk mengubah nama, berat gram &amp; catatan.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {hasUnsavedGrammageChanges && (
+                  <button
+                    type="button"
+                    onClick={handleSaveAllGrammageDrafts}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer animate-pulse"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Simpan Perubahan Gramasi</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSyncGrammagesFromPLOG}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                  title="Tarik ulang nama & item menu terbaru dari Perencanaan Menu oleh PLOG"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Sinkron Ulang PLOG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportGrammagePDF}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportGrammageExcel}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAddGrammageModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Item Manual</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table of Gramasi Item Menu */}
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="py-3 px-3 text-center w-10">#</th>
+                      <th className="py-3 px-3 min-w-[140px]">Kategori Item</th>
+                      <th className="py-3 px-3 min-w-[240px]">Nama Item Menu (Dari Menu Baru PLOG)</th>
+                      <th className="py-3 px-3 text-center bg-sky-50/90 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 min-w-[165px]">
+                        Gramasi Porsi Kecil (gram)
+                      </th>
+                      <th className="py-3 px-3 text-center bg-indigo-50/90 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 min-w-[165px]">
+                        Gramasi Porsi Besar (gram)
+                      </th>
+                      <th className="py-3 px-3 text-center min-w-[100px]">Selisih (B - K)</th>
+                      <th className="py-3 px-3 text-center min-w-[110px] print:hidden">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {grammageDrafts.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                          Belum ada item menu pada perencanaan menu ini. Tambahkan Menu Baru pada sub-menu A atau klik &quot;Tambah Item Manual&quot;.
+                        </td>
+                      </tr>
+                    ) : (
+                      grammageDrafts.map((item, idx) => {
+                        const diff = (Number(item.largeGrams) || 0) - (Number(item.smallGrams) || 0);
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3.5 px-3 text-center font-mono text-slate-500 font-bold">
+                              {idx + 1}
+                            </td>
+                            <td className="py-3.5 px-3">
+                              <span
+                                className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold ${categoryBadgeColor(
+                                  item.categoryKey
+                                )}`}
+                              >
+                                {item.categoryLabel}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-3">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-bold text-slate-900 dark:text-white text-xs">
+                                  {item.itemName}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                    item.isManuallyEdited
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                  }`}
+                                >
+                                  {item.isManuallyEdited ? 'Diedit Manual' : 'Sinkron PLOG'}
+                                </span>
+                              </div>
+                              {item.notes && (
+                                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {item.notes}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-center bg-sky-50/40 dark:bg-sky-950/20">
+                              <div className="inline-flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  aria-label={`Gramasi Porsi Kecil ${item.itemName}`}
+                                  value={item.smallGrams}
+                                  onChange={e =>
+                                    handleInlineGrammageChange(item.id, 'smallGrams', e.target.value)
+                                  }
+                                  className="w-20 px-2.5 py-1.5 text-center font-mono font-black text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-sky-800 dark:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                />
+                                <span className="text-[11px] font-bold text-sky-700 dark:text-sky-300">
+                                  gram
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-center bg-indigo-50/40 dark:bg-indigo-950/20">
+                              <div className="inline-flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  aria-label={`Gramasi Porsi Besar ${item.itemName}`}
+                                  value={item.largeGrams}
+                                  onChange={e =>
+                                    handleInlineGrammageChange(item.id, 'largeGrams', e.target.value)
+                                  }
+                                  className="w-20 px-2.5 py-1.5 text-center font-mono font-black text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-indigo-800 dark:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                                <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
+                                  gram
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-3 text-center font-mono font-bold text-slate-700 dark:text-slate-300">
+                              {diff >= 0 ? `+${diff}` : diff} gram
+                            </td>
+                            <td className="py-3.5 px-3 text-center print:hidden">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditGrammageModal(item)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900 text-blue-800 dark:text-sky-300 text-[11px] font-bold transition cursor-pointer"
+                                  title="Edit manual nama item, kategori, berat gramasi kecil & besar"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Edit</span>
+                                </button>
+                                {item.categoryKey === 'custom' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteGrammageItem(item.id)}
+                                    className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
+                                    title="Hapus Item Manual"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-xs">
+                      <td colSpan={3} className="py-3 px-3 text-right uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                        TOTAL GRAMASI PER SAJIAN ({grammageDrafts.length} ITEM MENU):
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-black text-sky-800 dark:text-sky-300 bg-sky-100/70 dark:bg-sky-950/40">
+                        {formatNumber(totalSmallGrams)} gram
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-black text-indigo-800 dark:text-indigo-300 bg-indigo-100/70 dark:bg-indigo-950/40">
+                        {formatNumber(totalLargeGrams)} gram
+                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-black text-slate-800 dark:text-slate-200">
+                        {totalLargeGrams - totalSmallGrams >= 0 ? '+' : ''}
+                        {formatNumber(totalLargeGrams - totalSmallGrams)} gram
+                      </td>
+                      <td className="py-3 px-3 text-center print:hidden">
+                        {hasUnsavedGrammageChanges && (
+                          <button
+                            type="button"
+                            onClick={handleSaveAllGrammageDrafts}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold"
+                          >
+                            Simpan
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================================= */}
+      {/* SUBMODUL C: INPUT & EVALUASI KANDUNGAN GIZI */}
       {/* ========================================================================= */}
       {activeTab === 'kandungan_gizi' && (
         <div className="space-y-6">
@@ -2520,6 +3130,243 @@ export const NutritionMenuModule: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDIT MANUAL GRAMASI ITEM MENU                                      */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={Boolean(editingGrammageItem)}
+        onClose={() => setEditingGrammageItem(null)}
+        title="Edit Manual Gramasi Item Menu"
+        subtitle={`Sesuaikan nama item hidangan dan berat per gram porsi kecil vs porsi besar (${currentMenu?.menuCode || ''})`}
+        maxWidth="lg"
+      >
+        <form onSubmit={handleSaveEditGrammageModal} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kategori Item Menu *
+              </label>
+              <input
+                type="text"
+                required
+                value={grammageEditForm.categoryLabel}
+                onChange={e =>
+                  setGrammageEditForm(prev => ({ ...prev, categoryLabel: e.target.value }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Nama Item Menu *
+              </label>
+              <input
+                type="text"
+                required
+                value={grammageEditForm.itemName}
+                onChange={e =>
+                  setGrammageEditForm(prev => ({ ...prev, itemName: e.target.value }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-3 rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800">
+              <label className="block text-xs font-bold text-sky-800 dark:text-sky-300 mb-1">
+                Berat Gramasi Porsi Kecil (gram) *
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  required
+                  value={grammageEditForm.smallGrams}
+                  onChange={e =>
+                    setGrammageEditForm(prev => ({
+                      ...prev,
+                      smallGrams: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black"
+                />
+                <span className="text-xs font-bold text-sky-700 dark:text-sky-300">gram</span>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
+              <label className="block text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-1">
+                Berat Gramasi Porsi Besar (gram) *
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  required
+                  value={grammageEditForm.largeGrams}
+                  onChange={e =>
+                    setGrammageEditForm(prev => ({
+                      ...prev,
+                      largeGrams: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black"
+                />
+                <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">gram</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Catatan / Keterangan Penyajian
+            </label>
+            <input
+              type="text"
+              value={grammageEditForm.notes}
+              onChange={e => setGrammageEditForm(prev => ({ ...prev, notes: e.target.value }))}
+              placeholder="Contoh: Berat bersih siap saji dalam sekat ompreng"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setEditingGrammageItem(null)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
+            >
+              Simpan Perubahan
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: TAMBAH ITEM GRAMASI MENU MANUAL                                    */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={isAddGrammageModalOpen}
+        onClose={() => setIsAddGrammageModalOpen(false)}
+        title="Tambah Item Menu Manual (Gramasi)"
+        subtitle={`Tambahkan item hidangan pendamping khusus untuk menu ${currentMenu?.menuCode || ''}`}
+        maxWidth="lg"
+      >
+        <form onSubmit={handleAddManualGrammageItem} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kategori Hidangan *
+              </label>
+              <input
+                type="text"
+                required
+                value={newGrammageForm.categoryLabel}
+                onChange={e =>
+                  setNewGrammageForm(prev => ({ ...prev, categoryLabel: e.target.value }))
+                }
+                placeholder="Contoh: Pelengkap / Sambal / Kuah"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Nama Item Menu *
+              </label>
+              <input
+                type="text"
+                required
+                value={newGrammageForm.itemName}
+                onChange={e =>
+                  setNewGrammageForm(prev => ({ ...prev, itemName: e.target.value }))
+                }
+                placeholder="Contoh: Sambal Tomat Tidak Pedas / Kerupuk Udang"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
+                Gramasi Porsi Kecil (gram) *
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                required
+                value={newGrammageForm.smallGrams}
+                onChange={e =>
+                  setNewGrammageForm(prev => ({
+                    ...prev,
+                    smallGrams: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
+                Gramasi Porsi Besar (gram) *
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                required
+                value={newGrammageForm.largeGrams}
+                onChange={e =>
+                  setNewGrammageForm(prev => ({
+                    ...prev,
+                    largeGrams: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Catatan / Keterangan
+            </label>
+            <input
+              type="text"
+              value={newGrammageForm.notes}
+              onChange={e => setNewGrammageForm(prev => ({ ...prev, notes: e.target.value }))}
+              placeholder="Opsional"
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsAddGrammageModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
+            >
+              Tambahkan Item
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* ========================================================================= */}
       {/* MODAL: TAMBAH BAHAN RESEP */}

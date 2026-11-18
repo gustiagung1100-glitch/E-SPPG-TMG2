@@ -9,13 +9,25 @@ import {
   generateBastNumber,
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
-import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
-import { formatNumber, formatRupiah, formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
-import { monthlyWasteSummary } from '../../lib/productionData';
 import {
+  processFacilityImageUpload,
+  FacilityTempReportPanel,
+  FacilityTempModalGrid,
+  applyFacilityPhotoPatch,
+} from '../common/FacilityTempUploadSection';
+import { LandscapeTrayCameraModal } from '../common/LandscapeTrayCameraModal';
+import { formatNumber, formatRupiah, formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
+import { monthlyWasteSummary, defaultFacilityTemperatures } from '../../lib/productionData';
+import { resolveMenuGrammages } from '../../lib/plogData';
+import {
+  CookingInspectionRecord,
+  CookingItemDetail,
   DistributionDeliveryRecord,
+  FacilityTemperatures,
+  MenuItem,
   OmprengReturnRecord,
   PortioningInspectionRecord,
+  PreparationInspectionRecord,
 } from '../../types';
 import {
   DynamicFormEditToggleBar,
@@ -59,6 +71,9 @@ import {
   MapPin,
   X,
   ClipboardCheck,
+  RefreshCw,
+  Edit3,
+  Utensils,
 } from 'lucide-react';
 
 type ProductionTab = 'prep' | 'cooking' | 'portioning' | 'distribution' | 'washing';
@@ -69,8 +84,10 @@ export const ProductionModule: React.FC = () => {
     institutions,
     prepRecords,
     addPrepRecord,
+    updatePrepRecord,
     cookingRecords,
     addCookingRecord,
+    updateCookingRecord,
     portioningRecords,
     addPortioningRecord,
     updatePortioningRecord,
@@ -87,6 +104,7 @@ export const ProductionModule: React.FC = () => {
     masterVolunteers,
     masterUnits,
     menuItems,
+    menuIngredientsMap,
     distributionLogs,
     kitchenProgress,
     updateKitchenProgress,
@@ -101,7 +119,10 @@ export const ProductionModule: React.FC = () => {
 
   // Modals state
   const [isPrepModalOpen, setIsPrepModalOpen] = useState(false);
+  const [editingPrepId, setEditingPrepId] = useState<string | null>(null);
   const [isCookingModalOpen, setIsCookingModalOpen] = useState(false);
+  const [editingCookingId, setEditingCookingId] = useState<string | null>(null);
+  const [selectedCookingId, setSelectedCookingId] = useState<string | null>(null);
   const [isPortioningModalOpen, setIsPortioningModalOpen] = useState(false);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -144,12 +165,53 @@ export const ProductionModule: React.FC = () => {
     fruitUnit: 'kg',
     fruitTemp: 19.5,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    facilityTemps: { ...defaultFacilityTemperatures } as FacilityTemperatures,
     notes: 'Pembersihan dan sortir bahan segar batch subuh.',
   });
 
+  const openNewPrepModal = () => {
+    setEditingPrepId(null);
+    setPrepForm(f => ({
+      ...f,
+      date: new Date().toISOString().slice(0, 10),
+      facilityTemps: { ...defaultFacilityTemperatures },
+    }));
+    setIsPrepModalOpen(true);
+  };
+
+  const openEditPrepModal = (rec: PreparationInspectionRecord) => {
+    setEditingPrepId(rec.id);
+    setPrepForm({
+      date: rec.date,
+      time: rec.time,
+      officerName: rec.officerName,
+      vegName: rec.damagedVegetable.name,
+      vegQty: rec.damagedVegetable.quantity,
+      vegUnit: rec.damagedVegetable.unit,
+      vegTemp: rec.damagedVegetable.temp,
+      vegPhoto: rec.damagedVegetable.photoUrl || '',
+      animalName: rec.damagedAnimal.name,
+      animalQty: rec.damagedAnimal.quantity,
+      animalUnit: rec.damagedAnimal.unit,
+      animalTemp: rec.damagedAnimal.temp,
+      animalPhoto: rec.damagedAnimal.photoUrl || '',
+      fruitName: rec.damagedFruit.name,
+      fruitQty: rec.damagedFruit.quantity,
+      fruitUnit: rec.damagedFruit.unit,
+      fruitTemp: rec.damagedFruit.temp,
+      fruitPhoto: rec.damagedFruit.photoUrl || '',
+      facilityTemps: {
+        ...defaultFacilityTemperatures,
+        ...(rec.facilityTemps || {}),
+      },
+      notes: rec.notes || '',
+    });
+    setIsPrepModalOpen(true);
+  };
+
   const handleSavePrep = async (e: React.FormEvent) => {
     e.preventDefault();
-    await addPrepRecord({
+    const payload = {
       date: prepForm.date,
       time: prepForm.time,
       officerName: prepForm.officerName,
@@ -174,121 +236,276 @@ export const ProductionModule: React.FC = () => {
         temp: Number(prepForm.fruitTemp),
         photoUrl: prepForm.fruitPhoto,
       },
+      facilityTemps: prepForm.facilityTemps,
       notes: prepForm.notes,
-    });
+    };
+
+    if (editingPrepId) {
+      await updatePrepRecord(editingPrepId, payload);
+    } else {
+      await addPrepRecord(payload);
+    }
+    setEditingPrepId(null);
     setIsPrepModalOpen(false);
   };
 
   // -------------------------------------------------------------
-  // TAB B: Form State Divisi Pengolahan
+  // TAB B: Form State Divisi Pengolahan (Terhubung Live ke Menu & Gramasi Item Menu PLOG)
   // -------------------------------------------------------------
-  const [cookingForm, setCookingForm] = useState({
+  const getCookedSlotDefaults = (categoryKey: CookingItemDetail['categoryKey']) => {
+    switch (categoryKey) {
+      case 'stapleFood':
+        return {
+          temp: 93.5,
+          equipment: 'Rice Steamer Gas 40 Tray',
+          photoUrl: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
+        };
+      case 'animalProtein':
+        return {
+          temp: 84.6,
+          equipment: 'Wajan Penggorengan A1',
+          photoUrl: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
+        };
+      case 'plantProtein':
+        return {
+          temp: 82.5,
+          equipment: 'Wajan Penggorengan A2',
+          photoUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+        };
+      case 'vegetable':
+        return {
+          temp: 87.1,
+          equipment: 'Kettle Sup Uap 200L',
+          photoUrl: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
+        };
+      case 'fruit':
+        return {
+          temp: 18.0,
+          equipment: 'Meja Steril Buah & Pelengkap',
+          photoUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+        };
+      default:
+        return {
+          temp: 18.0,
+          equipment: 'Meja Steril Pelengkap & Pendamping',
+          photoUrl: '',
+        };
+    }
+  };
+
+  const mapCategoryToCookedSlot = (
+    categoryKey: CookingItemDetail['categoryKey'],
+    cookedFoods?: CookingInspectionRecord['cookedFoods']
+  ) => {
+    if (!cookedFoods) return undefined;
+    if (categoryKey === 'stapleFood') return cookedFoods.rice;
+    if (categoryKey === 'animalProtein') return cookedFoods.animalProtein;
+    if (categoryKey === 'plantProtein') return cookedFoods.plantProtein;
+    if (categoryKey === 'vegetable') return cookedFoods.vegetable;
+    if (categoryKey === 'fruit') return cookedFoods.fruit;
+    return undefined;
+  };
+
+  const buildCookingItemEntries = (
+    menu: MenuItem | undefined,
+    existingItems?: CookingItemDetail[],
+    existingCookedFoods?: CookingInspectionRecord['cookedFoods']
+  ): CookingItemDetail[] => {
+    if (menu) {
+      const plogGrammages = resolveMenuGrammages(menu, menuIngredientsMap[menu.id] || []);
+      return plogGrammages.map(gram => {
+        const prev =
+          existingItems?.find(it => it.id === gram.id) ||
+          existingItems?.find(
+            it => it.categoryKey === gram.categoryKey && gram.categoryKey !== 'custom'
+          );
+        const slot = mapCategoryToCookedSlot(gram.categoryKey, existingCookedFoods);
+        const defaults = getCookedSlotDefaults(gram.categoryKey);
+
+        return {
+          id: gram.id,
+          categoryKey: gram.categoryKey,
+          categoryLabel: gram.categoryLabel,
+          itemName: gram.itemName,
+          smallGrams: gram.smallGrams,
+          largeGrams: gram.largeGrams,
+          grammagePhotoUrl: prev?.grammagePhotoUrl || '',
+          grammageSmallPhotoUrl: prev?.grammageSmallPhotoUrl || '',
+          grammageLargePhotoUrl: prev?.grammageLargePhotoUrl || '',
+          temp: prev?.temp ?? slot?.temp ?? defaults.temp,
+          photoUrl: prev?.photoUrl ?? slot?.photoUrl ?? defaults.photoUrl,
+          equipment: prev?.equipment ?? slot?.equipment ?? defaults.equipment,
+          session2Temp: prev?.session2Temp ?? slot?.session2Temp,
+          session2PhotoUrl: prev?.session2PhotoUrl ?? slot?.session2PhotoUrl,
+          session3Temp: prev?.session3Temp ?? slot?.session3Temp,
+          session3PhotoUrl: prev?.session3PhotoUrl ?? slot?.session3PhotoUrl,
+          notes: prev?.notes ?? slot?.notes ?? '',
+        };
+      });
+    }
+
+    const fallbackSlots: Array<{
+      categoryKey: CookingItemDetail['categoryKey'];
+      categoryLabel: string;
+      itemName: string;
+      smallGrams: number;
+      largeGrams: number;
+    }> = [
+      { categoryKey: 'stapleFood', categoryLabel: 'Makanan Pokok', itemName: 'Nasi Putih Pulen', smallGrams: 100, largeGrams: 150 },
+      { categoryKey: 'animalProtein', categoryLabel: 'Lauk Hewani', itemName: 'Lauk Hewani Utama', smallGrams: 55, largeGrams: 80 },
+      { categoryKey: 'plantProtein', categoryLabel: 'Lauk Nabati', itemName: 'Lauk Nabati', smallGrams: 40, largeGrams: 60 },
+      { categoryKey: 'vegetable', categoryLabel: 'Sayuran', itemName: 'Sayur Berkuah / Tumis', smallGrams: 60, largeGrams: 90 },
+      { categoryKey: 'fruit', categoryLabel: 'Buah Segar', itemName: 'Buah Segar', smallGrams: 80, largeGrams: 110 },
+    ];
+
+    return fallbackSlots.map(fb => {
+      const slot = mapCategoryToCookedSlot(fb.categoryKey, existingCookedFoods);
+      const defaults = getCookedSlotDefaults(fb.categoryKey);
+      return {
+        id: `fallback-${fb.categoryKey}`,
+        categoryKey: fb.categoryKey,
+        categoryLabel: fb.categoryLabel,
+        itemName: fb.itemName,
+        smallGrams: fb.smallGrams,
+        largeGrams: fb.largeGrams,
+        temp: slot?.temp ?? defaults.temp,
+        photoUrl: slot?.photoUrl ?? defaults.photoUrl,
+        equipment: slot?.equipment ?? defaults.equipment,
+        session2Temp: slot?.session2Temp,
+        session2PhotoUrl: slot?.session2PhotoUrl,
+        session3Temp: slot?.session3Temp,
+        session3PhotoUrl: slot?.session3PhotoUrl,
+        notes: slot?.notes ?? '',
+      };
+    });
+  };
+
+  const [cookingForm, setCookingForm] = useState<{
+    date: string;
+    time: string;
+    officerName: string;
+    menuId: string;
+    itemEntries: CookingItemDetail[];
+    facilityTemps: FacilityTemperatures;
+    notes: string;
+  }>({
     date: new Date().toISOString().slice(0, 10),
     time: '06:15 WIB',
     officerName: 'Suparman & Hadi Sukamto',
     menuId: '',
-    riceTemp: 93.5,
-    ricePhoto: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
-    riceEquipment: 'Rice Steamer Gas 40 Tray',
-    riceS2Temp: '' as string | number,
-    riceS2Photo: '',
-    riceS3Temp: '' as string | number,
-    riceS3Photo: '',
-    animalTemp: 84.6,
-    animalPhoto: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
-    animalEquipment: 'Wajan Penggorengan A1',
-    animalS2Temp: '' as string | number,
-    animalS2Photo: '',
-    animalS3Temp: '' as string | number,
-    animalS3Photo: '',
-    plantTemp: 82.5,
-    plantPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-    plantEquipment: 'Wajan Penggorengan A2',
-    plantS2Temp: '' as string | number,
-    plantS2Photo: '',
-    plantS3Temp: '' as string | number,
-    plantS3Photo: '',
-    vegTemp: 87.1,
-    vegPhoto: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
-    vegEquipment: 'Kettle Sup Uap 200L',
-    vegS2Temp: '' as string | number,
-    vegS2Photo: '',
-    vegS3Temp: '' as string | number,
-    vegS3Photo: '',
-    fruitTemp: 18.0,
-    fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
-    fruitEquipment: 'Meja Steril Buah & Pelengkap',
-    fruitS2Temp: '' as string | number,
-    fruitS2Photo: '',
-    fruitS3Temp: '' as string | number,
-    fruitS3Photo: '',
+    itemEntries: [],
+    facilityTemps: { ...defaultFacilityTemperatures },
     notes: 'Pemasakan inti daging ayam di atas 75°C. Minyak goreng jernih. Organoleptik aroma harum alami tanpa MSG berlebih.',
   });
 
+  const openNewCookingModal = () => {
+    setEditingCookingId(null);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const defaultMenu = menuItems.find(m => m.date === todayIso) || menuItems[0];
+    setCookingForm({
+      date: todayIso,
+      time: '06:15 WIB',
+      officerName: 'Suparman & Hadi Sukamto',
+      menuId: defaultMenu?.id || '',
+      itemEntries: buildCookingItemEntries(defaultMenu),
+      facilityTemps: { ...defaultFacilityTemperatures },
+      notes: 'Pemasakan inti daging di atas 75°C. Suhu ruangan, freezer, dan chiller terpantau sesuai standar.',
+    });
+    setIsCookingModalOpen(true);
+  };
+
+  const openEditCookingModal = (rec: CookingInspectionRecord) => {
+    setEditingCookingId(rec.id);
+    const matchedMenu =
+      (rec.menuId ? menuItems.find(m => m.id === rec.menuId) : undefined) ||
+      menuItems.find(m => m.date === rec.date) ||
+      menuItems[0];
+    setCookingForm({
+      date: rec.date,
+      time: rec.time,
+      officerName: rec.officerName,
+      menuId: matchedMenu?.id || rec.menuId || '',
+      itemEntries: buildCookingItemEntries(matchedMenu, rec.itemEntries, rec.cookedFoods),
+      facilityTemps: {
+        ...defaultFacilityTemperatures,
+        ...(rec.facilityTemps || {}),
+      },
+      notes: rec.notes || '',
+    });
+    setIsCookingModalOpen(true);
+  };
+
+  const handleCookingMenuChange = (nextMenuId: string) => {
+    const nextMenu = menuItems.find(m => m.id === nextMenuId);
+    setCookingForm(prev => ({
+      ...prev,
+      menuId: nextMenuId,
+      itemEntries: buildCookingItemEntries(nextMenu, prev.itemEntries),
+    }));
+  };
+
+  const updateCookingItemEntry = (itemId: string, patch: Partial<CookingItemDetail>) => {
+    setCookingForm(prev => ({
+      ...prev,
+      itemEntries: prev.itemEntries.map(it => (it.id === itemId ? { ...it, ...patch } : it)),
+    }));
+  };
+
   const handleSaveCooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    const toOptNum = (val: string | number) =>
-      val === '' || val === null || val === undefined ? undefined : Number(val);
     const matchedMenu =
       (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
       menuItems.find(m => m.date === cookingForm.date) ||
       menuItems[0];
 
-    await addCookingRecord({
+    // Pastikan nama item selalu tersinkron dengan data terbaru Sub-menu PLOG
+    const syncedEntries = buildCookingItemEntries(matchedMenu, cookingForm.itemEntries);
+
+    const pickSlotItem = (
+      categoryKey: CookingItemDetail['categoryKey'],
+      fallbackKey: CookingItemDetail['categoryKey']
+    ) => {
+      const found = syncedEntries.find(it => it.categoryKey === categoryKey);
+      const defaults = getCookedSlotDefaults(fallbackKey);
+      return {
+        temp: Number(found?.temp ?? defaults.temp),
+        photoUrl: found?.photoUrl || undefined,
+        equipment: found?.equipment || defaults.equipment,
+        session2Temp: found?.session2Temp !== undefined ? Number(found.session2Temp) : undefined,
+        session2PhotoUrl: found?.session2PhotoUrl || undefined,
+        session3Temp: found?.session3Temp !== undefined ? Number(found.session3Temp) : undefined,
+        session3PhotoUrl: found?.session3PhotoUrl || undefined,
+        notes: found?.notes || undefined,
+      };
+    };
+
+    const payload: Omit<CookingInspectionRecord, 'id'> = {
       date: cookingForm.date,
       time: cookingForm.time,
       officerName: cookingForm.officerName,
       menuId: matchedMenu?.id,
       cookedFoods: {
-        rice: {
-          temp: Number(cookingForm.riceTemp),
-          photoUrl: cookingForm.ricePhoto,
-          equipment: cookingForm.riceEquipment,
-          session2Temp: toOptNum(cookingForm.riceS2Temp),
-          session2PhotoUrl: cookingForm.riceS2Photo || undefined,
-          session3Temp: toOptNum(cookingForm.riceS3Temp),
-          session3PhotoUrl: cookingForm.riceS3Photo || undefined,
-        },
-        animalProtein: {
-          temp: Number(cookingForm.animalTemp),
-          photoUrl: cookingForm.animalPhoto,
-          equipment: cookingForm.animalEquipment,
-          session2Temp: toOptNum(cookingForm.animalS2Temp),
-          session2PhotoUrl: cookingForm.animalS2Photo || undefined,
-          session3Temp: toOptNum(cookingForm.animalS3Temp),
-          session3PhotoUrl: cookingForm.animalS3Photo || undefined,
-        },
-        plantProtein: {
-          temp: Number(cookingForm.plantTemp),
-          photoUrl: cookingForm.plantPhoto,
-          equipment: cookingForm.plantEquipment,
-          session2Temp: toOptNum(cookingForm.plantS2Temp),
-          session2PhotoUrl: cookingForm.plantS2Photo || undefined,
-          session3Temp: toOptNum(cookingForm.plantS3Temp),
-          session3PhotoUrl: cookingForm.plantS3Photo || undefined,
-        },
-        vegetable: {
-          temp: Number(cookingForm.vegTemp),
-          photoUrl: cookingForm.vegPhoto,
-          equipment: cookingForm.vegEquipment,
-          session2Temp: toOptNum(cookingForm.vegS2Temp),
-          session2PhotoUrl: cookingForm.vegS2Photo || undefined,
-          session3Temp: toOptNum(cookingForm.vegS3Temp),
-          session3PhotoUrl: cookingForm.vegS3Photo || undefined,
-        },
-        fruit: {
-          temp: Number(cookingForm.fruitTemp),
-          photoUrl: cookingForm.fruitPhoto,
-          equipment: cookingForm.fruitEquipment,
-          session2Temp: toOptNum(cookingForm.fruitS2Temp),
-          session2PhotoUrl: cookingForm.fruitS2Photo || undefined,
-          session3Temp: toOptNum(cookingForm.fruitS3Temp),
-          session3PhotoUrl: cookingForm.fruitS3Photo || undefined,
-        },
+        rice: pickSlotItem('stapleFood', 'stapleFood'),
+        animalProtein: pickSlotItem('animalProtein', 'animalProtein'),
+        plantProtein: pickSlotItem('plantProtein', 'plantProtein'),
+        vegetable: pickSlotItem('vegetable', 'vegetable'),
+        fruit: pickSlotItem('fruit', 'fruit'),
       },
+      itemEntries: syncedEntries,
+      facilityTemps: cookingForm.facilityTemps,
       notes: cookingForm.notes,
-    });
+    };
+
+    if (editingCookingId) {
+      await updateCookingRecord(editingCookingId, payload);
+      setSelectedCookingId(editingCookingId);
+      addToast('success', 'Data Pengolahan Diperbarui', 'Suhu item menu, suhu ruang, freezer, dan chiller berhasil disimpan.');
+    } else {
+      await addCookingRecord(payload);
+      addToast('success', 'Data Pengolahan Tersimpan', 'Log pengolahan, suhu ruangan & pendingin tersimpan.');
+    }
     setIsCookingModalOpen(false);
+    setEditingCookingId(null);
   };
 
   // -------------------------------------------------------------
@@ -363,9 +580,42 @@ export const ProductionModule: React.FC = () => {
     largePortionGrams: 585,
     smallPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
     largePhoto: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=500&q=80',
+    facilityTemps: { ...defaultFacilityTemperatures } as FacilityTemperatures,
     notes: 'Pemorsian menggunakan ompreng stainless steril bersegel silikon. Gramasi ditimbang teliti sampling per 25 boks.',
   });
   const [editingPortioningId, setEditingPortioningId] = useState<string | null>(null);
+  const [portioningCameraTarget, setPortioningCameraTarget] = useState<{
+    portionType: 'small' | 'large';
+    targetMode: 'form' | 'active_record';
+  } | null>(null);
+
+  const handlePortioningCameraCapture = async (dataUrl: string) => {
+    if (!portioningCameraTarget) return;
+    const isSmall = portioningCameraTarget.portionType === 'small';
+
+    if (portioningCameraTarget.targetMode === 'active_record' && portioningRecords[0]) {
+      await updatePortioningRecord(
+        portioningRecords[0].id,
+        isSmall ? { smallPortionPhoto: dataUrl } : { largePortionPhoto: dataUrl }
+      );
+      addToast(
+        'success',
+        'Foto Ompreng Tersimpan',
+        `Foto Ompreng ${isSmall ? 'Porsi Kecil' : 'Porsi Besar'} tersimpan & tersinkron ke Flayer Menu.`
+      );
+    } else {
+      setPortioningForm(f => ({
+        ...f,
+        ...(isSmall ? { smallPhoto: dataUrl } : { largePhoto: dataUrl }),
+      }));
+      addToast(
+        'success',
+        'Foto Ompreng Siap',
+        `Hasil crop landscape ${isSmall ? 'Porsi Kecil' : 'Porsi Besar'} dimasukkan ke form.`
+      );
+    }
+    setPortioningCameraTarget(null);
+  };
 
   const openNewPortioningModal = () => {
     setEditingPortioningId(null);
@@ -373,6 +623,7 @@ export const ProductionModule: React.FC = () => {
       ...f,
       date: new Date().toISOString().slice(0, 10),
       menuId: menuItems[0]?.id || '',
+      facilityTemps: { ...defaultFacilityTemperatures },
     }));
     setIsPortioningModalOpen(true);
   };
@@ -443,6 +694,10 @@ export const ProductionModule: React.FC = () => {
       largePortionGrams: rec.largePortionWeightGrams,
       smallPhoto: rec.smallPortionPhoto || '',
       largePhoto: rec.largePortionPhoto || '',
+      facilityTemps: {
+        ...defaultFacilityTemperatures,
+        ...(rec.facilityTemps || {}),
+      },
       notes: rec.notes || '',
     });
     setIsPortioningModalOpen(true);
@@ -538,6 +793,7 @@ export const ProductionModule: React.FC = () => {
       largePortionWeightGrams: Number(portioningForm.largePortionGrams),
       smallPortionPhoto: portioningForm.smallPhoto,
       largePortionPhoto: portioningForm.largePhoto,
+      facilityTemps: portioningForm.facilityTemps,
       notes: portioningForm.notes,
     };
 
@@ -981,20 +1237,32 @@ export const ProductionModule: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Scissors className="w-4 h-4 text-sky-600" />
-                Standar CCP & Inspeksi Bahan Rusak Divisi Persiapan
+                Standar CCP, Inspeksi Bahan Rusak, Suhu Ruang &amp; Pendingin Divisi Persiapan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu &amp; foto bahan rusak (sayur, lauk hewani, buah) pada batch persiapan harian.
+                Pencatatan suhu &amp; foto bahan rusak, suhu &amp; kelembapan ruangan (Ruang Pengolahan, Ruang Pemorsian, Gudang Basah, Gudang Kering), serta Freezer 1–2 &amp; Chiller 1–4.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsPrepModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Input Data & Foto Persiapan</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {prepRecords[0] && (
+                <button
+                  type="button"
+                  onClick={() => openEditPrepModal(prepRecords[0])}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Edit Data &amp; Foto Persiapan</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={openNewPrepModal}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Input Data & Foto Persiapan</span>
+              </button>
+            </div>
           </div>
 
           {/* Damaged Materials Cards */}
@@ -1097,6 +1365,32 @@ export const ProductionModule: React.FC = () => {
             )}
           </div>
 
+          {/* Suhu Ruang (Suhu, Kelembapan, Waktu & Foto) dan Suhu Freezer 1-2 & Chiller 1-4 (Suhu, Waktu & Foto) */}
+          {prepRecords[0] && (
+            <FacilityTempReportPanel
+              divisionLabel="Divisi Persiapan"
+              subtitleMeta={`Tanggal: ${formatIndonesianDate(prepRecords[0].date)} • Pukul ${prepRecords[0].time} • Petugas: ${prepRecords[0].officerName}`}
+              facilityTemps={prepRecords[0].facilityTemps}
+              fallbackTime={prepRecords[0].time}
+              showTimeFields={true}
+              showCoolingHumidity={false}
+              onUploadUnitPhoto={async (photoKey, dataUrl, unitLabel) => {
+                const currentTemps = prepRecords[0].facilityTemps || defaultFacilityTemperatures;
+                await updatePrepRecord(prepRecords[0].id, {
+                  facilityTemps: applyFacilityPhotoPatch(currentTemps, photoKey, dataUrl),
+                });
+                addToast(
+                  'success',
+                  'Foto Suhu Tersimpan',
+                  `Bukti foto ${unitLabel} berhasil diunggah ke log Divisi Persiapan.`
+                );
+              }}
+              onViewPhoto={url => setViewPhotoUrl(url)}
+              onOpenInputModal={() => openEditPrepModal(prepRecords[0])}
+              onUploadError={handleUploadError}
+            />
+          )}
+
           {/* Historical Prep Log Table */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -1137,165 +1431,199 @@ export const ProductionModule: React.FC = () => {
       {/* ========================================================= */}
       {/* TAB B: DIVISI PENGOLAHAN                                 */}
       {/* ========================================================= */}
-      {activeTab === 'cooking' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <CookingPot className="w-4 h-4 text-amber-600" />
-                Standar CCP Suhu Matang Masakan Divisi Pengolahan
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Pencatatan suhu &amp; foto masakan matang Sesi 1–3 (Nasi, Hewani, Nabati, Sayur, Buah) serta peralatan masak standar CCP.
-              </p>
+      {activeTab === 'cooking' && (() => {
+        const activeCooking =
+          (selectedCookingId ? cookingRecords.find(r => r.id === selectedCookingId) : undefined) ||
+          cookingRecords[0];
+        const linkedMenu = activeCooking
+          ? (activeCooking.menuId ? menuItems.find(m => m.id === activeCooking.menuId) : undefined) ||
+            menuItems.find(m => m.date === activeCooking.date) ||
+            menuItems[0]
+          : menuItems[0];
+        const liveItemEntries = activeCooking
+          ? buildCookingItemEntries(linkedMenu, activeCooking.itemEntries, activeCooking.cookedFoods)
+          : [];
+
+        return (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <CookingPot className="w-4 h-4 text-amber-600" />
+                  Input Data Pengolahan, Suhu Item Menu, Suhu Ruang &amp; Pendingin
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Nama item menu terhubung otomatis dari PLOG, dilengkapi pencatatan suhu &amp; foto Ruang Pengolahan, Ruang Pemorsian, Gudang Basah/Kering, Freezer 1–2, dan Chiller 1–4.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {activeCooking && (
+                  <button
+                    type="button"
+                    onClick={() => openEditCookingModal(activeCooking)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Edit Data &amp; Foto Pengolahan</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={openNewCookingModal}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Input Data &amp; Foto Pengolahan</span>
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsCookingModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Input Data & Foto Pengolahan</span>
-            </button>
+
+            {activeCooking && (
+              <>
+                {/* Banner Sinkronisasi Menu PLOG */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-sky-50 dark:from-amber-950/30 dark:to-sky-950/30 p-4 rounded-xl border border-amber-200/80 dark:border-amber-800/50">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="px-2 py-0.5 rounded-md font-bold bg-blue-900 text-white">
+                        {linkedMenu ? `${linkedMenu.menuCode} • ${linkedMenu.dayName}` : 'Menu Harian'}
+                      </span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        Tanggal Olah: {formatIndonesianDate(activeCooking.date)} • Pukul {activeCooking.time}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 text-[11px]">
+                        Terhubung PLOG ({liveItemEntries.length} Item Menu)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                      Petugas Pengolahan: <strong className="text-slate-800 dark:text-slate-200">{activeCooking.officerName}</strong>
+                      {activeCooking.notes ? ` — ${activeCooking.notes}` : ''}
+                    </p>
+                  </div>
+                  {cookingRecords.length > 1 && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">Pilih Log Tanggal:</label>
+                      <select
+                        value={activeCooking.id}
+                        onChange={e => setSelectedCookingId(e.target.value)}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                      >
+                        {cookingRecords.map(rec => (
+                          <option key={rec.id} value={rec.id}>
+                            {formatIndonesianDate(rec.date)} ({rec.time})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Grid Kartu Per-Item Menu: Suhu & Foto Item Menu (Sinkron PLOG) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {liveItemEntries.map((item, idx) => {
+                    const isColdOrFresh = item.categoryKey === 'fruit' || item.categoryKey === 'milkOrExtra';
+                    const isSafeTemp = isColdOrFresh ? item.temp <= 25 || item.temp >= 60 : item.temp >= 75;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between gap-3"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2 mb-1.5">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                {idx + 1}. {item.categoryLabel}
+                              </span>
+                              <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
+                                {item.itemName}
+                              </h4>
+                            </div>
+                            <span
+                              className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isColdOrFresh
+                                  ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                  : isSafeTemp
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              }`}
+                            >
+                              {isColdOrFresh ? 'Segar / Pendamping' : isSafeTemp ? 'CCP Aman ≥75°C' : 'Perlu Pantau'}
+                            </span>
+                          </div>
+
+                          {/* Suhu Matang Item Menu */}
+                          <div className="flex items-center justify-between pt-2">
+                            <div>
+                              <span className="text-[10px] text-slate-500 block">Suhu Matang Sesi 1</span>
+                              <span
+                                className={`text-2xl font-black font-mono ${
+                                  isColdOrFresh
+                                    ? 'text-blue-900 dark:text-sky-400'
+                                    : isSafeTemp
+                                    ? 'text-emerald-600'
+                                    : 'text-rose-600'
+                                }`}
+                              >
+                                {item.temp}°C
+                              </span>
+                            </div>
+                            <div className="text-right text-[10px] text-slate-500">
+                              <span className="block font-semibold text-slate-700 dark:text-slate-300">
+                                {item.equipment || 'Peralatan Standar'}
+                              </span>
+                              {(item.session2Temp !== undefined || item.session3Temp !== undefined) && (
+                                <span className="font-mono">
+                                  {item.session2Temp !== undefined ? `S2: ${item.session2Temp}°C` : ''}
+                                  {item.session2Temp !== undefined && item.session3Temp !== undefined ? ' • ' : ''}
+                                  {item.session3Temp !== undefined ? `S3: ${item.session3Temp}°C` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Dokumentasi Foto Item Menu */}
+                        {item.photoUrl && (
+                          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
+                              <Camera className="w-3 h-3 text-amber-600" /> Foto Item Menu ({item.itemName}):
+                            </span>
+                            <img
+                              src={item.photoUrl}
+                              alt={`Foto ${item.itemName}`}
+                              onClick={() => setViewPhotoUrl(item.photoUrl || null)}
+                              className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Suhu Ruang & Pendingin (Ruang Pengolahan, Ruang Pemorsian, Gudang Basah, Gudang Kering, Freezer 1-2, Chiller 1-4) */}
+                <FacilityTempReportPanel
+                  divisionLabel="Divisi Pengolahan"
+                  subtitleMeta={`Tanggal Olah: ${formatIndonesianDate(activeCooking.date)} • Pukul ${activeCooking.time} • Petugas: ${activeCooking.officerName}`}
+                  facilityTemps={activeCooking.facilityTemps}
+                  fallbackTime={activeCooking.time}
+                  showTimeFields={true}
+                  onUploadUnitPhoto={async (photoKey, dataUrl, unitLabel) => {
+                    const currentTemps = activeCooking.facilityTemps || defaultFacilityTemperatures;
+                    await updateCookingRecord(activeCooking.id, {
+                      facilityTemps: applyFacilityPhotoPatch(currentTemps, photoKey, dataUrl),
+                    });
+                    addToast('success', 'Foto Suhu Tersimpan', `Bukti foto ${unitLabel} berhasil diunggah ke log Divisi Pengolahan.`);
+                  }}
+                  onViewPhoto={url => setViewPhotoUrl(url)}
+                  onOpenInputModal={() => openEditCookingModal(activeCooking)}
+                  onUploadError={handleUploadError}
+                />
+              </>
+            )}
           </div>
-
-          {/* 5 Cooked Food Temperature Cards with Photos */}
-          {cookingRecords[0] && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-              {/* Rice */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span className="text-slate-800 dark:text-slate-200">1. Suhu Nasi Matang</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      CCP Aman
-                    </span>
-                  </div>
-                  <div className="text-2xl font-black font-mono text-emerald-600">
-                    {cookingRecords[0].cookedFoods.rice.temp}°C
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">Standar BGN: Inti steam &gt; 75°C</p>
-                </div>
-                {cookingRecords[0].cookedFoods.rice.photoUrl && (
-                  <div className="mt-3">
-                    <img
-                      src={cookingRecords[0].cookedFoods.rice.photoUrl}
-                      alt="Suhu Nasi"
-                      onClick={() => setViewPhotoUrl(cookingRecords[0].cookedFoods.rice.photoUrl || null)}
-                      className="w-full h-28 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Animal Protein */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span className="text-slate-800 dark:text-slate-200">2. Lauk Hewani</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      CCP Aman
-                    </span>
-                  </div>
-                  <div className="text-2xl font-black font-mono text-emerald-600">
-                    {cookingRecords[0].cookedFoods.animalProtein.temp}°C
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">Ayam Fillet Saus Madu (&gt; 75°C)</p>
-                </div>
-                {cookingRecords[0].cookedFoods.animalProtein.photoUrl && (
-                  <div className="mt-3">
-                    <img
-                      src={cookingRecords[0].cookedFoods.animalProtein.photoUrl}
-                      alt="Suhu Hewani"
-                      onClick={() => setViewPhotoUrl(cookingRecords[0].cookedFoods.animalProtein.photoUrl || null)}
-                      className="w-full h-28 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Plant Protein */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span className="text-slate-800 dark:text-slate-200">3. Lauk Nabati</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      CCP Aman
-                    </span>
-                  </div>
-                  <div className="text-2xl font-black font-mono text-emerald-600">
-                    {cookingRecords[0].cookedFoods.plantProtein.temp}°C
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">Tempe Bacem Gurih Karamel</p>
-                </div>
-                {cookingRecords[0].cookedFoods.plantProtein.photoUrl && (
-                  <div className="mt-3">
-                    <img
-                      src={cookingRecords[0].cookedFoods.plantProtein.photoUrl}
-                      alt="Suhu Nabati"
-                      onClick={() => setViewPhotoUrl(cookingRecords[0].cookedFoods.plantProtein.photoUrl || null)}
-                      className="w-full h-28 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Vegetable */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span className="text-slate-800 dark:text-slate-200">4. Sayur Sop</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      CCP Aman
-                    </span>
-                  </div>
-                  <div className="text-2xl font-black font-mono text-emerald-600">
-                    {cookingRecords[0].cookedFoods.vegetable.temp}°C
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">Kuah Kaldu Sayur Segar</p>
-                </div>
-                {cookingRecords[0].cookedFoods.vegetable.photoUrl && (
-                  <div className="mt-3">
-                    <img
-                      src={cookingRecords[0].cookedFoods.vegetable.photoUrl}
-                      alt="Suhu Sayur"
-                      onClick={() => setViewPhotoUrl(cookingRecords[0].cookedFoods.vegetable.photoUrl || null)}
-                      className="w-full h-28 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Fruit */}
-              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span className="text-slate-800 dark:text-slate-200">5. Suhu Buah</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800">
-                      Segar
-                    </span>
-                  </div>
-                  <div className="text-2xl font-black font-mono text-blue-900 dark:text-sky-400">
-                    {cookingRecords[0].cookedFoods.fruit.temp}°C
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-1">Pisang Cavendish Standar</p>
-                </div>
-                {cookingRecords[0].cookedFoods.fruit.photoUrl && (
-                  <div className="mt-3">
-                    <img
-                      src={cookingRecords[0].cookedFoods.fruit.photoUrl}
-                      alt="Suhu Buah"
-                      onClick={() => setViewPhotoUrl(cookingRecords[0].cookedFoods.fruit.photoUrl || null)}
-                      className="w-full h-28 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* TAB C: DIVISI PEMORSIAN                                   */}
@@ -1320,7 +1648,7 @@ export const ProductionModule: React.FC = () => {
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
                 >
                   <Camera className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Edit Foto &amp; Gramasi Aktif</span>
+                  <span>Edit Foto &amp; Suhu Aktif</span>
                 </button>
               )}
               <button
@@ -1364,19 +1692,31 @@ export const ProductionModule: React.FC = () => {
                   </p>
                 </div>
 
-                {portioningRecords[0].smallPortionPhoto && (
-                  <div className="mt-4">
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
                       <Camera className="w-3.5 h-3.5" /> Foto Ompreng Porsi Kecil:
                     </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPortioningCameraTarget({ portionType: 'small', targetMode: 'active_record' })
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Live Camera Landscape</span>
+                    </button>
+                  </div>
+                  {portioningRecords[0].smallPortionPhoto && (
                     <img
                       src={portioningRecords[0].smallPortionPhoto}
                       alt="Foto Ompreng Porsi Kecil"
                       onClick={() => setViewPhotoUrl(portioningRecords[0].smallPortionPhoto || null)}
                       className="w-full h-44 object-cover rounded-xl cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                     />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* Porsi Besar */}
@@ -1406,43 +1746,81 @@ export const ProductionModule: React.FC = () => {
                   </p>
                 </div>
 
-                {portioningRecords[0].largePortionPhoto && (
-                  <div className="mt-4">
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
                       <Camera className="w-3.5 h-3.5" /> Foto Ompreng Porsi Besar:
                     </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPortioningCameraTarget({ portionType: 'large', targetMode: 'active_record' })
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Live Camera Landscape</span>
+                    </button>
+                  </div>
+                  {portioningRecords[0].largePortionPhoto && (
                     <img
                       src={portioningRecords[0].largePortionPhoto}
                       alt="Foto Ompreng Porsi Besar"
                       onClick={() => setViewPhotoUrl(portioningRecords[0].largePortionPhoto || null)}
                       className="w-full h-44 object-cover rounded-xl cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                     />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           )}
 
           {/* Holding & Portioning Temps */}
           {portioningRecords[0] && (
-            <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                  Suhu Makanan Saat Masuk Ompreng & Fasilitas Ruangan
-                </span>
-                <span className="text-xs font-mono text-slate-500">
-                  Waktu Pemorsian: {portioningRecords[0].portioningTime} • Petugas: {portioningRecords[0].officerName}
-                </span>
+            <>
+              <div className="bg-slate-50 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                    Suhu Makanan Saat Masuk Ompreng
+                  </span>
+                  <span className="text-xs font-mono text-slate-500">
+                    Waktu Pemorsian: {portioningRecords[0].portioningTime} • Petugas: {portioningRecords[0].officerName}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {renderTempBadge('Suhu Nasi Saat Masuk', portioningRecords[0].foodTemps.rice.temp, '> 65°C', portioningRecords[0].foodTemps.rice.temp >= 65)}
+                  {renderTempBadge('Suhu Lauk Hewani', portioningRecords[0].foodTemps.animalProtein.temp, '> 65°C', portioningRecords[0].foodTemps.animalProtein.temp >= 65)}
+                  {renderTempBadge('Suhu Lauk Nabati', portioningRecords[0].foodTemps.plantProtein.temp, '> 60°C', portioningRecords[0].foodTemps.plantProtein.temp >= 60)}
+                  {renderTempBadge('Suhu Sayur Sop', portioningRecords[0].foodTemps.vegetable.temp, '> 60°C', portioningRecords[0].foodTemps.vegetable.temp >= 60)}
+                  {renderTempBadge('Suhu Buah Pisang', portioningRecords[0].foodTemps.fruit.temp, '15 - 20°C', true)}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {renderTempBadge('Suhu Nasi Saat Masuk', portioningRecords[0].foodTemps.rice.temp, '> 65°C', portioningRecords[0].foodTemps.rice.temp >= 65)}
-                {renderTempBadge('Suhu Lauk Hewani', portioningRecords[0].foodTemps.animalProtein.temp, '> 65°C', portioningRecords[0].foodTemps.animalProtein.temp >= 65)}
-                {renderTempBadge('Suhu Lauk Nabati', portioningRecords[0].foodTemps.plantProtein.temp, '> 60°C', portioningRecords[0].foodTemps.plantProtein.temp >= 60)}
-                {renderTempBadge('Suhu Sayur Sop', portioningRecords[0].foodTemps.vegetable.temp, '> 60°C', portioningRecords[0].foodTemps.vegetable.temp >= 60)}
-                {renderTempBadge('Suhu Buah Pisang', portioningRecords[0].foodTemps.fruit.temp, '15 - 20°C', true)}
-              </div>
-            </div>
+              {/* Suhu Ruang (Suhu, Kelembapan, Waktu & Foto) dan Suhu Freezer 1-2 & Chiller 1-4 (Suhu, Waktu & Foto) */}
+              <FacilityTempReportPanel
+                divisionLabel="Divisi Pemorsian"
+                subtitleMeta={`Tanggal: ${formatIndonesianDate(portioningRecords[0].date)} • Waktu Pemorsian: ${portioningRecords[0].portioningTime} • Petugas: ${portioningRecords[0].officerName}`}
+                facilityTemps={portioningRecords[0].facilityTemps}
+                fallbackTime={portioningRecords[0].time}
+                showTimeFields={true}
+                showCoolingHumidity={false}
+                onUploadUnitPhoto={async (photoKey, dataUrl, unitLabel) => {
+                  const currentTemps = portioningRecords[0].facilityTemps || defaultFacilityTemperatures;
+                  await updatePortioningRecord(portioningRecords[0].id, {
+                    facilityTemps: applyFacilityPhotoPatch(currentTemps, photoKey, dataUrl),
+                  });
+                  addToast(
+                    'success',
+                    'Foto Suhu Tersimpan',
+                    `Bukti foto ${unitLabel} berhasil diunggah ke log Divisi Pemorsian.`
+                  );
+                }}
+                onViewPhoto={url => setViewPhotoUrl(url)}
+                onOpenInputModal={() => openEditPortioningModal(portioningRecords[0])}
+                onUploadError={handleUploadError}
+              />
+            </>
           )}
         </div>
       )}
@@ -2106,9 +2484,16 @@ export const ProductionModule: React.FC = () => {
       {isPrepModalOpen && (
         <Modal
           isOpen={isPrepModalOpen}
-          onClose={() => setIsPrepModalOpen(false)}
-          title="Input Data Inspeksi Bahan Rusak & Suhu Divisi Persiapan"
-          maxWidth="xl"
+          onClose={() => {
+            setIsPrepModalOpen(false);
+            setEditingPrepId(null);
+          }}
+          title={
+            editingPrepId
+              ? 'Edit Data Bahan Rusak, Suhu Ruang, Pendingin & Foto Divisi Persiapan'
+              : 'Input Data Inspeksi Bahan Rusak, Suhu Ruang & Pendingin Divisi Persiapan'
+          }
+          maxWidth="4xl"
         >
           <form onSubmit={handleSavePrep} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2323,6 +2708,18 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
+            {/* Input Data & Upload Foto Suhu Ruang (Suhu, Kelembapan, Waktu) + Freezer 1-2 & Chiller 1-4 (Suhu, Waktu) */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Persiapan"
+              value={prepForm.facilityTemps}
+              fallbackTime={prepForm.time}
+              showTimeFields={true}
+              showCoolingHumidity={false}
+              onChange={next => setPrepForm(f => ({ ...f, facilityTemps: next }))}
+              onViewPhoto={url => setViewPhotoUrl(url)}
+              onUploadError={handleUploadError}
+            />
+
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan</label>
               <textarea
@@ -2358,11 +2755,19 @@ export const ProductionModule: React.FC = () => {
       {isCookingModalOpen && (
         <Modal
           isOpen={isCookingModalOpen}
-          onClose={() => setIsCookingModalOpen(false)}
-          title="Input Data Suhu Makanan Matang Divisi Pengolahan"
-          maxWidth="xl"
+          onClose={() => {
+            setIsCookingModalOpen(false);
+            setEditingCookingId(null);
+          }}
+          title={
+            editingCookingId
+              ? 'Edit Data Pengolahan, Suhu Item Menu, Ruang & Pendingin'
+              : 'Input Data Divisi Pengolahan (Suhu Menu, Ruang & Pendingin)'
+          }
+          maxWidth="4xl"
         >
-          <form onSubmit={handleSaveCooking} className="space-y-4 text-xs">
+          <form onSubmit={handleSaveCooking} className="space-y-5 text-xs">
+            {/* Header Info & Pemilihan Menu PLOG */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Tanggal</label>
@@ -2414,7 +2819,7 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Menu Harian (Master Menu)
+                  Menu Harian PLOG (Sumber Nama Item)
                 </label>
                 <select
                   value={
@@ -2423,7 +2828,7 @@ export const ProductionModule: React.FC = () => {
                     menuItems[0]?.id ||
                     ''
                   }
-                  onChange={e => setCookingForm(f => ({ ...f, menuId: e.target.value }))}
+                  onChange={e => handleCookingMenuChange(e.target.value)}
                   className="w-full px-2.5 py-2 border rounded-lg bg-slate-50 dark:bg-slate-800 dark:border-slate-700 text-[11px] font-semibold"
                 >
                   {menuItems.map(m => (
@@ -2432,155 +2837,168 @@ export const ProductionModule: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetId =
+                      cookingForm.menuId ||
+                      menuItems.find(m => m.date === cookingForm.date)?.id ||
+                      menuItems[0]?.id ||
+                      '';
+                    if (targetId) handleCookingMenuChange(targetId);
+                    addToast('info', 'Sinkronisasi PLOG', 'Nama item menu disinkronkan ulang dari Sub-Menu PLOG.');
+                  }}
+                  className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 dark:text-sky-400 hover:underline"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Sinkron Ulang Item Menu dari PLOG</span>
+                </button>
               </div>
             </div>
 
-            {/* Suhu Makanan Matang 5 Jenis (Sesi 1, Sesi 2, Sesi 3 + Peralatan Masak) */}
-            {(() => {
-              const selectedMenu =
-                (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
-                menuItems.find(m => m.date === cookingForm.date) ||
-                menuItems[0];
-
-              const foodFields = [
-                {
-                  label: '1. Makanan Pokok (Nasi)',
-                  menuTitle: selectedMenu?.stapleFood || '-',
-                  tempKey: 'riceTemp' as const,
-                  photoKey: 'ricePhoto' as const,
-                  equipKey: 'riceEquipment' as const,
-                  s2TempKey: 'riceS2Temp' as const,
-                  s2PhotoKey: 'riceS2Photo' as const,
-                  s3TempKey: 'riceS3Temp' as const,
-                  s3PhotoKey: 'riceS3Photo' as const,
-                },
-                {
-                  label: '2. Lauk Hewani',
-                  menuTitle: selectedMenu?.animalProtein || '-',
-                  tempKey: 'animalTemp' as const,
-                  photoKey: 'animalPhoto' as const,
-                  equipKey: 'animalEquipment' as const,
-                  s2TempKey: 'animalS2Temp' as const,
-                  s2PhotoKey: 'animalS2Photo' as const,
-                  s3TempKey: 'animalS3Temp' as const,
-                  s3PhotoKey: 'animalS3Photo' as const,
-                },
-                {
-                  label: '3. Lauk Nabati',
-                  menuTitle: selectedMenu?.plantProtein || '-',
-                  tempKey: 'plantTemp' as const,
-                  photoKey: 'plantPhoto' as const,
-                  equipKey: 'plantEquipment' as const,
-                  s2TempKey: 'plantS2Temp' as const,
-                  s2PhotoKey: 'plantS2Photo' as const,
-                  s3TempKey: 'plantS3Temp' as const,
-                  s3PhotoKey: 'plantS3Photo' as const,
-                },
-                {
-                  label: '4. Sayur',
-                  menuTitle: selectedMenu?.vegetable || '-',
-                  tempKey: 'vegTemp' as const,
-                  photoKey: 'vegPhoto' as const,
-                  equipKey: 'vegEquipment' as const,
-                  s2TempKey: 'vegS2Temp' as const,
-                  s2PhotoKey: 'vegS2Photo' as const,
-                  s3TempKey: 'vegS3Temp' as const,
-                  s3PhotoKey: 'vegS3Photo' as const,
-                },
-                {
-                  label: '5. Lainnya / Buah',
-                  menuTitle: selectedMenu?.fruit || selectedMenu?.milkOrExtra || '-',
-                  tempKey: 'fruitTemp' as const,
-                  photoKey: 'fruitPhoto' as const,
-                  equipKey: 'fruitEquipment' as const,
-                  s2TempKey: 'fruitS2Temp' as const,
-                  s2PhotoKey: 'fruitS2Photo' as const,
-                  s3TempKey: 'fruitS3Temp' as const,
-                  s3PhotoKey: 'fruitS3Photo' as const,
-                },
-              ];
-
-              return (
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
-                  <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+            {/* BAGIAN 1: INPUT DATA SUHU & FOTO ITEM MENU (NAMA ITEM TERHUBUNG PLOG) */}
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
                     <CookingPot className="w-4 h-4 text-amber-500" />
-                    Input Suhu, Peralatan &amp; Dokumentasi Sesi 1–3 (Standar Inti ≥ 75°C)
+                    1. Input Data Suhu &amp; Foto Item Menu (Sesi 1–3, Standar Inti ≥ 75°C)
                   </span>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-                    {foodFields.map(ff => (
-                      <div key={ff.tempKey} className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
-                        <div>
-                          <label className="block font-bold text-slate-800 dark:text-slate-100">{ff.label}</label>
-                          <p className="text-[10px] text-blue-700 dark:text-sky-400 font-medium line-clamp-1" title={ff.menuTitle}>
-                            Menu: {ff.menuTitle}
-                          </p>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-semibold">Peralatan Masak</label>
-                          <input
-                            type="text"
-                            value={cookingForm[ff.equipKey]}
-                            onChange={e => setCookingForm(f => ({ ...f, [ff.equipKey]: e.target.value }))}
-                            className="w-full px-2 py-1 border rounded text-[11px] dark:bg-slate-800"
-                          />
-                        </div>
-                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
-                          <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">Sesi 1 (°C &amp; Foto)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={cookingForm[ff.tempKey]}
-                            onChange={e => setCookingForm(f => ({ ...f, [ff.tempKey]: Number(e.target.value) }))}
-                            className="w-full px-2 py-1 border rounded font-mono text-xs dark:bg-slate-800 mt-0.5"
-                          />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.photoKey]: url })))}
-                            className="w-full text-[10px] mt-1"
-                          />
-                        </div>
-                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
-                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 2 (Opsional)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            placeholder="Suhu Sesi 2 (°C)"
-                            value={cookingForm[ff.s2TempKey]}
-                            onChange={e => setCookingForm(f => ({ ...f, [ff.s2TempKey]: e.target.value }))}
-                            className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 mt-0.5"
-                          />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.s2PhotoKey]: url })))}
-                            className="w-full text-[10px] mt-1"
-                          />
-                        </div>
-                        <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
-                          <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 3 (Opsional)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            placeholder="Suhu Sesi 3 (°C)"
-                            value={cookingForm[ff.s3TempKey]}
-                            onChange={e => setCookingForm(f => ({ ...f, [ff.s3TempKey]: e.target.value }))}
-                            className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 mt-0.5"
-                          />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => handleFileUpload(e, url => setCookingForm(f => ({ ...f, [ff.s3PhotoKey]: url })))}
-                            className="w-full text-[10px] mt-1"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Nama item menu otomatis mengikuti item yang diinput oleh PLOG pada menu harian terpilih.
+                  </p>
                 </div>
-              );
-            })()}
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300 self-start">
+                  Nama Item Sinkron PLOG
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {cookingForm.itemEntries.map((entry, idx) => (
+                  <div
+                    key={`temp-${entry.id}`}
+                    className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2"
+                  >
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                        {idx + 1}. {entry.categoryLabel}
+                      </span>
+                      <span
+                        className="text-xs font-bold text-blue-900 dark:text-sky-400 block truncate"
+                        title={entry.itemName}
+                      >
+                        {entry.itemName}
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-slate-500 font-semibold">Peralatan Masak</label>
+                      <input
+                        type="text"
+                        value={entry.equipment || ''}
+                        onChange={e => updateCookingItemEntry(entry.id, { equipment: e.target.value })}
+                        className="w-full px-2 py-1 border rounded text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
+                      />
+                    </div>
+
+                    <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">
+                        Sesi 1: Suhu (°C) &amp; Foto Item Menu
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={entry.temp}
+                        onChange={e => updateCookingItemEntry(entry.id, { temp: Number(e.target.value) })}
+                        className="w-full px-2 py-1 border rounded font-mono text-xs dark:bg-slate-800 dark:border-slate-700"
+                      />
+                      <div className="flex items-center gap-2">
+                        {entry.photoUrl && (
+                          <img
+                            src={entry.photoUrl}
+                            alt={`Foto ${entry.itemName}`}
+                            onClick={() => setViewPhotoUrl(entry.photoUrl || null)}
+                            className="w-11 h-11 rounded object-cover border border-slate-300 shrink-0 cursor-pointer"
+                          />
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e =>
+                            handleFileUpload(e, url => updateCookingItemEntry(entry.id, { photoUrl: url }))
+                          }
+                          className="w-full text-[10px]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                          Sesi 2 (°C)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Opsional"
+                          value={entry.session2Temp ?? ''}
+                          onChange={e =>
+                            updateCookingItemEntry(entry.id, {
+                              session2Temp: e.target.value === '' ? undefined : Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
+                        />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e =>
+                            handleFileUpload(e, url => updateCookingItemEntry(entry.id, { session2PhotoUrl: url }))
+                          }
+                          className="w-full text-[9px] mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                          Sesi 3 (°C)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Opsional"
+                          value={entry.session3Temp ?? ''}
+                          onChange={e =>
+                            updateCookingItemEntry(entry.id, {
+                              session3Temp: e.target.value === '' ? undefined : Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
+                        />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e =>
+                            handleFileUpload(e, url => updateCookingItemEntry(entry.id, { session3PhotoUrl: url }))
+                          }
+                          className="w-full text-[9px] mt-1"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* BAGIAN 2 & 3: INPUT DATA & UPLOAD FOTO SUHU RUANG + FREEZER 1-2 & CHILLER 1-4 (DENGAN KOLOM WAKTU) */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Pengolahan"
+              value={cookingForm.facilityTemps}
+              fallbackTime={cookingForm.time}
+              showTimeFields={true}
+              onChange={next => setCookingForm(f => ({ ...f, facilityTemps: next }))}
+              onViewPhoto={url => setViewPhotoUrl(url)}
+              onUploadError={handleUploadError}
+            />
 
             <div>
               <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Catatan Keterangan Pengolahan</label>
@@ -2595,7 +3013,10 @@ export const ProductionModule: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 type="button"
-                onClick={() => setIsCookingModalOpen(false)}
+                onClick={() => {
+                  setIsCookingModalOpen(false);
+                  setEditingCookingId(null);
+                }}
                 className="px-4 py-2 border rounded-xl text-slate-700 dark:text-slate-300"
               >
                 Batal
@@ -2604,7 +3025,7 @@ export const ProductionModule: React.FC = () => {
                 type="submit"
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold"
               >
-                Simpan Log Divisi Pengolahan
+                {editingCookingId ? 'Simpan Perubahan Data Pengolahan' : 'Simpan Log Divisi Pengolahan'}
               </button>
             </div>
           </form>
@@ -2623,10 +3044,10 @@ export const ProductionModule: React.FC = () => {
           }}
           title={
             editingPortioningId
-              ? 'Edit Data Gramasi, Suhu & Foto Divisi Pemorsian'
-              : 'Input Data Gramasi & Suhu Divisi Pemorsian'
+              ? 'Edit Data Suhu, Ruangan, Pendingin & Foto Divisi Pemorsian'
+              : 'Input Data Suhu, Ruangan, Pendingin & Foto Divisi Pemorsian'
           }
-          maxWidth="xl"
+          maxWidth="4xl"
         >
           <form onSubmit={handleSavePortioning} className="space-y-4 text-xs">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -2707,93 +3128,124 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Gramasi & Foto Ompreng */}
+            {/* Upload Foto Ompreng Porsi Kecil & Porsi Besar (Sinkron Otomatis dengan Flyer Menu) */}
             <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 space-y-3">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Scale className="w-4 h-4 text-purple-600" />
-                Penimbangan Sampling Gramasi Total &amp; Upload Foto Ompreng
-              </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                  <Camera className="w-4 h-4 text-purple-600" />
+                  Upload Foto Ompreng Porsi Kecil &amp; Porsi Besar (Sinkron Flyer Menu)
+                </span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  Live Camera Panduan Ompreng Landscape
+                </span>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Porsi Kecil */}
-                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2">
+                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-slate-800 dark:text-slate-200">Porsi Kecil (Target 380-410g)</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">Ompreng Porsi Kecil</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                       Sinkron Flyer Menu
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="1"
-                      value={portioningForm.smallPortionGrams}
-                      onChange={e => setPortioningForm(f => ({ ...f, smallPortionGrams: Number(e.target.value) }))}
-                      className="w-32 px-2 py-1.5 border rounded font-mono font-bold dark:bg-slate-800"
-                    />
-                    <span className="text-slate-500 font-bold">gram</span>
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPortioningCameraTarget({ portionType: 'small', targetMode: 'form' })}
+                    className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-xs transition"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Buka Live Camera Ompreng (Landscape)</span>
+                  </button>
+
                   <div className="flex items-center gap-2.5 pt-1">
                     {portioningForm.smallPhoto && (
                       <img
                         src={portioningForm.smallPhoto}
                         alt="Preview Porsi Kecil"
-                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0"
+                        onClick={() => setViewPhotoUrl(portioningForm.smallPhoto || null)}
+                        className="w-20 h-14 rounded-lg object-cover border border-slate-300 shrink-0 cursor-pointer"
                       />
                     )}
-                    <div className="flex-1 min-w-0">
-                      <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Kecil:</label>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <label className="block text-slate-500 text-[10px]">
+                        Atau Upload File / Kamera Bawaan:
+                      </label>
                       <input
                         type="file"
                         accept="image/*"
+                        capture="environment"
                         onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, smallPhoto: url })))}
                         className="w-full text-[10px]"
                       />
+                      {portioningForm.smallPhoto && (
+                        <button
+                          type="button"
+                          onClick={() => setPortioningForm(f => ({ ...f, smallPhoto: '' }))}
+                          className="text-[10px] text-rose-600 hover:underline font-semibold"
+                        >
+                          Hapus Foto Porsi Kecil
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Porsi Besar */}
-                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2">
+                <div className="p-3 rounded-lg border bg-white dark:bg-slate-900 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-slate-800 dark:text-slate-200">Porsi Besar (Target 560-600g)</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">Ompreng Porsi Besar</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
                       Sinkron Flyer Menu
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="1"
-                      value={portioningForm.largePortionGrams}
-                      onChange={e => setPortioningForm(f => ({ ...f, largePortionGrams: Number(e.target.value) }))}
-                      className="w-32 px-2 py-1.5 border rounded font-mono font-bold dark:bg-slate-800"
-                    />
-                    <span className="text-slate-500 font-bold">gram</span>
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPortioningCameraTarget({ portionType: 'large', targetMode: 'form' })}
+                    className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-blue-800 to-indigo-700 hover:from-blue-900 hover:to-indigo-800 text-white text-xs font-bold shadow-xs transition"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Buka Live Camera Ompreng (Landscape)</span>
+                  </button>
+
                   <div className="flex items-center gap-2.5 pt-1">
                     {portioningForm.largePhoto && (
                       <img
                         src={portioningForm.largePhoto}
                         alt="Preview Porsi Besar"
-                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0"
+                        onClick={() => setViewPhotoUrl(portioningForm.largePhoto || null)}
+                        className="w-20 h-14 rounded-lg object-cover border border-slate-300 shrink-0 cursor-pointer"
                       />
                     )}
-                    <div className="flex-1 min-w-0">
-                      <label className="block text-slate-500 text-[11px] mb-0.5">Upload Foto Ompreng Porsi Besar:</label>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <label className="block text-slate-500 text-[10px]">
+                        Atau Upload File / Kamera Bawaan:
+                      </label>
                       <input
                         type="file"
                         accept="image/*"
+                        capture="environment"
                         onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, largePhoto: url })))}
                         className="w-full text-[10px]"
                       />
+                      {portioningForm.largePhoto && (
+                        <button
+                          type="button"
+                          onClick={() => setPortioningForm(f => ({ ...f, largePhoto: '' }))}
+                          className="text-[10px] text-rose-600 hover:underline font-semibold"
+                        >
+                          Hapus Foto Porsi Besar
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Standar Porsi (Berat Mentah, Faktor Konversi, Berat Matang) & Suhu/Dokumentasi Sesi 1-3 */}
+            {/* Input Suhu & Dokumentasi Sesi 1 per Item Menu */}
             {(() => {
               const selectedMenu =
                 (portioningForm.menuId ? menuItems.find(m => m.id === portioningForm.menuId) : undefined) ||
@@ -2804,80 +3256,38 @@ export const ProductionModule: React.FC = () => {
                 {
                   label: '1. Makanan Pokok (p besar)',
                   menuTitle: selectedMenu?.stapleFood || '-',
-                  rawKey: 'riceRawLarge' as const,
-                  factorKey: 'riceFactorLarge' as const,
-                  cookedKey: 'riceCookedLarge' as const,
                   s1TempKey: 'riceTemp' as const,
                   s1PhotoKey: 'ricePhoto' as const,
-                  s2TempKey: 'riceS2Temp' as const,
-                  s2PhotoKey: 'riceS2Photo' as const,
-                  s3TempKey: 'riceS3Temp' as const,
-                  s3PhotoKey: 'riceS3Photo' as const,
                 },
                 {
                   label: '1b. Makanan Pokok (p kecil)',
                   menuTitle: selectedMenu?.stapleFood || '-',
-                  rawKey: 'riceRawSmall' as const,
-                  factorKey: 'riceFactorSmall' as const,
-                  cookedKey: 'riceCookedSmall' as const,
                   s1TempKey: 'riceSmallS1Temp' as const,
                   s1PhotoKey: 'riceSmallS1Photo' as const,
-                  s2TempKey: 'riceSmallS2Temp' as const,
-                  s2PhotoKey: 'riceSmallS2Photo' as const,
-                  s3TempKey: 'riceSmallS3Temp' as const,
-                  s3PhotoKey: 'riceSmallS3Photo' as const,
                 },
                 {
                   label: '2. Lauk Hewani',
                   menuTitle: selectedMenu?.animalProtein || '-',
-                  rawKey: 'animalRaw' as const,
-                  factorKey: 'animalFactor' as const,
-                  cookedKey: 'animalCooked' as const,
                   s1TempKey: 'animalTemp' as const,
                   s1PhotoKey: 'animalPhoto' as const,
-                  s2TempKey: 'animalS2Temp' as const,
-                  s2PhotoKey: 'animalS2Photo' as const,
-                  s3TempKey: 'animalS3Temp' as const,
-                  s3PhotoKey: 'animalS3Photo' as const,
                 },
                 {
                   label: '3. Lauk Nabati',
                   menuTitle: selectedMenu?.plantProtein || '-',
-                  rawKey: 'plantRaw' as const,
-                  factorKey: 'plantFactor' as const,
-                  cookedKey: 'plantCooked' as const,
                   s1TempKey: 'plantTemp' as const,
                   s1PhotoKey: 'plantPhoto' as const,
-                  s2TempKey: 'plantS2Temp' as const,
-                  s2PhotoKey: 'plantS2Photo' as const,
-                  s3TempKey: 'plantS3Temp' as const,
-                  s3PhotoKey: 'plantS3Photo' as const,
                 },
                 {
                   label: '4. Sayur',
                   menuTitle: selectedMenu?.vegetable || '-',
-                  rawKey: 'vegRaw' as const,
-                  factorKey: 'vegFactor' as const,
-                  cookedKey: 'vegCooked' as const,
                   s1TempKey: 'vegTemp' as const,
                   s1PhotoKey: 'vegPhoto' as const,
-                  s2TempKey: 'vegS2Temp' as const,
-                  s2PhotoKey: 'vegS2Photo' as const,
-                  s3TempKey: 'vegS3Temp' as const,
-                  s3PhotoKey: 'vegS3Photo' as const,
                 },
                 {
                   label: '5. Buah',
                   menuTitle: selectedMenu?.fruit || selectedMenu?.milkOrExtra || '-',
-                  rawKey: 'fruitRaw' as const,
-                  factorKey: 'fruitFactor' as const,
-                  cookedKey: 'fruitCooked' as const,
                   s1TempKey: 'fruitTemp' as const,
                   s1PhotoKey: 'fruitPhoto' as const,
-                  s2TempKey: 'fruitS2Temp' as const,
-                  s2PhotoKey: 'fruitS2Photo' as const,
-                  s3TempKey: 'fruitS3Temp' as const,
-                  s3PhotoKey: 'fruitS3Photo' as const,
                 },
               ];
 
@@ -2885,116 +3295,79 @@ export const ProductionModule: React.FC = () => {
                 <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50/70 dark:bg-slate-800/30">
                   <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                     <Thermometer className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                    Standar Porsi (Berat Mentah, Faktor Konversi, Berat Matang) &amp; Suhu Pemorsian Sesi 1–3
+                    Input Suhu &amp; Dokumentasi Item Menu Saat Pemorsian (Sesi 1)
                   </span>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {portionCategories.map(pc => (
-                      <div key={pc.label} className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
-                        <div>
-                          <label className="block font-bold text-slate-800 dark:text-slate-100">{pc.label}</label>
-                          <p className="text-[10px] text-blue-700 dark:text-sky-400 font-medium line-clamp-1" title={pc.menuTitle}>
-                            Menu: {pc.menuTitle} • Danger Zone: 60-5°C
-                          </p>
-                        </div>
+                    {portionCategories.map(pc => {
+                      const currentPhoto = portioningForm[pc.s1PhotoKey];
+                      return (
+                        <div key={pc.label} className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                          <div>
+                            <label className="block font-bold text-slate-800 dark:text-slate-100">{pc.label}</label>
+                            <p className="text-[10px] text-blue-700 dark:text-sky-400 font-medium line-clamp-1" title={pc.menuTitle}>
+                              Menu: {pc.menuTitle} • Danger Zone: 60-5°C
+                            </p>
+                          </div>
 
-                        <div className="grid grid-cols-3 gap-1.5">
-                          <div>
-                            <label className="block text-[10px] text-slate-500">Mentah (g)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={portioningForm[pc.rawKey]}
-                              onChange={e => setPortioningForm(f => ({ ...f, [pc.rawKey]: Number(e.target.value) }))}
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-slate-500">F. Konversi</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={portioningForm[pc.factorKey]}
-                              onChange={e => setPortioningForm(f => ({ ...f, [pc.factorKey]: Number(e.target.value) }))}
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-slate-500">Matang (g)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={portioningForm[pc.cookedKey]}
-                              onChange={e => setPortioningForm(f => ({ ...f, [pc.cookedKey]: Number(e.target.value) }))}
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">Sesi 1 (°C)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              placeholder="°C"
-                              value={portioningForm[pc.s1TempKey]}
-                              onChange={e =>
-                                setPortioningForm(f => ({
-                                  ...f,
-                                  [pc.s1TempKey]: pc.s1TempKey === 'riceSmallS1Temp' ? e.target.value : Number(e.target.value),
-                                }))
-                              }
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s1PhotoKey]: url })))}
-                              className="w-full text-[9px] mt-1"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 2 (°C)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              placeholder="Opsional"
-                              value={portioningForm[pc.s2TempKey]}
-                              onChange={e => setPortioningForm(f => ({ ...f, [pc.s2TempKey]: e.target.value }))}
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s2PhotoKey]: url })))}
-                              className="w-full text-[9px] mt-1"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">Sesi 3 (°C)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              placeholder="Opsional"
-                              value={portioningForm[pc.s3TempKey]}
-                              onChange={e => setPortioningForm(f => ({ ...f, [pc.s3TempKey]: e.target.value }))}
-                              className="w-full px-1.5 py-1 border rounded font-mono text-[11px] dark:bg-slate-800"
-                            />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s3PhotoKey]: url })))}
-                              className="w-full text-[9px] mt-1"
-                            />
+                          <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
+                                Suhu Pemorsian (°C)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                placeholder="°C"
+                                value={portioningForm[pc.s1TempKey]}
+                                onChange={e =>
+                                  setPortioningForm(f => ({
+                                    ...f,
+                                    [pc.s1TempKey]: pc.s1TempKey === 'riceSmallS1Temp' ? e.target.value : Number(e.target.value),
+                                  }))
+                                }
+                                className="w-full px-2.5 py-1.5 border rounded-md font-mono text-xs dark:bg-slate-800 dark:border-slate-700"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {currentPhoto && (
+                                <img
+                                  src={currentPhoto}
+                                  alt={`Foto ${pc.label}`}
+                                  onClick={() => setViewPhotoUrl(currentPhoto || null)}
+                                  className="w-11 h-11 rounded object-cover border border-slate-300 shrink-0 cursor-pointer"
+                                />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <label className="block text-[10px] text-slate-500 mb-0.5">Upload Foto Item:</label>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={e => handleFileUpload(e, url => setPortioningForm(f => ({ ...f, [pc.s1PhotoKey]: url })))}
+                                  className="w-full text-[10px]"
+                                />
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
             })()}
+
+            {/* Input Data & Upload Foto Suhu Ruang (Suhu, Kelembapan, Waktu) + Freezer 1-2 & Chiller 1-4 (Suhu, Waktu) */}
+            <FacilityTempModalGrid
+              divisionLabel="Divisi Pemorsian"
+              value={portioningForm.facilityTemps}
+              fallbackTime={portioningForm.time}
+              showTimeFields={true}
+              showCoolingHumidity={false}
+              onChange={next => setPortioningForm(f => ({ ...f, facilityTemps: next }))}
+              onViewPhoto={url => setViewPhotoUrl(url)}
+              onUploadError={handleUploadError}
+            />
 
             <div>
               <label className="block font-bold mb-1">Catatan Keterangan Pemorsian</label>
@@ -3921,6 +4294,17 @@ export const ProductionModule: React.FC = () => {
           })()}
         </Modal>
       )}
+
+      {/* ===================================================================== */}
+      {/* MODAL: LIVE CAMERA DOKUMENTASI OMPRENG (LANDSCAPE TRAY-GUIDED CAMERA) */}
+      {/* ===================================================================== */}
+      <LandscapeTrayCameraModal
+        isOpen={Boolean(portioningCameraTarget)}
+        onClose={() => setPortioningCameraTarget(null)}
+        onCapture={handlePortioningCameraCapture}
+        portionLabel={portioningCameraTarget?.portionType === 'small' ? 'Porsi Kecil' : 'Porsi Besar'}
+        locationLabel={sppgConfig.sppgName || 'Dapur SPPG TMG2'}
+      />
     </div>
   );
 };

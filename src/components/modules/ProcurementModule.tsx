@@ -75,8 +75,10 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Link2,
 } from 'lucide-react';
 import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
+import { computeMenuAggregatedNeeds } from '../../lib/supplyChainSync';
 
 type SubModuleTab = 'rab' | 'purchase_order' | 'quality_control';
 
@@ -174,12 +176,29 @@ export const ProcurementModule: React.FC = () => {
     qualityControlRecords,
     addQualityControlRecord,
     updateQualityControlRecord,
+    syncAllMenuNeedsToRAB,
+    menuItems,
+    menuIngredientsMap,
+    institutions,
     dynamicFormSchemas,
   } = useApp();
 
   const criticalInventoryCount = useMemo(
     () => inventory.filter(i => i.currentStock <= i.minimumStock).length,
     [inventory]
+  );
+
+  const menuPlannedNeeds = useMemo(
+    () =>
+      computeMenuAggregatedNeeds({
+        menuItems,
+        menuIngredientsMap,
+        masterUnits,
+        institutions,
+        inventory,
+        masterBahan,
+      }),
+    [menuItems, menuIngredientsMap, masterUnits, institutions, inventory, masterBahan]
   );
 
   const unitOptions = useMemo(
@@ -219,33 +238,34 @@ export const ProcurementModule: React.FC = () => {
     status: 'Menunggu Persetujuan',
     poCreatedQuantity: 0,
     poCreatedAmount: 0,
+    sourceType: 'menu_planning',
     customFields: {},
   });
 
-  // --- STATE SUBMODUL B: PURCHASE ORDER (PO) ---
+  // --- STATE SUBMODUL B: PURCHASE ORDER (PO TERIKAT RAB) ---
   const [isCreatePOOpen, setIsCreatePOOpen] = useState(false);
   const [selectedPOForDetail, setSelectedPOForDetail] = useState<PurchaseOrder | null>(null);
   const [isPODetailOpen, setIsPODetailOpen] = useState(false);
   const [filterPOStatus, setFilterPOStatus] = useState<string>('ALL');
 
-  // Form State for Creating PO from Approved RAB
-  const [selectedRABIdForPO, setSelectedRABIdForPO] = useState<string>('');
+  // Multi-item Form State for Creating PO strictly from Approved RAB
+  interface PODraftLine {
+    key: string;
+    rabId: string;
+    quantity: number;
+    unitPrice: number;
+  }
+  const [poDraftLines, setPoDraftLines] = useState<PODraftLine[]>([]);
   const [poFormSupplierName, setPoFormSupplierName] = useState<string>('');
   const [poFormDeliveryDate, setPoFormDeliveryDate] = useState<string>('2026-11-10');
-  const [poFormQuantity, setPoFormQuantity] = useState<number>(100);
-  const [poFormUnitPrice, setPoFormUnitPrice] = useState<number>(0);
   const [poFormNotes, setPoFormNotes] = useState<string>('');
 
-  // --- STATE SUBMODUL C: QUALITY CONTROL (QC) (Synced with Global Store) ---
+  // --- STATE SUBMODUL C: QUALITY CONTROL (QC) (Wajib Terikat Purchase Order) ---
   const qcList = qualityControlRecords;
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
+  const [editingQCRecord, setEditingQCRecord] = useState<QualityControlRecord | null>(null);
   const [selectedPOForQC, setSelectedPOForQC] = useState<PurchaseOrder | null>(null);
-  const [qcEntrySourceMode, setQcEntrySourceMode] = useState<'po' | 'manual'>('po');
   const [qcSelectedPOId, setQcSelectedPOId] = useState<string>('');
-  const [qcManualPONumber, setQcManualPONumber] = useState<string>('');
-  const [qcManualSupplierName, setQcManualSupplierName] = useState<string>(
-    masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar'
-  );
   const [qcItemDrafts, setQcItemDrafts] = useState<QCModalItemDraft[]>([]);
   const [qcFormInspector, setQcFormInspector] = useState<string>(currentUser.name);
 
@@ -298,28 +318,87 @@ export const ProcurementModule: React.FC = () => {
     return rabList.filter(i => i.status === 'Disetujui');
   }, [rabList]);
 
-  // Selected RAB for PO creation
-  const targetRABForPO = useMemo(() => {
-    return rabList.find(i => i.id === selectedRABIdForPO) || approvedRABItems[0];
-  }, [rabList, selectedRABIdForPO, approvedRABItems]);
+  const eligibleRABItemsForPO = useMemo(() => {
+    return approvedRABItems.filter(r => r.volume - (r.poCreatedQuantity || 0) > 0);
+  }, [approvedRABItems]);
 
-  // Remaining allowable volume & budget for the target RAB
-  const targetRABRemainingQty = useMemo(() => {
-    if (!targetRABForPO) return 0;
-    const used = targetRABForPO.poCreatedQuantity || 0;
-    return Math.max(0, targetRABForPO.volume - used);
-  }, [targetRABForPO]);
+  // Validasi multi-item PO lines against each RAB's remaining quota & budget
+  const poDraftValidation = useMemo(() => {
+    if (poDraftLines.length === 0) {
+      return {
+        isInvalid: true,
+        errorMessage: 'Tambahkan minimal 1 item RAB untuk diterbitkan menjadi PO.',
+        totalAmount: 0,
+      };
+    }
 
-  const targetRABRemainingAmount = useMemo(() => {
-    if (!targetRABForPO) return 0;
-    const used = targetRABForPO.poCreatedAmount || 0;
-    return Math.max(0, targetRABForPO.totalBudget - used);
-  }, [targetRABForPO]);
+    const usedQtyByRab = new Map<string, number>();
+    const usedAmtByRab = new Map<string, number>();
+    let totalAmount = 0;
 
-  // Strict Validation: Jangan mengizinkan PO melampaui jumlah atau anggaran yang disetujui tanpa otorisasi!
-  const isPOExceedingVolume = poFormQuantity > targetRABRemainingQty;
-  const isPOExceedingBudget = poFormQuantity * (poFormUnitPrice || targetRABForPO?.unitPrice || 0) > targetRABRemainingAmount;
-  const isPOValidationInvalid = isPOExceedingVolume || isPOExceedingBudget || poFormQuantity <= 0;
+    for (const line of poDraftLines) {
+      const rab = rabList.find(r => r.id === line.rabId);
+      if (!rab || rab.status !== 'Disetujui') {
+        return {
+          isInvalid: true,
+          errorMessage: 'Setiap item PO wajib berasal dari RAB yang berstatus Disetujui.',
+          totalAmount: 0,
+        };
+      }
+      if (line.quantity <= 0 || line.unitPrice <= 0) {
+        return {
+          isInvalid: true,
+          errorMessage: `Kuantitas dan harga satuan untuk ${rab.itemName} harus lebih besar dari 0.`,
+          totalAmount: 0,
+        };
+      }
+      const lineSub = line.quantity * line.unitPrice;
+      totalAmount += lineSub;
+      usedQtyByRab.set(rab.id, (usedQtyByRab.get(rab.id) || 0) + line.quantity);
+      usedAmtByRab.set(rab.id, (usedAmtByRab.get(rab.id) || 0) + lineSub);
+    }
+
+    for (const [rabId, reqQty] of usedQtyByRab.entries()) {
+      const rab = rabList.find(r => r.id === rabId)!;
+      const remQty = Math.max(0, rab.volume - (rab.poCreatedQuantity || 0));
+      const remAmt = Math.max(0, rab.totalBudget - (rab.poCreatedAmount || 0));
+      const reqAmt = usedAmtByRab.get(rabId) || 0;
+      if (reqQty > remQty) {
+        return {
+          isInvalid: true,
+          errorMessage: `Jumlah pesanan ${rab.itemName} (${formatNumber(reqQty)} ${rab.unit}) melampaui sisa kuota RAB (${formatNumber(remQty)} ${rab.unit}).`,
+          totalAmount,
+        };
+      }
+      if (reqAmt > remAmt + 100) {
+        return {
+          isInvalid: true,
+          errorMessage: `Nilai PO ${rab.itemName} (${formatRupiah(reqAmt)}) melampaui sisa pagu RAB (${formatRupiah(remAmt)}).`,
+          totalAmount,
+        };
+      }
+    }
+
+    return {
+      isInvalid: false,
+      errorMessage: '',
+      totalAmount,
+    };
+  }, [poDraftLines, rabList]);
+
+  // Eligible POs for QC (must exist and not be rejected/cancelled)
+  const eligiblePOsForQC = useMemo(() => {
+    const active = purchaseOrders.filter(p => p.status !== 'Ditolak' && p.status !== 'Dibatalkan');
+    return [...active].sort((a, b) => {
+      const score = (po: PurchaseOrder) => {
+        if (po.status === 'Dikirim ke supplier' || po.status === 'Sebagian diterima') return 0;
+        if (po.status === 'Disetujui' || po.status === 'Disetujui Kepala') return 1;
+        if (po.status === 'Menunggu persetujuan') return 2;
+        return 3;
+      };
+      return score(a) - score(b);
+    });
+  }, [purchaseOrders]);
 
   // Filtered POs
   const filteredPOs = useMemo(() => {
@@ -346,6 +425,7 @@ export const ProcurementModule: React.FC = () => {
       status: 'Menunggu Persetujuan',
       poCreatedQuantity: 0,
       poCreatedAmount: 0,
+      sourceType: 'menu_planning',
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form),
     });
     setIsRABModalOpen(true);
@@ -367,6 +447,10 @@ export const ProcurementModule: React.FC = () => {
       approvedBy: rab.approvedBy,
       poCreatedQuantity: rab.poCreatedQuantity || 0,
       poCreatedAmount: rab.poCreatedAmount || 0,
+      sourceType: rab.sourceType,
+      sourceMenuId: rab.sourceMenuId,
+      sourceMenuCode: rab.sourceMenuCode,
+      sourceMenuLabel: rab.sourceMenuLabel,
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form, rab.customFields),
     });
     setIsRABModalOpen(true);
@@ -413,12 +497,26 @@ export const ProcurementModule: React.FC = () => {
 
   // Quick Action: Terbitkan PO langsung dari baris RAB yang disetujui
   const handleStartPOFromRAB = (rab: RABItem) => {
-    setSelectedRABIdForPO(rab.id);
     const remQty = Math.max(0, rab.volume - (rab.poCreatedQuantity || 0));
-    setPoFormQuantity(remQty > 0 ? Math.min(remQty, 300) : 50);
-    setPoFormUnitPrice(rab.unitPrice);
+    if (remQty <= 0) {
+      addToast(
+        'warning',
+        'Kuota RAB Terpenuhi',
+        `Seluruh volume RAB ${rab.budgetCode} (${rab.itemName}) sudah diterbitkan menjadi PO.`
+      );
+      return;
+    }
+    setPoDraftLines([
+      {
+        key: `po-line-${Date.now()}-0`,
+        rabId: rab.id,
+        quantity: remQty,
+        unitPrice: rab.unitPrice,
+      },
+    ]);
     setPoFormSupplierName(masterSuppliers[0]?.name || 'PT Unggas Barokah Probolinggo');
-    setPoFormNotes(`PO pengadaan langsung bersumber dari kode anggaran ${rab.budgetCode}`);
+    setPoFormDeliveryDate('2026-11-10');
+    setPoFormNotes(`PO pengadaan bersumber dari kode anggaran ${rab.budgetCode}`);
     setIsCreatePOOpen(true);
   };
 
@@ -427,45 +525,114 @@ export const ProcurementModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   const handleOpenCreatePO = () => {
     if (approvedRABItems.length === 0) {
-      addToast('error', 'Tidak Ada RAB Disetujui', 'Silakan setujui item RAB terlebih dahulu sebelum menerbitkan PO.');
+      addToast(
+        'error',
+        'Tidak Ada RAB Disetujui',
+        'Silakan setujui item RAB (dari Perencanaan Menu) terlebih dahulu sebelum menerbitkan PO.'
+      );
       return;
     }
-    const firstApproved = approvedRABItems[0];
-    setSelectedRABIdForPO(firstApproved.id);
+    const targetList = eligibleRABItemsForPO.length > 0 ? eligibleRABItemsForPO : approvedRABItems;
+    const firstApproved = targetList[0];
     const remQty = Math.max(0, firstApproved.volume - (firstApproved.poCreatedQuantity || 0));
-    setPoFormQuantity(remQty > 0 ? Math.min(remQty, 250) : 50);
-    setPoFormUnitPrice(firstApproved.unitPrice);
+    if (remQty <= 0) {
+      addToast(
+        'warning',
+        'Seluruh Kuota RAB Terpakai',
+        'Semua RAB yang disetujui sudah habis dialokasikan ke PO. Tambahkan atau setujui RAB baru.'
+      );
+      return;
+    }
+    setPoDraftLines([
+      {
+        key: `po-line-${Date.now()}-0`,
+        rabId: firstApproved.id,
+        quantity: remQty,
+        unitPrice: firstApproved.unitPrice,
+      },
+    ]);
     setPoFormSupplierName(masterSuppliers[0]?.name || 'Koperasi Tani Makmur Krejengan');
     setPoFormDeliveryDate('2026-11-10');
     setPoFormNotes(`PO diajukan berdasarkan otorisasi RAB ${firstApproved.budgetCode}`);
     setIsCreatePOOpen(true);
   };
 
-  const handleRABSelectionChangeInPO = (rabId: string) => {
-    setSelectedRABIdForPO(rabId);
-    const found = rabList.find(r => r.id === rabId);
-    if (found) {
-      const remQty = Math.max(0, found.volume - (found.poCreatedQuantity || 0));
-      setPoFormQuantity(remQty > 0 ? Math.min(remQty, 200) : 50);
-      setPoFormUnitPrice(found.unitPrice);
-    }
+  const handleUpdatePODraftLine = (key: string, patch: Partial<PODraftLine>) => {
+    setPoDraftLines(prev =>
+      prev.map(line => {
+        if (line.key !== key) return line;
+        const next = { ...line, ...patch };
+        if (patch.rabId) {
+          const found = rabList.find(r => r.id === patch.rabId);
+          if (found) {
+            const remQty = Math.max(0, found.volume - (found.poCreatedQuantity || 0));
+            next.quantity = remQty > 0 ? remQty : 1;
+            next.unitPrice = found.unitPrice;
+          }
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleAddPODraftLine = () => {
+    const usedIds = new Set(poDraftLines.map(l => l.rabId));
+    const candidate =
+      eligibleRABItemsForPO.find(r => !usedIds.has(r.id)) ||
+      eligibleRABItemsForPO[0] ||
+      approvedRABItems[0];
+    if (!candidate) return;
+    const remQty = Math.max(0, candidate.volume - (candidate.poCreatedQuantity || 0));
+    setPoDraftLines(prev => [
+      ...prev,
+      {
+        key: `po-line-${Date.now()}-${prev.length}`,
+        rabId: candidate.id,
+        quantity: remQty > 0 ? remQty : 1,
+        unitPrice: candidate.unitPrice,
+      },
+    ]);
+  };
+
+  const handleRemovePODraftLine = (key: string) => {
+    if (poDraftLines.length <= 1) return;
+    setPoDraftLines(prev => prev.filter(l => l.key !== key));
   };
 
   const handleSavePO = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!targetRABForPO) return;
-
-    if (isPOValidationInvalid) {
-      addToast(
-        'error',
-        'Validasi Anggaran Gagal',
-        `Jumlah pesanan tidak boleh melampaui sisa alokasi RAB yang disetujui (${targetRABRemainingQty} ${targetRABForPO.unit}).`
-      );
+    if (poDraftValidation.isInvalid) {
+      addToast('error', 'Validasi Anggaran Gagal', poDraftValidation.errorMessage);
       return;
     }
 
-    const subtotal = poFormQuantity * (poFormUnitPrice || targetRABForPO.unitPrice);
-    const generatedPONumber = `PO/SPPG-TMG2/2026/XI/00${Math.floor(Math.random() * 80) + 10}`;
+    const poItems: PurchaseOrderItem[] = [];
+    const linkedBudgetCodes: string[] = [];
+    for (const line of poDraftLines) {
+      const rab = rabList.find(r => r.id === line.rabId);
+      if (!rab) continue;
+      const qty = Number(line.quantity);
+      const price = Number(line.unitPrice) || rab.unitPrice;
+      poItems.push({
+        itemId: rab.id,
+        itemName: rab.itemName,
+        quantity: qty,
+        unit: rab.unit,
+        unitPrice: price,
+        subtotal: qty * price,
+        rabId: rab.id,
+        receivedQuantity: 0,
+      });
+      if (!linkedBudgetCodes.includes(rab.budgetCode)) {
+        linkedBudgetCodes.push(rab.budgetCode);
+      }
+    }
+
+    if (poItems.length === 0) return;
+
+    const totalAmount = poItems.reduce((sum, it) => sum + it.subtotal, 0);
+    const seq = String(purchaseOrders.length + 1).padStart(3, '0');
+    const generatedPONumber = `PO/SPPG-TMG2/2026/XI/${seq}`;
 
     const newPO: Omit<PurchaseOrder, 'id'> = {
       poNumber: generatedPONumber,
@@ -473,23 +640,12 @@ export const ProcurementModule: React.FC = () => {
       supplierName: poFormSupplierName || 'Supplier Mitra Terdaftar',
       supplierContact: '0812-3456-7890 (PIC Pengiriman)',
       deliveryDate: poFormDeliveryDate,
-      items: [
-        {
-          itemId: targetRABForPO.id,
-          itemName: targetRABForPO.itemName,
-          quantity: poFormQuantity,
-          unit: targetRABForPO.unit,
-          unitPrice: poFormUnitPrice || targetRABForPO.unitPrice,
-          subtotal,
-          rabId: targetRABForPO.id,
-          receivedQuantity: 0,
-        },
-      ],
-      totalAmount: subtotal,
+      items: poItems,
+      totalAmount,
       status: 'Menunggu persetujuan',
-      rabId: targetRABForPO.id,
+      rabId: poItems[0].rabId,
       qcStatus: 'Belum QC',
-      notes: poFormNotes,
+      notes: poFormNotes || `PO bersumber dari RAB ${linkedBudgetCodes.join(', ')}`,
     };
 
     await addPurchaseOrder(newPO);
@@ -497,7 +653,7 @@ export const ProcurementModule: React.FC = () => {
     addToast(
       'success',
       'PO Berhasil Diterbitkan',
-      `Nomor ${generatedPONumber} sebesar ${formatRupiah(subtotal)} berhasil diajukan dari anggaran ${targetRABForPO.budgetCode}.`
+      `Nomor ${generatedPONumber} (${poItems.length} item, ${formatRupiah(totalAmount)}) berhasil diajukan dari RAB ${linkedBudgetCodes.join(', ')}.`
     );
     setIsCreatePOOpen(false);
   };
@@ -511,29 +667,11 @@ export const ProcurementModule: React.FC = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // HANDLERS: SUBMODUL C (QUALITY CONTROL & PENAMBAHAN STOK GUDANG)
+  // HANDLERS: SUBMODUL C (QUALITY CONTROL TERIKAT PO -> STOK GUDANG)
   // ---------------------------------------------------------------------------
   const buildDraftsFromPO = (po: PurchaseOrder): QCModalItemDraft[] => {
     const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
-    if (!po.items || po.items.length === 0) {
-      return [
-        {
-          key: `draft-${Date.now()}-0`,
-          itemName: 'Bahan Pangan MBG',
-          unit: 'kg',
-          orderedQuantity: 100,
-          receivedQuantity: 100,
-          condition: 'Baik',
-          qualityGrade: 'Grade A (Sangat Baik)',
-          receivingTemp: 24.0,
-          expiryDate: defaultExp,
-          photoUrls: [],
-          notes: '',
-          status: 'Diterima',
-        },
-      ];
-    }
-    return po.items.map((item, idx) => {
+    return (po.items || []).map((item, idx) => {
       const lowerName = item.itemName.toLowerCase();
       const isCold =
         lowerName.includes('ayam') ||
@@ -558,85 +696,57 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const handleOpenQCModal = (po: PurchaseOrder) => {
-    setQcEntrySourceMode('po');
+    setEditingQCRecord(null);
     setSelectedPOForQC(po);
     setQcSelectedPOId(po.id);
-    setQcManualPONumber(po.poNumber);
-    setQcManualSupplierName(po.supplierName);
     setQcItemDrafts(buildDraftsFromPO(po));
     setQcFormInspector(currentUser.name);
     setIsQCModalOpen(true);
   };
 
-  const handleOpenDirectQCModal = () => {
-    const arrivingPO = purchaseOrders.find(
-      p => p.status === 'Dikirim ke supplier' || p.status === 'Sebagian diterima'
-    );
-    if (arrivingPO) {
-      handleOpenQCModal(arrivingPO);
-      return;
-    }
-    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
-    setQcEntrySourceMode('manual');
-    setSelectedPOForQC(null);
-    setQcSelectedPOId('MANUAL');
-    setQcManualPONumber(`RCV/SPPG-TMG2/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/0${qcList.length + 1}`);
-    setQcManualSupplierName(masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar');
+  const handleOpenEditQCRecord = (record: QualityControlRecord) => {
+    const linkedPO =
+      purchaseOrders.find(p => p.id === record.poId || p.poNumber === record.poNumber) || null;
+    setEditingQCRecord(record);
+    setSelectedPOForQC(linkedPO);
+    setQcSelectedPOId(linkedPO?.id || record.poId);
+    setQcFormInspector(record.inspectorName || currentUser.name);
     setQcItemDrafts([
       {
-        key: `draft-${Date.now()}-0`,
-        itemName: '',
-        unit: 'kg',
-        orderedQuantity: 50,
-        receivedQuantity: 50,
-        condition: 'Baik',
-        qualityGrade: 'Grade A (Sangat Baik)',
-        receivingTemp: 24.0,
-        expiryDate: defaultExp,
-        photoUrls: [],
-        notes: '',
-        status: 'Diterima',
+        key: `edit-${record.id}`,
+        itemName: record.itemName,
+        unit: record.unit,
+        orderedQuantity: record.orderedQuantity,
+        receivedQuantity: record.receivedQuantity,
+        condition: record.condition,
+        qualityGrade: record.qualityGrade,
+        receivingTemp: record.receivingTemp ?? 24.0,
+        expiryDate: record.expiryDate,
+        photoUrls: getQCPhotos(record),
+        notes: record.notes || '',
+        status: record.status,
       },
     ]);
-    setQcFormInspector(currentUser.name);
     setIsQCModalOpen(true);
+  };
+
+  const handleOpenDirectQCModal = () => {
+    if (eligiblePOsForQC.length === 0) {
+      addToast(
+        'warning',
+        'Belum Ada Purchase Order (PO)',
+        'Input Quality Control wajib mengambil data dari Purchase Order (PO). Silakan terbitkan & kirim PO terlebih dahulu.'
+      );
+      return;
+    }
+    handleOpenQCModal(eligiblePOsForQC[0]);
   };
 
   const handleSelectPOSourceInQCModal = (val: string) => {
     setQcSelectedPOId(val);
-    if (val === 'MANUAL') {
-      setQcEntrySourceMode('manual');
-      setSelectedPOForQC(null);
-      setQcManualPONumber(`RCV/SPPG-TMG2/${new Date().toISOString().slice(0, 10).replace(/-/g, '')}/0${qcList.length + 1}`);
-      setQcManualSupplierName(masterSuppliers[0]?.name || 'Supplier Mitra Terdaftar');
-      if (qcItemDrafts.length === 0) {
-        const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
-        setQcItemDrafts([
-          {
-            key: `draft-${Date.now()}-0`,
-            itemName: '',
-            unit: 'kg',
-            orderedQuantity: 50,
-            receivedQuantity: 50,
-            condition: 'Baik',
-            qualityGrade: 'Grade A (Sangat Baik)',
-            receivingTemp: 24.0,
-            expiryDate: defaultExp,
-            photoUrls: [],
-            notes: '',
-            status: 'Diterima',
-          },
-        ]);
-      }
-      return;
-    }
-
     const foundPO = purchaseOrders.find(p => p.id === val);
     if (foundPO) {
-      setQcEntrySourceMode('po');
       setSelectedPOForQC(foundPO);
-      setQcManualPONumber(foundPO.poNumber);
-      setQcManualSupplierName(foundPO.supplierName);
       setQcItemDrafts(buildDraftsFromPO(foundPO));
     }
   };
@@ -646,7 +756,7 @@ export const ProcurementModule: React.FC = () => {
       prev.map(item => {
         if (item.key !== key) return item;
         const next = { ...item, ...patch };
-        if (patch.receivedQuantity !== undefined || patch.orderedQuantity !== undefined) {
+        if (patch.receivedQuantity !== undefined) {
           const ordered = Number(next.orderedQuantity);
           const received = Number(next.receivedQuantity);
           if (received <= 0) {
@@ -687,25 +797,9 @@ export const ProcurementModule: React.FC = () => {
     );
   };
 
-  const handleAddQCItemRow = () => {
-    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
-    setQcItemDrafts(prev => [
-      ...prev,
-      {
-        key: `draft-${Date.now()}-${prev.length}`,
-        itemName: '',
-        unit: 'kg',
-        orderedQuantity: 25,
-        receivedQuantity: 25,
-        condition: 'Baik',
-        qualityGrade: 'Grade A (Sangat Baik)',
-        receivingTemp: 24.0,
-        expiryDate: defaultExp,
-        photoUrls: [],
-        notes: '',
-        status: 'Diterima',
-      },
-    ]);
+  const handleReloadPOItemsInQC = () => {
+    if (!selectedPOForQC) return;
+    setQcItemDrafts(buildDraftsFromPO(selectedPOForQC));
   };
 
   const handleRemoveQCItemRow = (key: string) => {
@@ -715,32 +809,68 @@ export const ProcurementModule: React.FC = () => {
 
   const handleSaveQCInspection = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validDrafts = qcItemDrafts.filter(d => d.itemName.trim().length > 0);
-    if (validDrafts.length === 0) {
-      addToast('error', 'Data Bahan Kosong', 'Harap isi minimal 1 nama bahan/barang yang diterima.');
+
+    if (editingQCRecord) {
+      const draft = qcItemDrafts[0];
+      if (!draft) return;
+      const receivedQty = Number(draft.receivedQuantity) || 0;
+      const orderedQty = Number(draft.orderedQuantity) || 0;
+      const shouldAddStock =
+        (draft.status === 'Diterima' ||
+          draft.status === 'Diterima sebagian' ||
+          draft.status === 'Lolos Penuh') &&
+        receivedQty > 0;
+
+      await updateQualityControlRecord(editingQCRecord.id, {
+        receivedQuantity: receivedQty,
+        differenceQuantity: receivedQty - orderedQty,
+        condition: draft.condition,
+        qualityGrade: draft.qualityGrade,
+        receivingTemp: Number(draft.receivingTemp),
+        expiryDate: draft.expiryDate,
+        photoUrl: draft.photoUrls[0] || undefined,
+        photoUrls: draft.photoUrls,
+        notes: draft.notes.trim(),
+        inspectorName: qcFormInspector,
+        status: draft.status,
+        inventoryAdded: shouldAddStock,
+      });
+      setEditingQCRecord(null);
+      setIsQCModalOpen(false);
       return;
     }
 
-    const activePO = qcEntrySourceMode === 'po' ? selectedPOForQC : null;
-    const poId = activePO ? activePO.id : `manual-${Date.now()}`;
-    const poNumber = activePO ? activePO.poNumber : qcManualPONumber.trim() || `RCV-${Date.now().toString().slice(-6)}`;
-    const supplierName = activePO ? activePO.supplierName : qcManualSupplierName;
+    if (!selectedPOForQC) {
+      addToast(
+        'error',
+        'Sumber PO Wajib Dipilih',
+        'Quality Control hanya dapat dilakukan terhadap Purchase Order (PO) yang sudah diterbitkan.'
+      );
+      return;
+    }
+
+    const validDrafts = qcItemDrafts.filter(d => d.itemName.trim().length > 0);
+    if (validDrafts.length === 0) {
+      addToast('error', 'Data Bahan Kosong', 'PO terpilih tidak memiliki item untuk diinspeksi.');
+      return;
+    }
 
     for (const draft of validDrafts) {
       const orderedQty = Number(draft.orderedQuantity) || 0;
       const receivedQty = Number(draft.receivedQuantity) || 0;
       const diffQty = receivedQty - orderedQty;
 
-      // KETENTUAN PENTING:
-      // Stok gudang HANYA bertambah berdasarkan jumlah yang benar-benar diterima dan disetujui!
+      // Stok gudang HANYA bertambah berdasarkan hasil input Quality Control yang diterima!
       const shouldAddStock =
-        (draft.status === 'Diterima' || draft.status === 'Diterima sebagian' || draft.status === 'Lolos Penuh') &&
+        (draft.status === 'Diterima' ||
+          draft.status === 'Diterima sebagian' ||
+          draft.status === 'Lolos Penuh') &&
         receivedQty > 0;
 
       const newQCRecord: Omit<QualityControlRecord, 'id' | 'inspectedAt'> = {
-        poId,
-        poNumber,
-        supplierName,
+        poId: selectedPOForQC.id,
+        poNumber: selectedPOForQC.poNumber,
+        supplierName: selectedPOForQC.supplierName,
         itemName: draft.itemName.trim(),
         orderedQuantity: orderedQty,
         unit: draft.unit.trim() || 'kg',
@@ -932,12 +1062,21 @@ export const ProcurementModule: React.FC = () => {
             <>
               <button
                 type="button"
+                onClick={() => syncAllMenuNeedsToRAB()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold shadow-xs transition"
+                title="Ambil & sinkronkan kebutuhan bahan otomatis dari Perencanaan Menu (PLOG) ke RAB Bahan Pangan"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Sinkron dari Perencanaan Menu ({menuPlannedNeeds.aggregated.length})</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => syncCriticalInventoryToRAB()}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition"
                 title="Buat pengajuan RAB otomatis dari bahan Gudang yang berada di bawah stok minimum"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Sinkron Stok Kritis Gudang ({criticalInventoryCount})</span>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Stok Kritis ({criticalInventoryCount})</span>
               </button>
               <button
                 type="button"
@@ -968,9 +1107,38 @@ export const ProcurementModule: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
             >
               <Plus className="w-4 h-4" />
-              <span>Input Data Barang yang Diterima</span>
+              <span>Input QC dari Purchase Order</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Pipeline Rantai Pasok Terintegrasi */}
+      <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950/30 p-3.5 rounded-xl border border-sky-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div className="flex items-center gap-1.5 font-black text-blue-950 dark:text-sky-300">
+          <Link2 className="w-4 h-4 text-sky-600 shrink-0" />
+          <span>Alur Data Terhubung Otomatis:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 font-bold">
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+            1. Perencanaan Menu ({menuItems.length} Menu)
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-800 text-blue-900 dark:text-sky-300">
+            2. RAB ({rabList.length} Item)
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-800 text-indigo-800 dark:text-indigo-300">
+            3. Purchase Order ({purchaseOrders.length} PO)
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+            4. Quality Control ({qcList.length} QC)
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+          <span className="px-2 py-1 rounded-lg bg-emerald-600 text-white">
+            5. Stok Gudang ({inventory.length} Komoditas)
+          </span>
         </div>
       </div>
 
@@ -1180,21 +1348,34 @@ export const ProcurementModule: React.FC = () => {
               },
               {
                 key: 'itemName',
-                header: 'Nama Barang & Kategori',
+                header: 'Nama Barang, Kategori & Sumber Menu',
                 render: row => (
                   <div>
                     <div className="font-bold text-slate-900 dark:text-white text-xs">
                       {row.itemName}
                     </div>
-                    <span
-                      className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold mt-0.5 ${
-                        row.category === 'RAB Bahan Pangan'
-                          ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                      }`}
-                    >
-                      {row.category}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                      <span
+                        className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                          row.category === 'RAB Bahan Pangan'
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                        }`}
+                      >
+                        {row.category}
+                      </span>
+                      {row.sourceType === 'menu_planning' && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          <Link2 className="w-2.5 h-2.5" />
+                          <span>Menu PLOG: {row.sourceMenuCode || row.sourceMenuLabel || 'Terhubung'}</span>
+                        </span>
+                      )}
+                      {row.sourceType === 'operasional' && (
+                        <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          Operasional SPPG
+                        </span>
+                      )}
+                    </div>
                     {row.notes && (
                       <div className="text-[10px] text-slate-500 italic mt-0.5 max-w-xs truncate">
                         "{row.notes}"
@@ -1443,14 +1624,25 @@ export const ProcurementModule: React.FC = () => {
               },
               {
                 key: 'items',
-                header: 'Barang / Bahan Pesanan',
+                header: 'Barang / Bahan Pesanan & Sumber RAB',
                 render: row => (
-                  <div className="space-y-0.5 text-xs">
-                    {row.items.map((it, idx) => (
-                      <div key={idx} className="font-semibold text-slate-800 dark:text-slate-200">
-                        {it.itemName} ({formatNumber(it.quantity)} {it.unit})
-                      </div>
-                    ))}
+                  <div className="space-y-1 text-xs">
+                    {row.items.map((it, idx) => {
+                      const linkedRab = rabList.find(r => r.id === (it.rabId || row.rabId));
+                      return (
+                        <div key={idx} className="space-y-0.5">
+                          <div className="font-semibold text-slate-800 dark:text-slate-200">
+                            {it.itemName} ({formatNumber(it.quantity)} {it.unit})
+                          </div>
+                          {linkedRab && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                              <Link2 className="w-2.5 h-2.5" />
+                              <span>RAB: {linkedRab.budgetCode}</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ),
               },
@@ -1647,7 +1839,7 @@ export const ProcurementModule: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Input Barang Diterima</span>
+                <span>Input QC dari Purchase Order</span>
               </button>
               <button
                 type="button"
@@ -1907,10 +2099,26 @@ export const ProcurementModule: React.FC = () => {
                     {row.inventoryAdded && (
                       <div className="text-[9px] text-emerald-600 font-bold flex items-center gap-0.5">
                         <Check className="w-3 h-3" />
-                        <span>Stok Gudang +{row.receivedQuantity} {row.unit}</span>
+                        <span>Masuk Stok Gudang +{row.receivedQuantity} {row.unit}</span>
                       </div>
                     )}
                   </div>
+                ),
+              },
+              {
+                key: 'actions',
+                header: 'Edit QC',
+                align: 'right',
+                render: row => (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditQCRecord(row)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 rounded-lg text-[10px] font-bold transition"
+                    title="Edit kuantitas diterima / status QC (otomatis memperbarui PO & Stok Gudang)"
+                  >
+                    <FileEdit className="w-3 h-3" />
+                    <span>Edit QC</span>
+                  </button>
                 ),
               },
             ]}
@@ -1947,25 +2155,47 @@ export const ProcurementModule: React.FC = () => {
 
           <div className="bg-sky-50/80 dark:bg-sky-950/40 p-3 rounded-xl border border-sky-200 dark:border-sky-800 space-y-1.5">
             <label className="block text-[11px] font-bold text-blue-950 dark:text-sky-300">
-              Isi Otomatis dari Data Gudang / Master Bahan (Single-Entry)
+              Ambil Otomatis dari Perencanaan Menu (PLOG) / Master Bahan
             </label>
             <select
               defaultValue=""
               onChange={e => {
                 const val = e.target.value;
                 if (!val) return;
-                if (val.startsWith('inv:')) {
-                  const inv = inventory.find(i => i.id === val.slice(4));
-                  if (inv) {
-                    const suggestedVol = Math.max(inv.minimumStock * 2 - inv.currentStock, 50);
+                if (val.startsWith('menuagg:')) {
+                  const need = menuPlannedNeeds.aggregated.find(a => a.key === val.slice(8));
+                  if (need) {
                     setRabForm(prev => ({
                       ...prev,
                       category: 'RAB Bahan Pangan',
-                      itemName: inv.name,
-                      unit: inv.unit,
-                      unitPrice: inv.pricePerUnit,
-                      volume: suggestedVol,
-                      notes: `Tersinkron dari Gudang (${inv.code} • Stok saat ini: ${inv.currentStock} / Min: ${inv.minimumStock} ${inv.unit})`,
+                      itemName: need.name,
+                      unit: need.unit,
+                      unitPrice: need.unitPrice,
+                      volume: need.quantity,
+                      planDate: need.planDate || prev.planDate,
+                      sourceType: 'menu_planning',
+                      sourceMenuId: need.sourceMenuIds[0],
+                      sourceMenuCode: need.sourceMenuCodes.join(', '),
+                      sourceMenuLabel: need.sourceMenuLabels.join(' | '),
+                      notes: `Kebutuhan akumulasi Perencanaan Menu (${need.sourceMenuCodes.join(', ')})`,
+                    }));
+                  }
+                } else if (val.startsWith('menuitem:')) {
+                  const need = menuPlannedNeeds.perMenuItems.find(m => m.key === val.slice(9));
+                  if (need) {
+                    setRabForm(prev => ({
+                      ...prev,
+                      category: 'RAB Bahan Pangan',
+                      itemName: need.name,
+                      unit: need.unit,
+                      unitPrice: need.unitPrice,
+                      volume: need.quantity,
+                      planDate: need.sourceMenuDate || prev.planDate,
+                      sourceType: 'menu_planning',
+                      sourceMenuId: need.sourceMenuId,
+                      sourceMenuCode: need.sourceMenuCode,
+                      sourceMenuLabel: need.sourceMenuLabel,
+                      notes: `Kebutuhan Perencanaan Menu ${need.sourceMenuLabel}`,
                     }));
                   }
                 } else if (val.startsWith('mb:')) {
@@ -1978,6 +2208,10 @@ export const ProcurementModule: React.FC = () => {
                       unit: mb.unit,
                       unitPrice: mb.actualPrice,
                       volume: Math.max(mb.minimumStock, 50),
+                      sourceType: 'manual',
+                      sourceMenuId: undefined,
+                      sourceMenuCode: undefined,
+                      sourceMenuLabel: undefined,
                       notes: `Tersinkron dari Master Bahan (${mb.code})`,
                     }));
                   }
@@ -1985,15 +2219,22 @@ export const ProcurementModule: React.FC = () => {
               }}
               className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
             >
-              <option value="">-- Opsional: Pilih bahan untuk auto-isi nama, satuan & harga terbaru --</option>
-              <optgroup label="Stok Gudang Real-Time (Inventory)">
-                {inventory.map(inv => (
-                  <option key={inv.id} value={`inv:${inv.id}`}>
-                    [{inv.code}] {inv.name} — Stok: {formatNumber(inv.currentStock)}/{formatNumber(inv.minimumStock)} {inv.unit} ({formatRupiah(inv.pricePerUnit)}/{inv.unit})
+              <option value="">-- Pilih kebutuhan bahan dari Perencanaan Menu (PLOG) --</option>
+              <optgroup label="Akumulasi Kebutuhan Bahan Perencanaan Menu (PLOG)">
+                {menuPlannedNeeds.aggregated.map(need => (
+                  <option key={need.key} value={`menuagg:${need.key}`}>
+                    [{need.sourceMenuCodes.join(', ')}] {need.name} — {formatNumber(need.quantity)} {need.unit} ({formatRupiah(need.unitPrice)}/{need.unit})
                   </option>
                 ))}
               </optgroup>
-              <optgroup label="Master Bahan Pangan">
+              <optgroup label="Rincian Bahan Per Jadwal Menu (PLOG)">
+                {menuPlannedNeeds.perMenuItems.map(need => (
+                  <option key={need.key} value={`menuitem:${need.key}`}>
+                    {need.sourceMenuCode} • {need.name} ({formatNumber(need.quantity)} {need.unit})
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Master Bahan Pangan (Referensi Cadangan)">
                 {masterBahan.map(mb => (
                   <option key={mb.id} value={`mb:${mb.id}`}>
                     [{mb.code}] {mb.name} ({formatRupiah(mb.actualPrice)}/{mb.unit})
@@ -2097,51 +2338,141 @@ export const ProcurementModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: TERBITKAN PO (TERIKAT RAB DISIKSI) */}
+      {/* MODAL: TERBITKAN PO (TERIKAT RAB DISETUJUI - MULTI ITEM) */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isCreatePOOpen}
         onClose={() => setIsCreatePOOpen(false)}
         title="Terbitkan Purchase Order (PO Terikat RAB)"
-        subtitle="Data PO wajib bersumber dari RAB yang telah disetujui. Otorisasi membatasi kelebihan anggaran."
-        maxWidth="lg"
+        subtitle="Seluruh item PO wajib bersumber dari item RAB yang berstatus Disetujui."
+        maxWidth="xl"
       >
         <form onSubmit={handleSavePO} className="space-y-4">
-          {/* Pilih RAB yang Disetujui */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Pilih Item RAB yang Telah Disetujui *
-            </label>
-            <select
-              value={selectedRABIdForPO}
-              onChange={e => handleRABSelectionChangeInPO(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-            >
-              {approvedRABItems.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.budgetCode} - {r.itemName} (Total: {formatNumber(r.volume)} {r.unit} | Sisa: {formatNumber(Math.max(0, r.volume - (r.poCreatedQuantity || 0)))} {r.unit})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Info Card Sisa RAB */}
-          {targetRABForPO && (
-            <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 text-xs space-y-1">
-              <div className="flex items-center justify-between text-slate-500 font-semibold">
-                <span>Alokasi Disetujui: {formatNumber(targetRABForPO.volume)} {targetRABForPO.unit}</span>
-                <span>Pagu RAB: {formatRupiah(targetRABForPO.totalBudget)}</span>
-              </div>
-              <div className="flex items-center justify-between font-mono font-bold pt-1 border-t border-slate-200 dark:border-slate-800">
-                <span className="text-emerald-700 dark:text-emerald-400">
-                  Sisa Kuota Volume: {formatNumber(targetRABRemainingQty)} {targetRABForPO.unit}
-                </span>
-                <span className="text-blue-900 dark:text-sky-300">
-                  Sisa Pagu: {formatRupiah(targetRABRemainingAmount)}
-                </span>
-              </div>
+          {/* Daftar Item RAB yang Dipesan */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Daftar Item Pesanan dari RAB Disetujui ({poDraftLines.length} Item) *
+              </label>
+              <button
+                type="button"
+                onClick={handleAddPODraftLine}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950 dark:hover:bg-sky-900 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[11px] font-bold transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Item dari RAB</span>
+              </button>
             </div>
-          )}
+
+            <div className="space-y-2.5 max-h-[38vh] overflow-y-auto pr-1">
+              {poDraftLines.map((line, idx) => {
+                const rab = rabList.find(r => r.id === line.rabId);
+                const remQty = rab ? Math.max(0, rab.volume - (rab.poCreatedQuantity || 0)) : 0;
+                const remAmt = rab ? Math.max(0, rab.totalBudget - (rab.poCreatedAmount || 0)) : 0;
+                const lineExceeds = line.quantity > remQty || line.quantity <= 0;
+
+                return (
+                  <div
+                    key={line.key}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-black text-blue-900 dark:text-sky-300">
+                        Item PO #{idx + 1}
+                      </span>
+                      {poDraftLines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePODraftLine(line.key)}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950"
+                          title="Hapus baris"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <select
+                      value={line.rabId}
+                      onChange={e => handleUpdatePODraftLine(line.key, { rabId: e.target.value })}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                    >
+                      {approvedRABItems.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.budgetCode} — {r.itemName} (Sisa Kuota: {formatNumber(Math.max(0, r.volume - (r.poCreatedQuantity || 0)))} {r.unit})
+                        </option>
+                      ))}
+                    </select>
+
+                    {rab && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-500">
+                        <span>
+                          Sisa Kuota RAB:{' '}
+                          <strong className="text-emerald-700 dark:text-emerald-400">
+                            {formatNumber(remQty)} {rab.unit}
+                          </strong>
+                        </span>
+                        <span>
+                          Sisa Pagu:{' '}
+                          <strong className="text-blue-900 dark:text-sky-300">
+                            {formatRupiah(remAmt)}
+                          </strong>
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Jumlah ({rab?.unit || 'unit'}) *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="any"
+                          required
+                          value={line.quantity}
+                          onChange={e =>
+                            handleUpdatePODraftLine(line.key, { quantity: Number(e.target.value) })
+                          }
+                          className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-mono font-bold ${
+                            lineExceeds
+                              ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
+                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
+                          }`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Harga Satuan (Rp) *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          required
+                          value={line.unitPrice}
+                          onChange={e =>
+                            handleUpdatePODraftLine(line.key, { unitPrice: Number(e.target.value) })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                          Subtotal
+                        </label>
+                        <div className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono font-black text-slate-900 dark:text-white">
+                          {formatRupiah((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Supplier & Delivery Date */}
           <div className="grid grid-cols-2 gap-3">
@@ -2176,48 +2507,11 @@ export const ProcurementModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Quantity & Unit Price */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Jumlah Pesanan ({targetRABForPO?.unit}) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={poFormQuantity}
-                onChange={e => setPoFormQuantity(Number(e.target.value))}
-                className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
-                  isPOExceedingVolume
-                    ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
-                    : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white'
-                }`}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Harga Satuan (Rp) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={poFormUnitPrice || targetRABForPO?.unitPrice || 0}
-                onChange={e => setPoFormUnitPrice(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
-            </div>
-          </div>
-
-          {/* Validation Error Banner: Exceeding Budget Alert */}
-          {isPOExceedingVolume && (
+          {/* Validation Error Banner */}
+          {poDraftValidation.isInvalid && poDraftValidation.errorMessage && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/60 rounded-xl border border-rose-200 dark:border-rose-800 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300 font-semibold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>
-                Peringatan: Jumlah pesanan ({poFormQuantity} {targetRABForPO?.unit}) melampaui sisa kuota RAB yang disetujui ({targetRABRemainingQty} {targetRABForPO?.unit})! Otorisasi memblokir pesanan ini.
-              </span>
+              <span>{poDraftValidation.errorMessage}</span>
             </div>
           )}
 
@@ -2226,11 +2520,11 @@ export const ProcurementModule: React.FC = () => {
             <div>
               <div className="text-[10px] text-sky-300 font-bold uppercase">Total Nilai Purchase Order:</div>
               <div className="text-sm font-semibold font-mono mt-0.5">
-                {formatNumber(poFormQuantity)} {targetRABForPO?.unit} × {formatRupiah(poFormUnitPrice || targetRABForPO?.unitPrice || 0)}
+                {poDraftLines.length} Item Terikat RAB Disetujui
               </div>
             </div>
             <div className="text-xl font-black font-mono text-white">
-              {formatRupiah(poFormQuantity * (poFormUnitPrice || targetRABForPO?.unitPrice || 0))}
+              {formatRupiah(poDraftValidation.totalAmount)}
             </div>
           </div>
 
@@ -2257,9 +2551,9 @@ export const ProcurementModule: React.FC = () => {
             </button>
             <button
               type="submit"
-              disabled={isPOValidationInvalid}
+              disabled={poDraftValidation.isInvalid}
               className={`px-5 py-2 text-xs font-bold rounded-lg shadow-xs transition ${
-                isPOValidationInvalid
+                poDraftValidation.isInvalid
                   ? 'bg-slate-300 text-slate-500 cursor-not-allowed dark:bg-slate-800 dark:text-slate-600'
                   : 'bg-blue-900 hover:bg-blue-800 text-white'
               }`}
@@ -2271,100 +2565,66 @@ export const ProcurementModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: QUALITY CONTROL & INPUT DATA BARANG YANG DITERIMA */}
+      {/* MODAL: QUALITY CONTROL (WAJIB TERIKAT PURCHASE ORDER) */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isQCModalOpen}
-        onClose={() => setIsQCModalOpen(false)}
-        title="Input Data Barang yang Diterima & Inspeksi Quality Control (QC)"
+        onClose={() => {
+          setIsQCModalOpen(false);
+          setEditingQCRecord(null);
+        }}
+        title={
+          editingQCRecord
+            ? `Edit Hasil Quality Control — ${editingQCRecord.itemName}`
+            : 'Input Quality Control (QC) dari Purchase Order'
+        }
         subtitle={
-          qcEntrySourceMode === 'po' && selectedPOForQC
-            ? `Verifikasi fisik penerimaan per bahan/barang untuk PO: ${selectedPOForQC.poNumber}`
-            : 'Input penerimaan bahan/barang beserta upload foto per item, perhitungan selisih & keterangan manual'
+          editingQCRecord
+            ? `Mengubah hasil QC otomatis memperbarui status PO (${editingQCRecord.poNumber}) dan saldo Stok Gudang`
+            : selectedPOForQC
+            ? `Verifikasi fisik penerimaan bahan bersumber dari PO: ${selectedPOForQC.poNumber} (Otomatis masuk Stok Gudang)`
+            : 'Pilih Purchase Order (PO) untuk verifikasi barang masuk ke Stok Gudang'
         }
         maxWidth="2xl"
       >
         <form onSubmit={handleSaveQCInspection} className="space-y-4">
-          {/* Sumber Penerimaan & Info Header */}
+          {/* Sumber Purchase Order (Terkunci ke PO) */}
           <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div>
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Sumber Purchase Order / Penerimaan
+                Sumber Purchase Order (Wajib) *
               </label>
-              <select
-                value={qcSelectedPOId || 'MANUAL'}
-                onChange={e => handleSelectPOSourceInQCModal(e.target.value)}
-                className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-              >
-                <option value="MANUAL">+ Penerimaan Langsung / Input Manual</option>
-                {purchaseOrders.map(po => (
-                  <option key={po.id} value={po.id}>
-                    {po.poNumber} — {po.supplierName} ({po.status})
-                  </option>
-                ))}
-              </select>
+              {editingQCRecord ? (
+                <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono font-bold text-blue-900 dark:text-sky-300 truncate">
+                  {editingQCRecord.poNumber}
+                </div>
+              ) : (
+                <select
+                  required
+                  value={qcSelectedPOId}
+                  onChange={e => handleSelectPOSourceInQCModal(e.target.value)}
+                  className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                >
+                  {eligiblePOsForQC.map(po => (
+                    <option key={po.id} value={po.id}>
+                      {po.poNumber} — {po.supplierName} ({po.status})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
-            {qcEntrySourceMode === 'manual' ? (
-              <>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                    No. Referensi / Surat Jalan *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={qcManualPONumber}
-                    onChange={e => setQcManualPONumber(e.target.value)}
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                    Supplier / Rekanan *
-                  </label>
-                  <select
-                    value={qcManualSupplierName}
-                    onChange={e => setQcManualSupplierName(e.target.value)}
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                  >
-                    {masterSuppliers.map(s => (
-                      <option key={s.id} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                    Supplier Rekanan
-                  </span>
-                  <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white truncate">
-                    {selectedPOForQC?.supplierName}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                    Petugas Pemeriksa QC *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={qcFormInspector}
-                    onChange={e => setQcFormInspector(e.target.value)}
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          {qcEntrySourceMode === 'manual' && (
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                Supplier Rekanan (Dari PO)
+              </span>
+              <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white truncate">
+                {editingQCRecord?.supplierName || selectedPOForQC?.supplierName || '-'}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
                 Petugas Pemeriksa QC *
               </label>
               <input
@@ -2372,26 +2632,28 @@ export const ProcurementModule: React.FC = () => {
                 required
                 value={qcFormInspector}
                 onChange={e => setQcFormInspector(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
               />
             </div>
-          )}
+          </div>
 
-          {/* Daftar Bahan & Barang yang Diterima (Per-Item Upload Foto, Perhitungan Selisih, Keterangan Manual) */}
+          {/* Daftar Bahan & Barang dari PO (Item & Qty Dipesan Terkunci dari PO) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
                 <PackageCheck className="w-4 h-4 text-emerald-600" />
-                <span>Daftar Bahan & Barang yang Diterima ({qcItemDrafts.length} Item)</span>
+                <span>Daftar Barang dari Purchase Order ({qcItemDrafts.length} Item)</span>
               </div>
-              <button
-                type="button"
-                onClick={handleAddQCItemRow}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[11px] font-bold transition"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Bahan / Barang</span>
-              </button>
+              {!editingQCRecord && selectedPOForQC && (
+                <button
+                  type="button"
+                  onClick={handleReloadPOItemsInQC}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[11px] font-bold transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Muat Semua Item PO</span>
+                </button>
+              )}
             </div>
 
             <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
@@ -2408,7 +2670,7 @@ export const ProcurementModule: React.FC = () => {
                   >
                     <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
                       <span className="text-[11px] font-black text-blue-900 dark:text-sky-300 uppercase tracking-wide">
-                        Item #{idx + 1} {draft.itemName ? `— ${draft.itemName}` : ''}
+                        Item #{idx + 1} — {draft.itemName}
                       </span>
                       <div className="flex items-center gap-2">
                         <span
@@ -2422,12 +2684,12 @@ export const ProcurementModule: React.FC = () => {
                         >
                           Selisih: {diff === 0 ? `0 ${draft.unit} (Sesuai)` : `${diff > 0 ? '+' : ''}${diff} ${draft.unit}`} ({pct}%)
                         </span>
-                        {qcItemDrafts.length > 1 && (
+                        {!editingQCRecord && qcItemDrafts.length > 1 && (
                           <button
                             type="button"
                             onClick={() => handleRemoveQCItemRow(draft.key)}
                             className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                            title="Hapus baris item ini"
+                            title="Lewati item yang belum tiba"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -2435,59 +2697,41 @@ export const ProcurementModule: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Row 1: Nama Bahan, Satuan, Jumlah Dipesan, Jumlah Diterima, Perhitungan Selisih */}
+                    {/* Row 1: Nama Bahan (PO), Satuan (PO), Jumlah Dipesan (PO), Jumlah Diterima (Input), Selisih */}
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
                       <div className="sm:col-span-4">
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Nama Bahan / Barang *
+                          Nama Bahan / Barang (Dari PO)
                         </label>
                         <input
                           type="text"
-                          required
-                          placeholder="Contoh: Daging Ayam Fillet"
+                          readOnly
                           value={draft.itemName}
-                          onChange={e => handleUpdateQCItemDraft(draft.key, { itemName: e.target.value })}
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-semibold cursor-not-allowed"
                         />
                       </div>
 
                       <div className="sm:col-span-2">
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Satuan (Master) *
+                          Satuan (Dari PO)
                         </label>
-                        <select
-                          required
+                        <input
+                          type="text"
+                          readOnly
                           value={draft.unit}
-                          onChange={e => handleUpdateQCItemDraft(draft.key, { unit: e.target.value })}
-                          className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-                        >
-                          {masterUnits.map(u => (
-                            <option key={u.id} value={u.code}>
-                              {u.code} — {u.name}
-                            </option>
-                          ))}
-                          {draft.unit && !masterUnits.some(u => u.code === draft.unit) && (
-                            <option value={draft.unit}>{draft.unit}</option>
-                          )}
-                        </select>
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-semibold cursor-not-allowed"
+                        />
                       </div>
 
                       <div className="sm:col-span-2">
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Dipesan ({draft.unit}) *
+                          Dipesan PO ({draft.unit})
                         </label>
                         <input
                           type="number"
-                          min="0"
-                          step="any"
-                          required
+                          readOnly
                           value={draft.orderedQuantity}
-                          onChange={e =>
-                            handleUpdateQCItemDraft(draft.key, {
-                              orderedQuantity: Number(e.target.value),
-                            })
-                          }
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-mono font-bold cursor-not-allowed"
                         />
                       </div>
 
@@ -2759,7 +3003,10 @@ export const ProcurementModule: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsQCModalOpen(false)}
+              onClick={() => {
+                setIsQCModalOpen(false);
+                setEditingQCRecord(null);
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
             >
               Batal
@@ -2768,7 +3015,7 @@ export const ProcurementModule: React.FC = () => {
               type="submit"
               className="px-5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs"
             >
-              Simpan QC & Data Barang Diterima
+              {editingQCRecord ? 'Simpan Perubahan QC & Stok' : 'Simpan QC & Masukkan ke Stok Gudang'}
             </button>
           </div>
         </form>
@@ -2796,6 +3043,17 @@ export const ProcurementModule: React.FC = () => {
                 <span className="text-[10px] text-slate-400">Kepada Supplier / Rekanan:</span>
                 <div className="font-bold text-slate-900 dark:text-white text-sm">{selectedPOForDetail.supplierName}</div>
                 <div className="text-[11px] text-slate-500">{selectedPOForDetail.supplierContact}</div>
+                {(() => {
+                  const linkedRab = rabList.find(
+                    r => r.id === (selectedPOForDetail.rabId || selectedPOForDetail.items[0]?.rabId)
+                  );
+                  return linkedRab ? (
+                    <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300 text-[10px] font-mono font-bold">
+                      <Link2 className="w-3 h-3" />
+                      <span>Sumber RAB: {linkedRab.budgetCode}</span>
+                    </div>
+                  ) : null;
+                })()}
               </div>
               <div className="text-right">
                 <span className="text-[10px] text-slate-400">Tanggal Terbit & Kirim:</span>

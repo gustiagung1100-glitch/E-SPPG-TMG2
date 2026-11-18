@@ -12,6 +12,12 @@ import {
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
 import {
+  SuratTugasSheet,
+  resolveSuratTugasAutoFields,
+  generateSuratTugasKdoNumber,
+  exportSuratTugasPDF,
+} from '../common/SuratTugasSheet';
+import {
   exportTableToPDF,
   exportToExcel,
   triggerPrint,
@@ -71,6 +77,8 @@ export const LettersModule: React.FC = () => {
     beneficiaryAttendance,
     masterVolunteers,
     distributionLogs,
+    fuelLogs,
+    distributionDeliveries,
     currentUser,
     hasPermission,
     addToast,
@@ -105,6 +113,7 @@ export const LettersModule: React.FC = () => {
   // Template Viewer Modal
   const [viewingTemplate, setViewingTemplate] = useState<DocumentTemplate | null>(null);
   const [bastInstitutionId, setBastInstitutionId] = useState<string>('');
+  const [stVolunteerId, setStVolunteerId] = useState<string>('');
 
   // Form State for Creating a Cloned Outgoing Document (Mail Merge)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('tmpl-spd');
@@ -145,7 +154,8 @@ export const LettersModule: React.FC = () => {
   const buildInitialFieldsForTemplate = (
     tmpl: DocumentTemplate,
     targetDate?: string,
-    targetInstId?: string
+    targetInstId?: string,
+    targetVolunteerId?: string
   ): Record<string, string> => {
     const initialFieldValues: Record<string, string> = {};
     tmpl.fields.forEach(f => {
@@ -171,6 +181,27 @@ export const LettersModule: React.FC = () => {
       initialFieldValues['JAM_KEMBALI'] = resolved.returnTime || '........';
       initialFieldValues['NAMA_PETUGAS_DISTRIBUSI'] = resolved.distributorName;
       initialFieldValues['NO_HP_DISTRIBUSI'] = resolved.distributorPhone;
+    } else if (tmpl.id === 'tmpl-st') {
+      const resolved = resolveSuratTugasAutoFields({
+        sppgConfig,
+        masterVolunteers,
+        outgoingDocuments,
+        fuelLogs,
+        distributionDeliveries,
+        date: targetDate || new Date().toISOString().slice(0, 10),
+        volunteerId: targetVolunteerId,
+      });
+      initialFieldValues['NAMA_PETUGAS'] = resolved.penerimaNama;
+      initialFieldValues['DIVISI_JABATAN'] = resolved.penerimaJabatan;
+      initialFieldValues['NIK_PETUGAS'] = resolved.penerimaNik;
+      initialFieldValues['JENIS_KENDARAAN'] = resolved.jenisKendaraan;
+      initialFieldValues['NOMOR_POLISI'] = resolved.nomorPolisi;
+      initialFieldValues['RUTE_PERJALANAN'] = resolved.rutePerjalanan;
+      initialFieldValues['KEPERLUAN'] = resolved.keperluan;
+      initialFieldValues['WAKTU_PELAKSANAAN'] = resolved.waktuPelaksanaan;
+      initialFieldValues['DIKETAHUI_NAMA'] = resolved.diketahuiNama;
+      initialFieldValues['DIKETAHUI_JABATAN'] = resolved.diketahuiJabatan;
+      initialFieldValues['NIP_PEMBERI_TUGAS'] = resolved.pemberiTugasNip;
     }
 
     return initialFieldValues;
@@ -216,6 +247,48 @@ export const LettersModule: React.FC = () => {
     };
   };
 
+  // Helper to sync Surat Tugas ST-KDO fields automatically when volunteer or date changes
+  const syncSuratTugasFormForVolunteerAndDate = (
+    volId: string,
+    dateStr: string,
+    prevForm: typeof outgoingForm
+  ): typeof outgoingForm => {
+    const resolved = resolveSuratTugasAutoFields({
+      sppgConfig,
+      masterVolunteers,
+      outgoingDocuments,
+      fuelLogs,
+      distributionDeliveries,
+      date: dateStr,
+      volunteerId: volId || undefined,
+    });
+
+    return {
+      ...prevForm,
+      date: dateStr,
+      subject: `Surat Tugas Perjalanan Kendaraan Operasional — ${resolved.penerimaNama}`,
+      recipientName: resolved.penerimaNama,
+      recipientInstitution: resolved.penerimaJabatan,
+      recipientAddress: `Kecamatan ${sppgConfig.district}, ${sppgConfig.regency}`,
+      signedBy: resolved.pemberiTugasNama,
+      signedRole: resolved.pemberiTugasJabatan,
+      fieldsData: {
+        ...prevForm.fieldsData,
+        NAMA_PETUGAS: resolved.penerimaNama,
+        DIVISI_JABATAN: resolved.penerimaJabatan,
+        NIK_PETUGAS: resolved.penerimaNik,
+        JENIS_KENDARAAN: resolved.jenisKendaraan,
+        NOMOR_POLISI: resolved.nomorPolisi,
+        RUTE_PERJALANAN: prevForm.fieldsData.RUTE_PERJALANAN || resolved.rutePerjalanan,
+        KEPERLUAN: prevForm.fieldsData.KEPERLUAN || resolved.keperluan,
+        WAKTU_PELAKSANAAN: prevForm.fieldsData.WAKTU_PELAKSANAAN || resolved.waktuPelaksanaan,
+        DIKETAHUI_NAMA: prevForm.fieldsData.DIKETAHUI_NAMA || resolved.diketahuiNama,
+        DIKETAHUI_JABATAN: prevForm.fieldsData.DIKETAHUI_JABATAN || resolved.diketahuiJabatan,
+        NIP_PEMBERI_TUGAS: prevForm.fieldsData.NIP_PEMBERI_TUGAS || resolved.pemberiTugasNip,
+      },
+    };
+  };
+
   // Handle template selection change
   const handleTemplateChange = (templateId: string) => {
     const tmpl = officialDocumentTemplates.find(t => t.id === templateId);
@@ -224,9 +297,18 @@ export const LettersModule: React.FC = () => {
     setSelectedTemplateId(templateId);
 
     const todayStr = new Date().toISOString().slice(0, 10);
+    const activeDate = outgoingForm.date || todayStr;
     const defaultInst = institutions[0];
     if (tmpl.id === 'tmpl-bast' && defaultInst) {
       setBastInstitutionId(defaultInst.id);
+    }
+
+    const defaultVol =
+      masterVolunteers.find(v => v.isActive && (v.division === 'Distribusi' || v.position === 'Driver Armada')) ||
+      masterVolunteers.find(v => v.isActive) ||
+      masterVolunteers[0];
+    if (tmpl.id === 'tmpl-st' && defaultVol) {
+      setStVolunteerId(defaultVol.id);
     }
 
     // Auto-generate number based on prefix
@@ -234,13 +316,16 @@ export const LettersModule: React.FC = () => {
     const padded = String(countThisType).padStart(3, '0');
     const autoNumber =
       tmpl.id === 'tmpl-bast'
-        ? generateBastNumber(191 + countThisType, outgoingForm.date || todayStr)
-        : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
+        ? generateBastNumber(191 + countThisType, activeDate)
+        : tmpl.id === 'tmpl-st'
+          ? generateSuratTugasKdoNumber(140 + countThisType, activeDate)
+          : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
 
     const initialFieldValues = buildInitialFieldsForTemplate(
       tmpl,
-      outgoingForm.date || todayStr,
-      defaultInst?.id
+      activeDate,
+      defaultInst?.id,
+      defaultVol?.id
     );
 
     setOutgoingForm(prev => ({
@@ -250,7 +335,9 @@ export const LettersModule: React.FC = () => {
       subject:
         tmpl.id === 'tmpl-bast' && initialFieldValues['NAMA_LEMBAGA']
           ? `Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) — ${initialFieldValues['NAMA_LEMBAGA']}`
-          : tmpl.defaultSubject,
+          : tmpl.id === 'tmpl-st' && initialFieldValues['NAMA_PETUGAS']
+            ? `Surat Tugas Perjalanan Kendaraan Operasional — ${initialFieldValues['NAMA_PETUGAS']}`
+            : tmpl.defaultSubject,
       fieldsData: initialFieldValues,
       recipientName:
         tmpl.id === 'tmpl-bast'
@@ -262,13 +349,15 @@ export const LettersModule: React.FC = () => {
       recipientInstitution:
         tmpl.id === 'tmpl-bast'
           ? initialFieldValues['NAMA_LEMBAGA'] || prev.recipientInstitution
-          : prev.recipientInstitution,
+          : tmpl.id === 'tmpl-st'
+            ? initialFieldValues['DIVISI_JABATAN'] || 'Divisi Distribusi'
+            : prev.recipientInstitution,
       recipientAddress:
         tmpl.id === 'tmpl-bast' && defaultInst
           ? defaultInst.address
           : prev.recipientAddress,
       signedRole:
-        tmpl.id === 'tmpl-bast'
+        tmpl.id === 'tmpl-bast' || tmpl.id === 'tmpl-st'
           ? `Kepala ${sppgConfig.sppgName}`
           : 'Kepala SPPG Temenggungan 2',
     }));
@@ -283,14 +372,29 @@ export const LettersModule: React.FC = () => {
       setBastInstitutionId(defaultInst.id);
     }
 
+    const defaultVol =
+      masterVolunteers.find(v => v.isActive && (v.division === 'Distribusi' || v.position === 'Driver Armada')) ||
+      masterVolunteers.find(v => v.isActive) ||
+      masterVolunteers[0];
+    if (tmpl.id === 'tmpl-st' && defaultVol) {
+      setStVolunteerId(defaultVol.id);
+    }
+
     const countThisType = outgoingDocuments.filter(d => d.type === tmpl.type).length + 1;
     const padded = String(countThisType).padStart(3, '0');
     const autoNumber =
       tmpl.id === 'tmpl-bast'
         ? generateBastNumber(191 + countThisType, todayStr)
-        : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
+        : tmpl.id === 'tmpl-st'
+          ? generateSuratTugasKdoNumber(140 + countThisType, todayStr)
+          : `${padded}/${tmpl.codePrefix}/SPPG-TMG2/MBG/XI/2026`;
 
-    const initialFieldValues = buildInitialFieldsForTemplate(tmpl, todayStr, defaultInst?.id);
+    const initialFieldValues = buildInitialFieldsForTemplate(
+      tmpl,
+      todayStr,
+      defaultInst?.id,
+      defaultVol?.id
+    );
 
     setOutgoingForm({
       letterCode: tmpl.codePrefix,
@@ -299,7 +403,9 @@ export const LettersModule: React.FC = () => {
       subject:
         tmpl.id === 'tmpl-bast' && initialFieldValues['NAMA_LEMBAGA']
           ? `Berita Acara Serah Terima Paket Makanan & Alat Makan (MBG) — ${initialFieldValues['NAMA_LEMBAGA']}`
-          : tmpl.defaultSubject,
+          : tmpl.id === 'tmpl-st' && initialFieldValues['NAMA_PETUGAS']
+            ? `Surat Tugas Perjalanan Kendaraan Operasional — ${initialFieldValues['NAMA_PETUGAS']}`
+            : tmpl.defaultSubject,
       recipientName:
         tmpl.id === 'tmpl-bast'
           ? initialFieldValues['NAMA_PIC'] || 'PIC Lembaga'
@@ -309,12 +415,14 @@ export const LettersModule: React.FC = () => {
       recipientInstitution:
         tmpl.id === 'tmpl-bast'
           ? initialFieldValues['NAMA_LEMBAGA'] || 'Lembaga Penerima Manfaat'
-          : 'Mitra MBG / Instansi Terkait',
+          : tmpl.id === 'tmpl-st'
+            ? initialFieldValues['DIVISI_JABATAN'] || 'Divisi Distribusi'
+            : 'Mitra MBG / Instansi Terkait',
       recipientAddress:
         tmpl.id === 'tmpl-bast' && defaultInst ? defaultInst.address : 'Kabupaten Probolinggo',
       signedBy: sppgConfig.headOfSppg,
       signedRole:
-        tmpl.id === 'tmpl-bast'
+        tmpl.id === 'tmpl-bast' || tmpl.id === 'tmpl-st'
           ? `Kepala ${sppgConfig.sppgName}`
           : 'Kepala SPPG Temenggungan 2',
       status: 'Disahkan',
@@ -1305,6 +1413,14 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                         prev
                       )
                     );
+                  } else if (selectedTemplateId === 'tmpl-st') {
+                    setOutgoingForm(prev =>
+                      syncSuratTugasFormForVolunteerAndDate(
+                        stVolunteerId || '',
+                        nextDate,
+                        prev
+                      )
+                    );
                   } else {
                     setOutgoingForm(prev => ({ ...prev, date: nextDate }));
                   }
@@ -1408,6 +1524,34 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                 </select>
                 <p className="text-[10px] text-blue-700 dark:text-blue-300">
                   Nama Lembaga, Jumlah Porsi, PIC, Nomor HP PIC, Hari & Tanggal otomatis terisi dari Master Data & Modul Penerima Manfaat.
+                </p>
+              </div>
+            )}
+
+            {selectedTemplateId === 'tmpl-st' && (
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2">
+                <label className="block text-[11px] font-bold text-blue-950 dark:text-blue-200">
+                  Pilih Petugas / Relawan (Sinkron Otomatis Master Relawan & Log Kendaraan Operasional):
+                </label>
+                <select
+                  value={stVolunteerId || ''}
+                  onChange={(e) => {
+                    const volId = e.target.value;
+                    setStVolunteerId(volId);
+                    setOutgoingForm(prev =>
+                      syncSuratTugasFormForVolunteerAndDate(volId, prev.date, prev)
+                    );
+                  }}
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+                >
+                  {masterVolunteers.filter(v => v.isActive).map(vol => (
+                    <option key={vol.id} value={vol.id}>
+                      {vol.name} — Divisi {vol.division} ({vol.position}){vol.idCardNumber ? ` | NIK: ${vol.idCardNumber}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-blue-700 dark:text-blue-300">
+                  Nama, Jabatan/Divisi, NIK penerima tugas serta data kendaraan operasional otomatis disinkronkan dengan Master Relawan & Log Armada.
                 </p>
               </div>
             )}
@@ -1562,6 +1706,21 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                 })
               : null;
 
+            const isSuratTugasDoc =
+              selectedOutgoing.templateId === 'tmpl-st' ||
+              selectedOutgoing.type === 'Surat Tugas';
+            const suratTugasData = isSuratTugasDoc
+              ? resolveSuratTugasAutoFields({
+                  sppgConfig,
+                  masterVolunteers,
+                  outgoingDocuments,
+                  fuelLogs,
+                  distributionDeliveries,
+                  selectedDoc: selectedOutgoing,
+                  date: selectedOutgoing.date,
+                })
+              : null;
+
             return (
               <div className="space-y-4">
                 {/* Top Toolbar */}
@@ -1589,6 +1748,15 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                         Unduh PDF BAST
                       </button>
                     )}
+                    {suratTugasData && (
+                      <button
+                        onClick={() => exportSuratTugasPDF(suratTugasData)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Unduh PDF Surat Tugas
+                      </button>
+                    )}
                     <button
                       onClick={() => triggerPrint()}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
@@ -1601,6 +1769,8 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
                 {bastData ? (
                   <BASTDocumentSheet data={bastData} />
+                ) : suratTugasData ? (
+                  <SuratTugasSheet data={suratTugasData} />
                 ) : (
                   /* Document Paper Container */
                   <div className="p-8 bg-white text-slate-900 border border-slate-200 rounded-xl shadow-lg print:shadow-none print:border-none print:p-0 font-serif leading-relaxed text-sm">
@@ -2188,6 +2358,24 @@ Diterbitkan secara sah oleh Satuan Pelayanan Pemenuhan Gizi Temenggungan 2.`}
                     institutionId: institutions[0]?.id,
                     date: new Date().toISOString().slice(0, 10),
                     bastNumber: generateBastNumber(192),
+                  })}
+                />
+              </div>
+            )}
+
+            {viewingTemplate.id === 'tmpl-st' && (
+              <div>
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  Pratinjau Format Visual Resmi Surat Tugas Kendaraan Operasional (ST-KDO):
+                </div>
+                <SuratTugasSheet
+                  data={resolveSuratTugasAutoFields({
+                    sppgConfig,
+                    masterVolunteers,
+                    outgoingDocuments,
+                    fuelLogs,
+                    distributionDeliveries,
+                    date: new Date().toISOString().slice(0, 10),
                   })}
                 />
               </div>

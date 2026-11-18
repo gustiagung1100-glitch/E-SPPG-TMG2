@@ -45,6 +45,12 @@ import {
   exportPlogOrganolepticPDF,
 } from '../common/PlogOrganolepticSheet';
 import {
+  SuratTugasSheet,
+  SuratTugasData,
+  resolveSuratTugasAutoFields,
+  exportSuratTugasPDF,
+} from '../common/SuratTugasSheet';
+import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
   getCustomTableFields,
@@ -99,11 +105,11 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
     key: 'surat_tugas',
     title: 'Surat Tugas Petugas & Relawan',
     category: 'Distribusi & Lapangan',
-    codePrefix: 'ST-MBG',
-    description: 'Surat penugasan resmi personel SPPG untuk operasional harian, belanja bahan, dan pengantaran.',
-    sourceModule: 'Administrasi Surat & SDM (letterId, volunteerId)',
+    codePrefix: 'ST-KDO',
+    description: 'Surat Tugas Perjalanan Kendaraan Operasional SPPG untuk petugas & relawan (sinkron Master Relawan, Log Armada & Administrasi Surat).',
+    sourceModule: 'Master Relawan, Log Armada & Administrasi Surat',
     defaultOrientation: 'portrait',
-    approverRole: 'Kepala SPPG Temenggungan 2',
+    approverRole: 'Kepala SPPG Probolinggo Krejengan Temenggungan 2',
   },
   {
     key: 'perjalanan_dinas',
@@ -504,6 +510,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [plogWetPhotoOverride, setPlogWetPhotoOverride] = useState<string | undefined>(undefined);
   const [plogDryPhotoOverride, setPlogDryPhotoOverride] = useState<string | undefined>(undefined);
 
+  // Surat Tugas Perjalanan Kendaraan Operasional controls
+  const [stSelectedVolunteerId, setStSelectedVolunteerId] = useState<string>('AUTO');
+  const [stSelectedDocId, setStSelectedDocId] = useState<string>('AUTO');
+  const [showStEditor, setShowStEditor] = useState<boolean>(false);
+  const [stOverrides, setStOverrides] = useState<Partial<SuratTugasData>>({});
+
   // Active Report Metadata
   const currentConfig = useMemo(() => {
     return REPORT_CONFIGS.find(r => r.key === activeReportKey) || REPORT_CONFIGS[0];
@@ -619,6 +631,31 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     orgaKesimpulanOverride,
     orgaMengetahuiOverride,
     orgaCustomRows,
+  ]);
+
+  // Auto-resolved Surat Tugas Perjalanan Kendaraan Operasional (Master Relawan + Log Armada + Surat Keluar)
+  const suratTugasData = useMemo(() => {
+    return resolveSuratTugasAutoFields({
+      sppgConfig,
+      masterVolunteers,
+      outgoingDocuments,
+      fuelLogs,
+      distributionDeliveries,
+      date: selectedDate,
+      volunteerId: stSelectedVolunteerId,
+      documentId: stSelectedDocId !== 'AUTO' ? stSelectedDocId : undefined,
+      overrides: stOverrides,
+    });
+  }, [
+    sppgConfig,
+    masterVolunteers,
+    outgoingDocuments,
+    fuelLogs,
+    distributionDeliveries,
+    selectedDate,
+    stSelectedVolunteerId,
+    stSelectedDocId,
+    stOverrides,
   ]);
 
   // Auto-resolved Kombinasi Pemeriksaan Makanan + Organoleptik PLOG (Menu Basah & Menu Kering)
@@ -3517,6 +3554,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       await exportPortioningFoodTempPDF(portioningFoodTempData);
       return;
     }
+    if (activeReportKey === 'surat_tugas') {
+      await exportSuratTugasPDF(suratTugasData);
+      return;
+    }
 
     await exportTableToPDF({
       title: reportPayload.title,
@@ -3552,6 +3593,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     <div className="space-y-6">
       {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; BAST, Checklist Organoleptik, Organoleptik PLOG, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
       {activeReportKey !== 'bast_distribusi' &&
+        activeReportKey !== 'surat_tugas' &&
         activeReportKey !== 'organoleptik_penerima' &&
         activeReportKey !== 'organoleptik_plog' &&
         activeReportKey !== 'suhu_makanan_pengolahan' &&
@@ -3973,6 +4015,222 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   ))}
                 </div>
               )}
+            </div>
+          ) : activeReportKey === 'surat_tugas' ? (
+            <div className="space-y-4">
+              {/* Control Bar Khusus Surat Tugas Perjalanan Kendaraan Operasional (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Format Resmi: Surat Tugas Perjalanan Kendaraan Operasional SPPG (BGN)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Nama petugas, jabatan/divisi, dan NIK otomatis tersinkron dari Master Data Relawan atau Arsip Surat Tugas; kendaraan &amp; tanggal dapat langsung disesuaikan sebelum cetak/PDF.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStOverrides({})}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 transition"
+                    >
+                      Reset ke Data Otomatis
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowStEditor(v => !v)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-900 text-white hover:bg-blue-800 transition"
+                    >
+                      {showStEditor ? 'Tutup Editor Surat Tugas' : 'Edit Rincian Kendaraan & Petugas'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Pilih Petugas / Relawan (Master Data SDM)
+                    </label>
+                    <select
+                      value={stSelectedVolunteerId}
+                      onChange={e => {
+                        setStSelectedVolunteerId(e.target.value);
+                        setStOverrides(prev => ({
+                          ...prev,
+                          penerimaNama: undefined,
+                          penerimaJabatan: undefined,
+                          penerimaNik: undefined,
+                        }));
+                      }}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium"
+                    >
+                      <option value="AUTO">Otomatis (Divisi Distribusi / Surat Aktif)</option>
+                      {masterVolunteers
+                        .filter(v => v.isActive)
+                        .map(v => (
+                          <option key={v.id} value={v.id}>
+                            {v.name} — Div. {v.division} ({v.position})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Sumber Nomor / Arsip Surat Tugas
+                    </label>
+                    <select
+                      value={stSelectedDocId}
+                      onChange={e => {
+                        setStSelectedDocId(e.target.value);
+                        setStOverrides({});
+                      }}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium"
+                    >
+                      <option value="AUTO">Otomatis ({suratTugasData.letterNumber})</option>
+                      {outgoingDocuments
+                        .filter(d => d.type === 'Surat Tugas')
+                        .map(d => (
+                          <option key={d.id} value={d.id}>
+                            {d.letterNumber} — {d.recipientName}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Keperluan &amp; Rute Cepat
+                    </label>
+                    <input
+                      type="text"
+                      value={stOverrides.keperluan ?? suratTugasData.keperluan}
+                      onChange={e => setStOverrides(prev => ({ ...prev, keperluan: e.target.value }))}
+                      placeholder="Contoh: Pengisian BBM / Pengiriman MBG"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                {showStEditor && (
+                  <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Nomor Surat</label>
+                      <input
+                        type="text"
+                        value={stOverrides.letterNumber ?? suratTugasData.letterNumber}
+                        onChange={e => setStOverrides(prev => ({ ...prev, letterNumber: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Nama Penerima Tugas</label>
+                      <input
+                        type="text"
+                        value={stOverrides.penerimaNama ?? suratTugasData.penerimaNama}
+                        onChange={e => setStOverrides(prev => ({ ...prev, penerimaNama: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Jabatan / Divisi Penerima</label>
+                      <input
+                        type="text"
+                        value={stOverrides.penerimaJabatan ?? suratTugasData.penerimaJabatan}
+                        onChange={e => setStOverrides(prev => ({ ...prev, penerimaJabatan: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">NIK Penerima Tugas</label>
+                      <input
+                        type="text"
+                        value={stOverrides.penerimaNik ?? suratTugasData.penerimaNik}
+                        onChange={e => setStOverrides(prev => ({ ...prev, penerimaNik: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Jenis Kendaraan</label>
+                      <input
+                        type="text"
+                        value={stOverrides.jenisKendaraan ?? suratTugasData.jenisKendaraan}
+                        onChange={e => setStOverrides(prev => ({ ...prev, jenisKendaraan: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Nomor Polisi</label>
+                      <input
+                        type="text"
+                        value={stOverrides.nomorPolisi ?? suratTugasData.nomorPolisi}
+                        onChange={e => setStOverrides(prev => ({ ...prev, nomorPolisi: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Rute Perjalanan</label>
+                      <input
+                        type="text"
+                        value={stOverrides.rutePerjalanan ?? suratTugasData.rutePerjalanan}
+                        onChange={e => setStOverrides(prev => ({ ...prev, rutePerjalanan: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Waktu Pelaksanaan</label>
+                      <input
+                        type="text"
+                        value={stOverrides.waktuPelaksanaan ?? suratTugasData.waktuPelaksanaan}
+                        onChange={e => setStOverrides(prev => ({ ...prev, waktuPelaksanaan: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Diketahui Oleh (Asisten Lapangan)</label>
+                      <input
+                        type="text"
+                        value={stOverrides.diketahuiNama ?? suratTugasData.diketahuiNama}
+                        onChange={e => setStOverrides(prev => ({ ...prev, diketahuiNama: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Jabatan Diketahui Oleh</label>
+                      <input
+                        type="text"
+                        value={stOverrides.diketahuiJabatan ?? suratTugasData.diketahuiJabatan}
+                        onChange={e => setStOverrides(prev => ({ ...prev, diketahuiJabatan: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">Nama Kepala SPPG (Pemberi Tugas)</label>
+                      <input
+                        type="text"
+                        value={stOverrides.pemberiTugasNama ?? suratTugasData.pemberiTugasNama}
+                        onChange={e => setStOverrides(prev => ({ ...prev, pemberiTugasNama: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">NIP Kepala SPPG</label>
+                      <input
+                        type="text"
+                        value={stOverrides.pemberiTugasNip ?? suratTugasData.pemberiTugasNip}
+                        onChange={e => setStOverrides(prev => ({ ...prev, pemberiTugasNip: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi SURAT TUGAS PERJALANAN KENDARAAN OPERASIONAL */}
+              <div className="max-w-4xl mx-auto">
+                <SuratTugasSheet data={suratTugasData} />
+              </div>
             </div>
           ) : activeReportKey === 'organoleptik_penerima' ? (
             <div className="space-y-4">
@@ -5054,6 +5312,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     />
                   ))}
                 </div>
+              ) : activeReportKey === 'surat_tugas' ? (
+                <SuratTugasSheet
+                  data={suratTugasData}
+                  className="max-w-4xl w-full border-slate-300 shadow-md"
+                />
               ) : activeReportKey === 'organoleptik_penerima' ? (
                 <OrganolepticChecklistSheet
                   data={organolepticData}

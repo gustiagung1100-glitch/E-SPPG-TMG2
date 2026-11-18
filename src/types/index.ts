@@ -300,6 +300,24 @@ export interface BeneficiaryNutritionRecord {
   updatedAt: string;
 }
 
+export interface MenuItemGrammage {
+  id: string;
+  categoryKey:
+    | 'stapleFood'
+    | 'animalProtein'
+    | 'plantProtein'
+    | 'vegetable'
+    | 'fruit'
+    | 'milkOrExtra'
+    | 'custom';
+  categoryLabel: string;
+  itemName: string;
+  smallGrams: number;
+  largeGrams: number;
+  notes?: string;
+  isManuallyEdited?: boolean;
+}
+
 export interface MenuItem {
   id: string;
   date: string;
@@ -326,6 +344,7 @@ export interface MenuItem {
   approvedBy?: string;
   notes?: string;
   ingredients?: RecipeIngredient[];
+  itemGrammages?: MenuItemGrammage[];
   customFields?: Record<string, any>;
 }
 
@@ -456,6 +475,7 @@ export interface StockMutation {
   notes: string;
   operatorName: string;
   recipientOrDepartment?: string;
+  qcId?: string;
   customFields?: Record<string, any>;
 }
 
@@ -493,6 +513,11 @@ export interface InventoryItem {
   expiryDate: string;
   qualityStatus: 'Baik' | 'Perlu Pemantauan' | 'Kadaluarsa';
   batches?: StockBatch[];
+  sourceType?: 'quality_control' | 'manual';
+  latestQcId?: string;
+  latestPoNumber?: string;
+  qcRecordIds?: string[];
+  qcTotalReceived?: number;
   customFields?: Record<string, any>;
 }
 
@@ -517,6 +542,10 @@ export interface RABItem {
   approvedAt?: string;
   poCreatedQuantity?: number;
   poCreatedAmount?: number;
+  sourceType?: 'menu_planning' | 'manual' | 'operasional' | 'inventory_alert';
+  sourceMenuId?: string;
+  sourceMenuCode?: string;
+  sourceMenuLabel?: string;
   customFields?: Record<string, any>;
 }
 
@@ -785,6 +814,7 @@ export interface FacilityTemperatures {
   fridge4Temp: number; // Kulkas 4 Bumbu Basah (4 s/d 6°C)
   fridge4Photo?: string;
   humidityMap?: Record<string, number>; // Kelembapan (%) per key ruangan/pendingin
+  timeMap?: Record<string, string>; // Waktu pencatatan (HH:mm) per key ruangan/pendingin
 }
 
 export interface DamagedMaterialItem {
@@ -833,6 +863,26 @@ export interface CookedFoodItem {
   smallPortionSession3PhotoUrl?: string;
 }
 
+export interface CookingItemDetail {
+  id: string;
+  categoryKey: MenuItemGrammage['categoryKey'];
+  categoryLabel: string;
+  itemName: string; // Nama item menu terhubung dengan PLOG
+  smallGrams: number; // Gramasi porsi kecil (g) terhubung Sub-menu Gramasi Item Menu PLOG
+  largeGrams: number; // Gramasi porsi besar (g) terhubung Sub-menu Gramasi Item Menu PLOG
+  grammagePhotoUrl?: string; // Foto gramasi item menu (umum)
+  grammageSmallPhotoUrl?: string; // Foto penimbangan gramasi porsi kecil
+  grammageLargePhotoUrl?: string; // Foto penimbangan gramasi porsi besar
+  temp: number; // Suhu matang Sesi 1 (°C)
+  photoUrl?: string; // Foto item menu matang (Sesi 1)
+  equipment?: string;
+  session2Temp?: number;
+  session2PhotoUrl?: string;
+  session3Temp?: number;
+  session3PhotoUrl?: string;
+  notes?: string;
+}
+
 export interface CookingInspectionRecord {
   id: string;
   date: string;
@@ -846,6 +896,9 @@ export interface CookingInspectionRecord {
     vegetable: CookedFoodItem;
     fruit: CookedFoodItem;
   };
+  itemEntries?: CookingItemDetail[];
+  smallPortionOmprengPhoto?: string;
+  largePortionOmprengPhoto?: string;
   facilityTemps?: FacilityTemperatures;
   notes: string;
 }

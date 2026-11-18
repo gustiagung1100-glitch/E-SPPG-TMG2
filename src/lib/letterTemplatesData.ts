@@ -62,44 +62,68 @@ Pejabat Pemberi Perintah,
   {
     id: 'tmpl-st',
     type: 'Surat Tugas',
-    codePrefix: 'ST',
-    title: 'Surat Tugas (ST)',
-    description: 'Surat penugasan personil relawan atau staf SPPG untuk pelaksanaan tugas teknis operasional dapur, pelatihan, atau pengawalan distribusi.',
-    defaultSubject: 'Surat Tugas Pelaksanaan Distribusi & Pengawasan Gizi MBG',
+    codePrefix: 'ST-KDO',
+    title: 'Surat Tugas Perjalanan Kendaraan Operasional (ST-KDO)',
+    description: 'Surat tugas resmi penggunaan kendaraan operasional SPPG untuk pengantaran paket MBG, pengisian BBM, maupun tugas dinas lapangan petugas & relawan.',
+    defaultSubject: 'Surat Tugas Perjalanan Kendaraan Operasional SPPG',
     fields: [
-      { key: 'NAMA_PETUGAS', label: 'Nama yang Ditugaskan', placeholder: 'Agus Santoso & Rahmat Hidayat', defaultValue: 'Agus Santoso & Rahmat Hidayat' },
-      { key: 'DIVISI_JABATAN', label: 'Divisi / Jabatan', placeholder: 'Tim Divisi Distribusi & Logistik', defaultValue: 'Divisi Distribusi & Logistik Armada 1' },
-      { key: 'URAIAN_TUGAS', label: 'Rincian Penugasan', placeholder: 'Melaksanakan pengiriman porsi MBG...', defaultValue: 'Melaksanakan pengantaran makanan hangat porsi kecil & porsi besar, pengawasan serah terima boks termal, dan penjemputan ompreng steril pada 4 sekolah rute Temenggungan - Krejengan.' },
-      { key: 'LOKASI_TUGAS', label: 'Lokasi Penugasan', placeholder: 'Kecamatan Krejengan', defaultValue: 'Wilayah Pelayanan Kecamatan Krejengan' },
-      { key: 'WAKTU_PELAKSANAAN', label: 'Waktu / Periode Tugas', placeholder: '08 - 14 November 2026', defaultValue: '08 s/d 14 November 2026 (Pukul 07:00 - 14:00 WIB)' },
+      { key: 'NAMA_PETUGAS', label: 'Nama Penerima Tugas', placeholder: 'Rizal Arbiyanto', defaultValue: 'Rizal Arbiyanto' },
+      { key: 'DIVISI_JABATAN', label: 'Jabatan / Divisi', placeholder: 'Divisi Distribusi', defaultValue: 'Divisi Distribusi' },
+      { key: 'NIK_PETUGAS', label: 'NIK Penerima Tugas', placeholder: '3513210906880002', defaultValue: '3513210906880002' },
+      { key: 'JENIS_KENDARAAN', label: 'Jenis Kendaraan', placeholder: 'Suzuki - GC415V APV DLX', defaultValue: 'Suzuki - GC415V APV DLX' },
+      { key: 'NOMOR_POLISI', label: 'Nomor Polisi', placeholder: 'N 1805 MW', defaultValue: 'N 1805 MW' },
+      { key: 'RUTE_PERJALANAN', label: 'Rute Perjalanan', placeholder: 'Pom Bensin / SPPG TMG2 - Sekolah Sasaran', defaultValue: 'Pom Bensin' },
+      { key: 'KEPERLUAN', label: 'Keperluan', placeholder: 'Pengisian BBM / Distribusi MBG', defaultValue: 'Pengisian BBM' },
+      { key: 'WAKTU_PELAKSANAAN', label: 'Waktu Pelaksanaan', placeholder: '06.00–14.00 WIB', defaultValue: '06.00–14.00 WIB' },
+      { key: 'DIKETAHUI_NAMA', label: 'Diketahui Oleh (Nama)', placeholder: 'M. Eka Gusti Agung Pratama', defaultValue: 'M. Eka Gusti Agung Pratama' },
+      { key: 'DIKETAHUI_JABATAN', label: 'Diketahui Oleh (Jabatan)', placeholder: 'Asisten Lapangan SPPG', defaultValue: 'Asisten Lapangan SPPG' },
+      { key: 'NIP_PEMBERI_TUGAS', label: 'NIP Pemberi Tugas', placeholder: 'NIP.2002918 202621 2 004', defaultValue: 'NIP.2002918 202621 2 004' },
     ],
     templateBody: `SURAT TUGAS
+PERJALANAN KENDARAAN OPERASIONAL
+SATUAN PELAYANAN PEMENUHAN GIZI (SPPG)
+PROBOLINGGO KREJENGAN TEMENGGUNGAN 2
 Nomor: {{NOMOR_SURAT}}
 
-Dasar:
-1. Program Makan Bergizi Gratis (MBG) Badan Gizi Nasional (BGN) Republik Indonesia.
-2. Surat Keputusan Kepala SPPG Probolinggo Krejengan Temenggungan 2 tentang Operasional Pelayanan Gizi Harian.
+Yang bertanda tangan di bawah ini:
+Nama    : {{PENANDATANGAN}}
+Jabatan : {{JABATAN_PENANDATANGAN}}
 
-MEMERINTAHKAN:
+Dengan ini memberikan tugas kepada:
+Nama    : {{NAMA_PETUGAS}}
+Jabatan : {{DIVISI_JABATAN}}
+NIK     : {{NIK_PETUGAS}}
 
-Kepada:
-Nama       : {{NAMA_PETUGAS}}
-Divisi     : {{DIVISI_JABATAN}}
-Instansi   : {{NAMA_SPPG}} (Yayasan Hafshawaty)
+Untuk menggunakan kendaraan operasional SPPG dalam rangka mendukung kegiatan operasional Program Makan Bergizi Gratis (MBG), dengan ketentuan sebagai berikut:
+Jenis kendaraan    : {{JENIS_KENDARAAN}}
+Nomor polisi       : {{NOMOR_POLISI}}
+Tanggal perjalanan : {{TANGGAL_SURAT}}
+Rute perjalanan    : {{RUTE_PERJALANAN}}
+Keperluan          : {{KEPERLUAN}}
+Waktu pelaksanaan  : {{WAKTU_PELAKSANAAN}}
 
-Untuk:
-1. {{URAIAN_TUGAS}}
-2. Lokasi Penugasan: {{LOKASI_TUGAS}}.
-3. Waktu Pelaksanaan: {{WAKTU_PELAKSANAAN}}.
-4. Melaksanakan tugas dengan penuh tanggung jawab, mematuhi Standar Operasional Prosedur (SOP) Sanitasi Higiene Makanan, dan melaporkan hasilnya kepada Kepala SPPG.
+Selama melaksanakan tugas, penerima tugas wajib:
+1. Menggunakan kendaraan operasional hanya untuk kepentingan kedinasan dan operasional Program Makan Bergizi Gratis (MBG).
+2. Mematuhi seluruh peraturan perundang-undangan di bidang lalu lintas dan angkutan jalan.
+3. Menjaga kebersihan, keamanan, serta kondisi kendaraan selama digunakan.
+4. Mengisi Bukti Perjalanan Kendaraan Operasional (Log Book) secara lengkap setelah perjalanan selesai.
+5. Bertanggung jawab atas kendaraan beserta kelengkapan yang digunakan selama masa penugasan.
 
-Surat tugas ini diberikan untuk dilaksanakan sebagaimana mestinya.
+Setelah melaksanakan tugas, penerima tugas wajib melaporkan hasil pelaksanaan perjalanan kepada {{JABATAN_PENANDATANGAN}} serta menyerahkan Bukti Perjalanan Kendaraan Operasional sebagai arsip administrasi.
 
-Temenggungan, {{TANGGAL_SURAT}}
-Kepala SPPG Temenggungan 2,
+Demikian Surat Tugas ini dibuat untuk dilaksanakan dengan penuh tanggung jawab.
+
+Probolinggo, {{TANGGAL_SURAT}}
+
+Diketahui Oleh,                        Penerima Tugas,
+{{DIKETAHUI_NAMA}}                     {{NAMA_PETUGAS}}
+{{DIKETAHUI_JABATAN}}                  {{DIVISI_JABATAN}}
+
+Pemberi Tugas
+{{JABATAN_PENANDATANGAN}}
 
 {{PENANDATANGAN}}
-{{JABATAN_PENANDATANGAN}}`,
+{{NIP_PEMBERI_TUGAS}}`,
   },
   {
     id: 'tmpl-bast',

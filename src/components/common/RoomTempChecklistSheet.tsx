@@ -7,6 +7,7 @@ import {
   FacilityTempUnitConfig,
   getFacilityTempValue,
   getFacilityHumidityValue,
+  getFacilityTimeValue,
   getFacilityPhotoUrl,
 } from './FacilityTempUploadSection';
 import { parseLocalDate } from '../../lib/exportUtils';
@@ -158,9 +159,10 @@ export function resolveRoomTempChecklistData(
       }
       const tempVal = getFacilityTempValue(rec.facilityTemps, unit.tempKey);
       const humVal = getFacilityHumidityValue(rec.facilityTemps, unit.tempKey);
+      const unitTimeVal = getFacilityTimeValue(rec.facilityTemps, unit.tempKey, rec.time);
       const photoUrl = getFacilityPhotoUrl(rec.facilityTemps, unit.photoKey);
       return {
-        jam: stripWib(rec.time),
+        jam: stripWib(unitTimeVal || rec.time),
         suhuHasil: formatCommaDecimal(tempVal),
         kelembapanHasil: `${humVal}%`,
         photoUrl,

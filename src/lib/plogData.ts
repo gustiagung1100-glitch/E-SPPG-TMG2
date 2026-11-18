@@ -3,6 +3,8 @@ import {
   FoodCompositionItem,
   NutritionTargetConfig,
   DivisionJobdesk,
+  MenuItem,
+  MenuItemGrammage,
 } from '../types';
 
 /**
@@ -535,3 +537,126 @@ export const defaultDivisionJobdesks: DivisionJobdesk[] = [
     status: 'Belum Mulai',
   },
 ];
+
+/**
+ * Membangun daftar gramasi item menu standar (Porsi Kecil vs Porsi Besar)
+ * secara otomatis dari Menu Harian PLOG & Resep Komposisi Bahannya.
+ */
+export function buildDefaultGrammagesForMenu(
+  menu: Pick<
+    MenuItem,
+    'id' | 'stapleFood' | 'animalProtein' | 'plantProtein' | 'vegetable' | 'fruit' | 'milkOrExtra'
+  >,
+  recipeList: RecipeIngredient[] = []
+): MenuItemGrammage[] {
+  const slots: Array<{
+    categoryKey: Exclude<MenuItemGrammage['categoryKey'], 'custom'>;
+    categoryLabel: string;
+    itemName: string;
+    matchCats: string[];
+    fallbackSmall: number;
+    fallbackLarge: number;
+  }> = [
+    {
+      categoryKey: 'stapleFood',
+      categoryLabel: 'Makanan Pokok',
+      itemName: menu.stapleFood,
+      matchCats: ['pokok'],
+      fallbackSmall: 100,
+      fallbackLarge: 150,
+    },
+    {
+      categoryKey: 'animalProtein',
+      categoryLabel: 'Lauk Hewani',
+      itemName: menu.animalProtein,
+      matchCats: ['hewani'],
+      fallbackSmall: 55,
+      fallbackLarge: 80,
+    },
+    {
+      categoryKey: 'plantProtein',
+      categoryLabel: 'Lauk Nabati',
+      itemName: menu.plantProtein,
+      matchCats: ['nabati'],
+      fallbackSmall: 40,
+      fallbackLarge: 60,
+    },
+    {
+      categoryKey: 'vegetable',
+      categoryLabel: 'Sayuran',
+      itemName: menu.vegetable,
+      matchCats: ['sayur'],
+      fallbackSmall: 60,
+      fallbackLarge: 90,
+    },
+    {
+      categoryKey: 'fruit',
+      categoryLabel: 'Buah Segar',
+      itemName: menu.fruit,
+      matchCats: ['buah'],
+      fallbackSmall: 80,
+      fallbackLarge: 110,
+    },
+    {
+      categoryKey: 'milkOrExtra',
+      categoryLabel: 'Pelengkap / Susu',
+      itemName: menu.milkOrExtra,
+      matchCats: ['ekstra', 'susu'],
+      fallbackSmall: 125,
+      fallbackLarge: 125,
+    },
+  ];
+
+  return slots
+    .filter(s => (s.itemName || '').trim() !== '')
+    .map(slot => {
+      const matchedRecipes = recipeList.filter(ing => {
+        const catLower = (ing.category || '').toLowerCase();
+        return slot.matchCats.some(tok => catLower.includes(tok));
+      });
+      const recipeSmallSum = matchedRecipes.reduce((acc, r) => acc + (r.netWeightSmall || 0), 0);
+      const recipeLargeSum = matchedRecipes.reduce((acc, r) => acc + (r.netWeightLarge || 0), 0);
+
+      return {
+        id: `${menu.id}-gram-${slot.categoryKey}`,
+        categoryKey: slot.categoryKey,
+        categoryLabel: slot.categoryLabel,
+        itemName: slot.itemName.trim(),
+        smallGrams: recipeSmallSum > 0 ? recipeSmallSum : slot.fallbackSmall,
+        largeGrams: recipeLargeSum > 0 ? recipeLargeSum : slot.fallbackLarge,
+        notes:
+          matchedRecipes.length > 0
+            ? `Diambil dari menu PLOG & ${matchedRecipes.length} bahan resep`
+            : 'Standar gramasi menu harian PLOG',
+        isManuallyEdited: false,
+      };
+    });
+}
+
+/**
+ * Mengambil daftar gramasi item menu final dari PLOG (menggabungkan input manual
+ * pada sub-menu "Gramasi Item Menu" dengan sinkronisasi live nama item menu PLOG).
+ */
+export function resolveMenuGrammages(
+  menu: MenuItem | undefined,
+  recipeList: RecipeIngredient[] = []
+): MenuItemGrammage[] {
+  if (!menu) return [];
+  const baseDefaults = buildDefaultGrammagesForMenu(menu, recipeList);
+  const saved = Array.isArray(menu.itemGrammages) ? menu.itemGrammages : [];
+  if (saved.length === 0) return baseDefaults;
+
+  const mergedStandard = baseDefaults.map(def => {
+    const existing = saved.find(s => s.categoryKey === def.categoryKey || s.id === def.id);
+    if (!existing) return def;
+    return {
+      ...def,
+      ...existing,
+      itemName: existing.isManuallyEdited ? existing.itemName : def.itemName,
+    };
+  });
+
+  const customItems = saved.filter(s => s.categoryKey === 'custom');
+  return [...mergedStandard, ...customItems];
+}
+

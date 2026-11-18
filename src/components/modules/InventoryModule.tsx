@@ -72,6 +72,7 @@ import {
   Eye,
   X,
   Calculator,
+  Link2,
 } from 'lucide-react';
 import { RefreshCw } from 'lucide-react';
 import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
@@ -102,6 +103,8 @@ export const InventoryModule: React.FC = () => {
     hasPermission,
     sppgConfig,
     addToast,
+    syncInventoryFromQualityControl,
+    qualityControlRecords,
     dynamicFormSchemas,
   } = useApp();
 
@@ -153,20 +156,20 @@ export const InventoryModule: React.FC = () => {
     customFields: {},
   });
 
-  // Modal: Quick Transaction (Barang Masuk / Barang Keluar / Retur)
+  // Modal: Quick Transaction (Barang Keluar / Retur Keluar — Barang Masuk otomatis dari QC)
   const [isMutationModalOpen, setIsMutationModalOpen] = useState(false);
   const [mutationForm, setMutationForm] = useState({
     itemId: items[0]?.id || 'inv-1',
-    type: 'Barang Masuk' as MutationType,
+    type: 'Barang Keluar' as MutationType,
     orderedQuantity: 50,
-    quantity: 50,
-    referenceNumber: `IN-PO-26110${mutations.length + 1}`,
+    quantity: 30,
+    referenceNumber: `OUT-PRD-26110${mutations.length + 1}`,
     batchNumber: `BATCH-261108-${Math.floor(Math.random() * 80) + 10}`,
     expiryDate: new Date(Date.now() + 86400000 * 10).toISOString().slice(0, 10),
     supplierName: masterSuppliers[0]?.name || 'Koperasi Pasar Krejengan',
     recipientOrDepartment: 'Div. Pengolahan / Dapur Utama',
     photoUrl: '',
-    notes: 'Penerimaan bahan pangan sesuai standar mutu',
+    notes: 'Pengeluaran bahan pangan untuk produksi dapur SPPG',
     operatorName: currentUser.name,
     customFields: {} as Record<string, any>,
   });
@@ -328,34 +331,30 @@ export const InventoryModule: React.FC = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // HANDLERS: MUTASI BARANG (BARANG MASUK / KELUAR / RETUR)
+  // HANDLERS: MUTASI BARANG (BARANG KELUAR / RETUR — BARANG MASUK OTOMATIS DARI QC)
   // ---------------------------------------------------------------------------
-  // Formula: Stok Akhir = Stok Awal + Barang Masuk - Barang Keluar
   const handleOpenQuickMutation = (
     item: InventoryItem,
-    type: MutationType = 'Barang Masuk'
+    type: MutationType = 'Barang Keluar'
   ) => {
+    const safeType: MutationType = type === 'Barang Masuk' ? 'Barang Keluar' : type;
     setMutationForm({
       itemId: item.id,
-      type,
-      orderedQuantity: type === 'Barang Masuk' ? 50 : 0,
-      quantity: type === 'Barang Keluar' ? Math.min(item.currentStock, 30) : 50,
+      type: safeType,
+      orderedQuantity: 0,
+      quantity: safeType === 'Barang Keluar' ? Math.min(item.currentStock, 30) : Math.min(item.currentStock, 10),
       referenceNumber:
-        type === 'Barang Masuk'
-          ? `IN-RCV-26110${mutations.length + 1}`
-          : type === 'Barang Keluar'
+        safeType === 'Barang Keluar'
           ? `OUT-PRD-26110${mutations.length + 1}`
           : `RET-SUP-26110${mutations.length + 1}`,
       batchNumber: `BATCH-${item.code.slice(-3)}-${Date.now().toString().slice(-4)}`,
       expiryDate: new Date(Date.now() + 86400000 * 8).toISOString().slice(0, 10),
       supplierName: item.supplierName,
-      recipientOrDepartment: type === 'Barang Keluar' ? 'Div. Pengolahan' : item.supplierName,
+      recipientOrDepartment: safeType === 'Barang Keluar' ? 'Div. Pengolahan' : item.supplierName,
       photoUrl: '',
       notes:
-        type === 'Barang Masuk'
-          ? 'Penerimaan bahan tambahan dari supplier'
-          : type === 'Barang Keluar'
-          ? 'Pengeluaran untuk produksi makan siang MBG 2.850 porsi'
+        safeType === 'Barang Keluar'
+          ? 'Pengeluaran untuk produksi makan siang MBG'
           : 'Retur ke supplier karena bahan tidak sesuai standar mutu',
       operatorName: currentUser.name,
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.inventory_mutation_form),
@@ -686,38 +685,37 @@ export const InventoryModule: React.FC = () => {
                 GUDANG & LOGISTIK MBG
               </span>
               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                <RefreshCw className="w-3 h-3" />
-                Tersinkron Real-Time ke RAB, Master Bahan & Menu
+                <Link2 className="w-3 h-3" />
+                Stok Gudang Diambil Otomatis dari Hasil Input Quality Control ({qualityControlRecords.length} QC)
               </span>
             </div>
             <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
               Modul Pengadaan dan Gudang (Inventory Control)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Setiap perubahan harga, satuan, atau stok otomatis memperbarui Master Bahan, RAB Pengadaan, Food Cost Resep, dan Kartu Stok
+              Alur Terhubung: Perencanaan Menu → RAB → Purchase Order → Quality Control → Stok Gudang & Kartu Stok
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {hasPermission('inventory', 'create') && (
-            <button
-              type="button"
-              onClick={handleOpenCreateItem}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Tambah Item Bahan</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => syncInventoryFromQualityControl()}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold shadow-xs transition"
+            title="Sinkronkan ulang seluruh penerimaan stok gudang langsung dari hasil Quality Control (QC)"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Sinkron Ulang dari Hasil QC</span>
+          </button>
 
           <button
             type="button"
-            onClick={() => handleOpenQuickMutation(items[0], 'Barang Masuk')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+            onClick={() => items[0] && handleOpenQuickMutation(items[0], 'Barang Keluar')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
           >
-            <ArrowUpRight className="w-4 h-4" />
-            <span>Catat Mutasi Stok</span>
+            <ArrowDownRight className="w-4 h-4" />
+            <span>Catat Barang Keluar / Retur</span>
           </button>
         </div>
       </div>
@@ -1018,16 +1016,28 @@ export const InventoryModule: React.FC = () => {
               },
               {
                 key: 'storage',
-                header: 'Lokasi & Supplier',
+                header: 'Lokasi, Supplier & Sumber QC',
                 render: row => (
                   <div className="text-xs space-y-0.5">
                     <div className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                       <Warehouse className="w-3.5 h-3.5 text-sky-600" />
                       <span>{row.storageLocation}</span>
                     </div>
-                    <div className="text-[10px] text-slate-500 truncate max-w-[150px]">
+                    <div className="text-[10px] text-slate-500 truncate max-w-[160px]">
                       {row.supplierName}
                     </div>
+                    {row.latestPoNumber ? (
+                      <div className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[9px] font-mono font-bold">
+                        <Link2 className="w-2.5 h-2.5 shrink-0" />
+                        <span>
+                          QC: {row.latestPoNumber} ({row.qcRecordIds?.length || 1} batch • +{formatNumber(row.qcTotalReceived || 0)} {row.unit})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-[9px] text-slate-400 italic">
+                        Sumber: Quality Control
+                      </div>
+                    )}
                   </div>
                 ),
               },
@@ -1081,15 +1091,6 @@ export const InventoryModule: React.FC = () => {
                     >
                       <ClipboardList className="w-3 h-3" />
                       <span>Kartu Stok</span>
-                    </button>
-
-                    {/* Quick Barang Masuk */}
-                    <button
-                      onClick={() => handleOpenQuickMutation(row, 'Barang Masuk')}
-                      className="p-1.5 text-emerald-600 hover:text-emerald-800 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
-                      title="Catat Barang Masuk (+)"
-                    >
-                      <ArrowUpRight className="w-4 h-4" />
                     </button>
 
                     {/* Quick Barang Keluar */}
@@ -1733,6 +1734,13 @@ export const InventoryModule: React.FC = () => {
             />
           )}
 
+          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+            <Info className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Barang Masuk Gudang</strong> otomatis dicatat dari hasil input <strong>Quality Control (Modul PLOK)</strong>. Gunakan form ini untuk mencatat <strong>Barang Keluar</strong> ke dapur atau <strong>Retur Keluar</strong> ke supplier.
+            </span>
+          </div>
+
           <DynamicFormRenderer
             schema={dynamicFormSchemas.inventory_mutation_form}
             values={{
@@ -1746,6 +1754,33 @@ export const InventoryModule: React.FC = () => {
               })),
             }}
             excludeKeys={mutationForm.type !== 'Barang Masuk' ? ['orderedQuantity'] : []}
+            customRenderField={field => {
+              if (field.key === 'type') {
+                return (
+                  <div>
+                    <label className="block font-bold mb-1.5 text-slate-700 dark:text-slate-300">
+                      {field.label}
+                      <span className="text-rose-500 ml-0.5">*</span>
+                    </label>
+                    <select
+                      required
+                      value={mutationForm.type === 'Barang Masuk' ? 'Barang Keluar' : mutationForm.type}
+                      onChange={e =>
+                        setMutationForm(prev => ({
+                          ...prev,
+                          type: e.target.value as MutationType,
+                        }))
+                      }
+                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                    >
+                      <option value="Barang Keluar">Barang Keluar (Pemakaian Dapur)</option>
+                      <option value="Retur Keluar">Retur Keluar (Pengembalian ke Supplier)</option>
+                    </select>
+                  </div>
+                );
+              }
+              return undefined;
+            }}
             onChange={(key, value, field) => {
               if (field.isSystem) {
                 setMutationForm(prev => ({
@@ -1994,6 +2029,15 @@ export const InventoryModule: React.FC = () => {
             />
           )}
 
+          {editingItem && (
+            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-[11px] text-sky-900 dark:text-sky-200 flex items-start gap-2">
+              <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <span>
+                Saldo stok saat ini (<strong>{formatNumber(editingItem.currentStock)} {editingItem.unit}</strong>) dihitung otomatis dari hasil <strong>Quality Control</strong> dikurangi pemakaian dapur dan penyesuaian opname.
+              </span>
+            </div>
+          )}
+
           <DynamicFormRenderer
             schema={dynamicFormSchemas.inventory_item_form}
             values={{
@@ -2003,6 +2047,7 @@ export const InventoryModule: React.FC = () => {
             dynamicOptions={{
               unit: unitOptions,
             }}
+            excludeKeys={editingItem ? ['currentStock'] : []}
             onChange={(key, value, field) => {
               if (field.isSystem) {
                 setItemFormData(prev => {

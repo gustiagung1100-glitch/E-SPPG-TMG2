@@ -112,6 +112,14 @@ import {
 } from './plogData';
 import { initialBeneficiaryNutritionRecords } from './beneficiaryNutritionData';
 import { calculateWHOZScore, validateNikFormat, normalizeNik } from './whoZScore';
+import {
+  isMatchingMaterialNameShared,
+  normalizeMaterialSyncName,
+  syncRABWithMenuPlans,
+  reconcileRABWithPurchaseOrders as reconcileRABWithPurchaseOrdersShared,
+  reconcilePurchaseOrdersWithQC,
+  reconcileInventoryFromQualityControl,
+} from './supplyChainSync';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -246,7 +254,7 @@ interface AppContextType {
 
   // Operasional Lainnya
   menuItems: MenuItem[];
-  addMenuItem: (item: Omit<MenuItem, 'id'>) => Promise<void>;
+  addMenuItem: (item: Omit<MenuItem, 'id'>) => Promise<MenuItem>;
   updateMenuItem: (id: string, item: Partial<MenuItem>) => Promise<void>;
   deleteMenuItem: (id: string) => Promise<void>;
   approveMenuItem: (id: string, approvedBy: string) => Promise<void>;
@@ -293,6 +301,8 @@ interface AppContextType {
   deleteRABItem: (id: string) => Promise<void>;
   approveRABItem: (id: string, approverName: string) => Promise<void>;
   syncCriticalInventoryToRAB: () => Promise<number>;
+  syncAllMenuNeedsToRAB: () => Promise<number>;
+  syncInventoryFromQualityControl: () => Promise<number>;
   syncMenuNeedsToRAB: (
     menuId: string,
     needs: Array<{
@@ -792,16 +802,17 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierName: 'PT Unggas Barokah Probolinggo',
     supplierContact: 'H. Suwandi - 0812-7788-9911',
     deliveryDate: '2026-11-08',
+    rabId: 'rab-2',
     items: [
-      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Segar', quantity: 280, unit: 'kg', unitPrice: 38000, subtotal: 10640000 },
+      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 250, unit: 'kg', unitPrice: 38000, subtotal: 9500000, rabId: 'rab-2', receivedQuantity: 250 },
     ],
-    totalAmount: 10640000,
-    status: 'Disetujui Kepala',
-    qcStatus: 'Lolos Penuh',
-    qcNotes: 'Suhu tiba 3.8°C, bau segar alami, potongan seragam bersih tanpa lemak berlebih.',
+    totalAmount: 9500000,
+    status: 'Selesai diterima',
+    qcStatus: 'Diterima',
+    qcNotes: 'Suhu tiba 2.8°C, bau segar alami, potongan seragam bersih tanpa lemak berlebih.',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Pengiriman batch subuh pukul 03:30 WIB untuk masak porsi SD.',
+    notes: 'Pengiriman batch subuh pukul 03:30 WIB dari alokasi RAB-BP-2026-11-002.',
     supplierConfirmed: true,
     supplierConfirmedAt: '2026-11-07 14:00',
     supplierEstimatedDelivery: '2026-11-08 03:30 WIB',
@@ -829,25 +840,28 @@ const initialPurchaseOrders: PurchaseOrder[] = [
   {
     id: 'po-2',
     poNumber: 'PO/SPPG-TMG2/2026/XI/0089',
-    date: '2026-11-08',
-    supplierName: 'Petani Bawang Dringu & CV Sembako',
-    supplierContact: 'Pak Sugiono - 0852-3344-9988',
-    deliveryDate: '2026-11-09',
+    date: '2026-11-06',
+    supplierName: 'Koperasi Tani Makmur Krejengan',
+    supplierContact: 'H. Abdurrahman - 0852-3344-9988',
+    deliveryDate: '2026-11-07',
+    rabId: 'rab-1',
     items: [
-      { itemId: 'inv-8', itemName: 'Bawang Merah Probolinggo Super', quantity: 60, unit: 'kg', unitPrice: 34000, subtotal: 2040000 },
-      { itemId: 'inv-5', itemName: 'Minyak Goreng Sawit Kemasan 2L', quantity: 80, unit: 'liter', unitPrice: 17500, subtotal: 1400000 },
+      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1800, unit: 'kg', unitPrice: 14500, subtotal: 26100000, rabId: 'rab-1', receivedQuantity: 1800 },
     ],
-    totalAmount: 3440000,
-    status: 'Menunggu Verifikasi Keuangan',
-    qcStatus: 'Belum QC',
-    notes: 'Kebutuhan restock bahan dapur yang menipis di gudang.',
+    totalAmount: 26100000,
+    status: 'Selesai diterima',
+    qcStatus: 'Diterima',
+    qcNotes: 'Kadar air < 14%, butir utuh > 95%, bebas kutu dan batu kecil.',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Pengadaan beras gelombang 1 dari RAB-BP-2026-11-001.',
     supplierConfirmed: true,
-    supplierConfirmedAt: '2026-11-08 16:30',
-    supplierEstimatedDelivery: '2026-11-09 06:00 WIB',
+    supplierConfirmedAt: '2026-11-06 11:30',
+    supplierEstimatedDelivery: '2026-11-07 14:00 WIB',
     supplierDriverName: 'Sugiarto',
     supplierDriverPhone: '0852-9988-1122',
     supplierVehicleNumber: 'N 8140 DR',
-    supplierDeliveryStatus: 'Sedang Dipersiapkan',
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
   },
   {
     id: 'po-3',
@@ -856,16 +870,17 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierName: 'Kebun Pisang Gending',
     supplierContact: 'Moch. Mansur - 0819-2233-4455',
     deliveryDate: '2026-11-07',
+    rabId: 'rab-5',
     items: [
-      { itemId: 'inv-6', itemName: 'Pisang Cavendish Matang Alami', quantity: 2900, unit: 'butir', unitPrice: 1800, subtotal: 5220000 },
+      { itemId: 'inv-6', itemName: 'Pisang Cavendish Masak Pohon', quantity: 250, unit: 'kg', unitPrice: 13500, subtotal: 3375000, rabId: 'rab-5', receivedQuantity: 250 },
     ],
-    totalAmount: 5220000,
-    status: 'Diterima di Gudang',
-    qcStatus: 'Lolos Penuh',
+    totalAmount: 3375000,
+    status: 'Selesai diterima',
+    qcStatus: 'Diterima',
     qcNotes: 'Tingkat kematangan 85%, kulit mulus tanpa memar.',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Distribusi untuk menu hari Minggu dan Senin.',
+    notes: 'Distribusi untuk menu siklus minggu ke-2 dari RAB-BP-2026-11-005.',
     supplierConfirmed: true,
     supplierConfirmedAt: '2026-11-06 13:00',
     supplierEstimatedDelivery: '2026-11-07 05:00 WIB',
@@ -875,23 +890,107 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierDeliveryStatus: 'Telah Tiba di Gudang',
   },
   {
+    id: 'po-5',
+    poNumber: 'PO/SPPG-TMG2/2026/XI/0090',
+    date: '2026-11-07',
+    supplierName: 'CV Segar Sayur Bromo',
+    supplierContact: 'Ibu Endang - 0813-5566-7788',
+    deliveryDate: '2026-11-08',
+    rabId: 'rab-4',
+    items: [
+      { itemId: 'inv-4', itemName: 'Wortel & Buncis Segar Dataran Tinggi', quantity: 220, unit: 'kg', unitPrice: 12000, subtotal: 2640000, rabId: 'rab-4', receivedQuantity: 210 },
+    ],
+    totalAmount: 2640000,
+    status: 'Sebagian diterima',
+    qcStatus: 'Diterima sebagian',
+    qcNotes: '210 kg diterima baik, 10 kg wortel berlendir ditolak.',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Pasokan sayur segar dari RAB-BP-2026-11-004.',
+    supplierConfirmed: true,
+    supplierConfirmedAt: '2026-11-07 15:00',
+    supplierEstimatedDelivery: '2026-11-08 05:30 WIB',
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
+  },
+  {
+    id: 'po-6',
+    poNumber: 'PO/SPPG-TMG2/2026/XI/0092',
+    date: '2026-11-06',
+    supplierName: 'Peternakan Ayam Barokah Pajarakan',
+    supplierContact: 'H. Yusuf - 0812-4455-6677',
+    deliveryDate: '2026-11-07',
+    rabId: 'rab-3',
+    items: [
+      { itemId: 'inv-3', itemName: 'Telur Ayam Ras Grade A Segar', quantity: 180, unit: 'kg', unitPrice: 27500, subtotal: 4950000, rabId: 'rab-3', receivedQuantity: 180 },
+    ],
+    totalAmount: 4950000,
+    status: 'Selesai diterima',
+    qcStatus: 'Diterima',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Telur segar grade A dari RAB-BP-2026-11-003.',
+    supplierConfirmed: true,
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
+  },
+  {
+    id: 'po-7',
+    poNumber: 'PO/SPPG-TMG2/2026/XI/0093',
+    date: '2026-11-04',
+    supplierName: 'Distributor Resmi Susu Nasional',
+    supplierContact: 'CS Susu MBG - 0811-3344-5566',
+    deliveryDate: '2026-11-05',
+    rabId: 'rab-6',
+    items: [
+      { itemId: 'inv-7', itemName: 'Susu UHT Plain / Cokelat 125ml', quantity: 4800, unit: 'pcs', unitPrice: 3600, subtotal: 17280000, rabId: 'rab-6', receivedQuantity: 4800 },
+    ],
+    totalAmount: 17280000,
+    status: 'Selesai diterima',
+    qcStatus: 'Diterima',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Susu UHT kemasan 125ml dari RAB-BP-2026-11-006.',
+    supplierConfirmed: true,
+    supplierDeliveryStatus: 'Telah Tiba di Gudang',
+  },
+  {
     id: 'po-4',
     poNumber: 'PO/SPPG-TMG2/2026/XI/0091',
     date: '2026-11-09',
     supplierName: 'PT Unggas Barokah Probolinggo',
     supplierContact: 'H. Suwandi - 0812-7788-9911',
     deliveryDate: '2026-11-10',
+    rabId: 'rab-2',
     items: [
-      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Segar', quantity: 290, unit: 'kg', unitPrice: 38000, subtotal: 11020000 },
+      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 290, unit: 'kg', unitPrice: 38000, subtotal: 11020000, rabId: 'rab-2', receivedQuantity: 0 },
     ],
     totalAmount: 11020000,
-    status: 'Disetujui Kepala',
+    status: 'Dikirim ke supplier',
     qcStatus: 'Belum QC',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Kebutuhan pasokan ayam potong segar untuk menu hari Selasa, 10 November 2026. Harap konfirmasi kesanggupan.',
-    supplierConfirmed: false,
-    supplierDeliveryStatus: 'Menunggu Konfirmasi',
+    notes: 'Kebutuhan pasokan ayam potong segar untuk menu hari Selasa, 10 November 2026 (RAB-BP-2026-11-002). Siap dilakukan QC kedatangan.',
+    supplierConfirmed: true,
+    supplierDeliveryStatus: 'Dalam Pengiriman',
+  },
+  {
+    id: 'po-8',
+    poNumber: 'PO/SPPG-TMG2/2026/XI/0094',
+    date: '2026-11-09',
+    supplierName: 'Koperasi Tani Makmur Krejengan',
+    supplierContact: 'H. Abdurrahman - 0852-3344-9988',
+    deliveryDate: '2026-11-10',
+    rabId: 'rab-1',
+    items: [
+      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1000, unit: 'kg', unitPrice: 14500, subtotal: 14500000, rabId: 'rab-1', receivedQuantity: 0 },
+    ],
+    totalAmount: 14500000,
+    status: 'Dikirim ke supplier',
+    qcStatus: 'Belum QC',
+    approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
+    verifiedByFinance: 'M. Farhan, S.E.',
+    notes: 'Pengadaan beras gelombang 2 dari RAB-BP-2026-11-001. Menunggu pemeriksaan QC kedatangan.',
+    supplierConfirmed: true,
+    supplierDeliveryStatus: 'Dalam Pengiriman',
   },
 ];
 
@@ -1660,125 +1759,9 @@ function validateStoredSessionAgainstPolicy(
 // =============================================================================
 // REAL-TIME CROSS-MODULE DATA SYNCHRONIZATION HELPERS
 // =============================================================================
-const SYNC_STOP_WORDS = new Set([
-  'segar',
-  'grade',
-  'kemasan',
-  'lokal',
-  'kupas',
-  'medium',
-  'pulen',
-  'wangi',
-  'standar',
-  'bgn',
-  'murni',
-  'pengadaan',
-  'bahan',
-  'pangan',
-  'super',
-  'alami',
-  'matang',
-  'plastik',
-  'food',
-  'probolinggo',
-  'kraksaan',
-  'gending',
-  'pajarakan',
-  'sukapura',
-  'dringu',
-  'krejengan',
-  'dataran',
-  'tinggi',
-  'broiler',
-  'ras',
-  'giling',
-]);
-
-export function normalizeSyncName(name: string): string {
-  return (name || '')
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function extractSyncTokens(name: string): string[] {
-  return normalizeSyncName(name)
-    .split(' ')
-    .filter(tok => tok.length >= 3 && !SYNC_STOP_WORDS.has(tok) && !/^\d+$/.test(tok));
-}
-
-export function isMatchingMaterialName(a: string, b: string): boolean {
-  const na = normalizeSyncName(a);
-  const nb = normalizeSyncName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  if (na.length >= 4 && nb.length >= 4 && (na.includes(nb) || nb.includes(na))) return true;
-
-  const ta = extractSyncTokens(a);
-  const tb = extractSyncTokens(b);
-  if (ta.length === 0 || tb.length === 0) return false;
-
-  const hasTelurA = ta.includes('telur');
-  const hasTelurB = tb.includes('telur');
-  if (hasTelurA !== hasTelurB) return false;
-
-  const compoundHeads = new Set([
-    'bawang',
-    'cabai',
-    'gula',
-    'daging',
-    'ikan',
-    'kacang',
-    'tepung',
-    'daun',
-    'saus',
-    'minyak',
-  ]);
-
-  if (ta[0] === tb[0]) {
-    if (compoundHeads.has(ta[0]) && ta.length >= 2 && tb.length >= 2) {
-      return ta[1] === tb[1];
-    }
-    return true;
-  }
-
-  if (ta.includes('ayam') && tb.includes('ayam') && !hasTelurA && !hasTelurB) {
-    return true;
-  }
-  if (ta.includes('sapi') && tb.includes('sapi') && !ta.includes('bakso') && !tb.includes('bakso')) {
-    return true;
-  }
-  return false;
-}
-
-function reconcileRABWithPurchaseOrders(pos: PurchaseOrder[], rabs: RABItem[]): RABItem[] {
-  const activePOs = pos.filter(po => po.status !== 'Ditolak' && po.status !== 'Dibatalkan');
-  return rabs.map(rab => {
-    let totalQty = 0;
-    let totalAmount = 0;
-
-    for (const po of activePOs) {
-      const matchingItems = (po.items || []).filter(item => item.rabId === rab.id);
-      if (matchingItems.length > 0) {
-        for (const item of matchingItems) {
-          totalQty += Number(item.quantity || 0);
-          totalAmount += Number(item.subtotal || (item.quantity || 0) * (item.unitPrice || 0));
-        }
-      } else if (po.rabId === rab.id) {
-        totalQty += (po.items || []).reduce((acc, i) => acc + Number(i.quantity || 0), 0);
-        totalAmount += Number(po.totalAmount || 0);
-      }
-    }
-
-    return {
-      ...rab,
-      poCreatedQuantity: totalQty,
-      poCreatedAmount: totalAmount,
-    };
-  });
-}
+export const normalizeSyncName = normalizeMaterialSyncName;
+export const isMatchingMaterialName = isMatchingMaterialNameShared;
+const reconcileRABWithPurchaseOrders = reconcileRABWithPurchaseOrdersShared;
 
 function buildDefaultMenuIngredientsMap(): Record<string, RecipeIngredient[]> {
   return {
@@ -2169,13 +2152,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return defaultDivisionJobdesks;
   });
 
-  const [inventory, setInventory] = useState<InventoryItem[]>(() => {
+  // Reconciled 4-stage Supply Chain Initialization:
+  // Menu (PLOG) -> RAB -> Purchase Order (PO) -> Quality Control (QC) -> Stok Gudang
+  const initialSupplyChainState = React.useMemo(() => {
+    let rawInv: InventoryItem[] = defaultInventoryItemsWithBatches;
     try {
       const saved = localStorage.getItem('esppg_inventory');
       if (saved) {
-        const parsed: InventoryItem[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(item => {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          rawInv = parsed.map((item: InventoryItem) => {
             if (item.batches && item.batches.length > 0) return item;
             const richDefault = defaultInventoryItemsWithBatches.find(d => d.id === item.id);
             return richDefault?.batches ? { ...item, batches: richDefault.batches } : item;
@@ -2183,23 +2169,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     } catch {
-      // Fallback
+      rawInv = defaultInventoryItemsWithBatches;
     }
-    return defaultInventoryItemsWithBatches;
-  });
 
-  const [stockMutations, setStockMutations] = useState<StockMutation[]>(() => {
+    let rawMuts: StockMutation[] = defaultStockMutations;
     try {
       const saved = localStorage.getItem('esppg_stock_mutations_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) rawMuts = parsed;
       }
     } catch {
-      // Fallback
+      rawMuts = defaultStockMutations;
     }
-    return defaultStockMutations;
-  });
+
+    let rawPOs: PurchaseOrder[] = initialPurchaseOrders;
+    try {
+      const saved = localStorage.getItem('esppg_purchase_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) rawPOs = parsed;
+      }
+    } catch {
+      rawPOs = initialPurchaseOrders;
+    }
+
+    let rawRABs: RABItem[] = defaultRABItems;
+    try {
+      const saved = localStorage.getItem('esppg_rab_items');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) rawRABs = parsed;
+      }
+    } catch {
+      rawRABs = defaultRABItems;
+    }
+
+    let rawQCs: QualityControlRecord[] = defaultQualityControlRecords;
+    try {
+      const saved = localStorage.getItem('esppg_qc_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) rawQCs = parsed;
+      }
+    } catch {
+      rawQCs = defaultQualityControlRecords;
+    }
+
+    const syncedPOs = reconcilePurchaseOrdersWithQC(rawPOs, rawQCs);
+    const syncedRABs = reconcileRABWithPurchaseOrders(syncedPOs, rawRABs);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: rawQCs,
+      purchaseOrders: syncedPOs,
+      rabItems: syncedRABs,
+      masterBahan,
+      existingInventory: rawInv,
+      existingMutations: rawMuts,
+    });
+
+    return {
+      qualityControlRecords: rawQCs,
+      purchaseOrders: syncedPOs,
+      rabItems: syncedRABs,
+      inventory: invSync.inventory,
+      stockMutations: invSync.stockMutations,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => initialSupplyChainState.inventory);
+
+  const [stockMutations, setStockMutations] = useState<StockMutation[]>(() => initialSupplyChainState.stockMutations);
 
   const [stockOpnames, setStockOpnames] = useState<StockOpnameRecord[]>(() => {
     try {
@@ -2214,20 +2254,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return defaultStockOpnameRecords;
   });
 
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
-    const saved = localStorage.getItem('esppg_purchase_orders');
-    return saved ? JSON.parse(saved) : initialPurchaseOrders;
-  });
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => initialSupplyChainState.purchaseOrders);
 
-  const [rabItems, setRabItems] = useState<RABItem[]>(() => {
-    const saved = localStorage.getItem('esppg_rab_items');
-    return saved ? JSON.parse(saved) : defaultRABItems;
-  });
+  const [rabItems, setRabItems] = useState<RABItem[]>(() => initialSupplyChainState.rabItems);
 
-  const [qualityControlRecords, setQualityControlRecords] = useState<QualityControlRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_qc_records');
-    return saved ? JSON.parse(saved) : defaultQualityControlRecords;
-  });
+  const [qualityControlRecords, setQualityControlRecords] = useState<QualityControlRecord[]>(() => initialSupplyChainState.qualityControlRecords);
+
+  // Ref mirrors to prevent stale-closure drift across rapid sequential / batch updates
+  const inventoryRef = React.useRef<InventoryItem[]>(inventory);
+  const stockMutationsRef = React.useRef<StockMutation[]>(stockMutations);
+  const purchaseOrdersRef = React.useRef<PurchaseOrder[]>(purchaseOrders);
+  const rabItemsRef = React.useRef<RABItem[]>(rabItems);
+  const qualityControlRecordsRef = React.useRef<QualityControlRecord[]>(qualityControlRecords);
+
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+
+  useEffect(() => {
+    stockMutationsRef.current = stockMutations;
+  }, [stockMutations]);
+
+  useEffect(() => {
+    purchaseOrdersRef.current = purchaseOrders;
+  }, [purchaseOrders]);
+
+  useEffect(() => {
+    rabItemsRef.current = rabItems;
+  }, [rabItems]);
+
+  useEffect(() => {
+    qualityControlRecordsRef.current = qualityControlRecords;
+  }, [qualityControlRecords]);
 
   const [distributionLogs, setDistributionLogs] = useState<DistributionLog[]>(() => {
     const saved = localStorage.getItem('esppg_distribution_logs');
@@ -4520,16 +4578,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Data Dihapus', `Data penerima gizi ${target?.fullName || ''} telah dihapus.`);
   };
 
-  // Menu Items CRUD & Approval
-  const addMenuItem = async (item: Omit<MenuItem, 'id'>) => {
+  // Menu Items CRUD & Approval (auto-syncs linked Draft/Pending RAB items)
+  const syncLinkedMenuPlansToRABSilently = (
+    nextMenus: MenuItem[],
+    nextMap: Record<string, RecipeIngredient[]>
+  ) => {
+    const rabSync = syncRABWithMenuPlans({
+      menuItems: nextMenus,
+      menuIngredientsMap: nextMap,
+      masterUnits,
+      institutions,
+      rabItems: rabItemsRef.current,
+      inventory: inventoryRef.current,
+      masterBahan,
+    });
+    const reconciledRABs = reconcileRABWithPurchaseOrders(purchaseOrdersRef.current, rabSync.rabItems);
+    rabItemsRef.current = reconciledRABs;
+    setRabItems(reconciledRABs);
+  };
+
+  const addMenuItem = async (item: Omit<MenuItem, 'id'>): Promise<MenuItem> => {
     const newItem: MenuItem = { ...item, id: 'menu-' + Date.now() };
-    setMenuItems(prev => [...prev, newItem]);
+    const nextMenus = [...menuItems, newItem];
+    setMenuItems(nextMenus);
+    if (item.ingredients && item.ingredients.length > 0) {
+      const nextMap = { ...menuIngredientsMap, [newItem.id]: item.ingredients };
+      setMenuIngredientsMap(nextMap);
+      syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+    }
     await logAudit('CREATE', 'menu', `Menyusun menu gizi baru tanggal: ${item.date} (${item.stapleFood})`);
     addToast('success', 'Menu Disimpan', `Menu siklus untuk tanggal ${item.date} berhasil ditambahkan.`);
+    return newItem;
   };
 
   const updateMenuItem = async (id: string, item: Partial<MenuItem>) => {
-    setMenuItems(prev => prev.map(m => (m.id === id ? { ...m, ...item } : m)));
+    const nextMenus = menuItems.map(m => (m.id === id ? { ...m, ...item } : m));
+    setMenuItems(nextMenus);
+    if (item.ingredients) {
+      const nextMap = { ...menuIngredientsMap, [id]: item.ingredients };
+      setMenuIngredientsMap(nextMap);
+      syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+    }
     await logAudit('UPDATE', 'menu', `Memperbarui rincian menu gizi ID: ${id}`);
     addToast('success', 'Menu Diperbarui', 'Komposisi gizi menu berhasil diperbarui.');
   };
@@ -4565,7 +4654,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMenuIngredientsMap(nextMap);
     const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
     const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
-    setMenuItems(prev => recomputeMenuItemsFromRecipes(prev, nextMap, masterUnits, qSmall, qLarge));
+    const nextMenus = recomputeMenuItemsFromRecipes(menuItems, nextMap, masterUnits, qSmall, qLarge);
+    setMenuItems(nextMenus);
+    syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
   };
 
   const updateDivisionJobdesks = (
@@ -4700,7 +4791,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supplierName?: string;
     }
   ): Promise<StockMutation | null> => {
-    const targetItem = inventory.find(i => i.id === mutation.itemId);
+    if (mutation.type === 'Barang Masuk' || mutation.type === 'Stok Awal') {
+      addToast(
+        'warning',
+        'Pemasukan Stok Wajib Melalui Quality Control',
+        'Stok masuk gudang hanya diambil otomatis dari hasil Input Quality Control (Menu -> RAB -> PO -> QC).'
+      );
+      return null;
+    }
+
+    const targetItem = inventoryRef.current.find(i => i.id === mutation.itemId);
     if (!targetItem) return null;
 
     const isOutgoing = mutation.type === 'Barang Keluar' || mutation.type === 'Retur Keluar';
@@ -4736,45 +4836,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       totalPrice: (isOutgoing ? qtyOut : qtyIn) * unitPrice,
     };
 
-    setStockMutations(prev => [...prev, newMutation]);
-
-    setInventory(prev =>
-      prev.map(i => {
-        if (i.id !== targetItem.id) return i;
-        let updatedBatches = [...(i.batches || [])];
-        if (qtyIn > 0) {
-          updatedBatches.push({
-            id: `b-${Date.now()}`,
-            batchNumber: mutation.batchNumber || `BATCH-${Date.now().toString().slice(-6)}`,
-            receivedDate: effectiveDate,
-            expiryDate: mutation.expiryDate || i.expiryDate,
-            initialQty: qtyIn,
-            remainingQty: qtyIn,
-            unitPrice,
-            supplierName: mutation.supplierName || i.supplierName,
-          });
-        } else if (qtyOut > 0 && updatedBatches.length > 0) {
-          // FEFO depletion
-          let remainingToDeduct = qtyOut;
-          updatedBatches = updatedBatches
-            .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime())
-            .map(b => {
-              if (remainingToDeduct <= 0 || b.remainingQty <= 0) return b;
-              const take = Math.min(b.remainingQty, remainingToDeduct);
-              remainingToDeduct -= take;
-              return { ...b, remainingQty: b.remainingQty - take };
-            });
-        }
-
-        return {
-          ...i,
-          currentStock: newBalance,
-          lastRestocked: qtyIn > 0 ? effectiveDate : i.lastRestocked,
-          qualityStatus: newBalance <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-          batches: updatedBatches,
-        };
-      })
-    );
+    const nextRawMuts = [...stockMutationsRef.current, newMutation];
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: qualityControlRecordsRef.current,
+      purchaseOrders: purchaseOrdersRef.current,
+      rabItems: rabItemsRef.current,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: nextRawMuts,
+    });
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+    setStockMutations(invSync.stockMutations);
+    setInventory(invSync.inventory);
 
     await logAudit(
       'UPDATE',
@@ -4790,23 +4864,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateStockMutation = async (id: string, updates: Partial<StockMutation>) => {
-    setStockMutations(prev =>
-      prev.map(m => {
-        if (m.id !== id) return m;
-        const nextQtyIn = updates.quantityIn !== undefined ? updates.quantityIn : m.quantityIn;
-        const nextQtyOut = updates.quantityOut !== undefined ? updates.quantityOut : m.quantityOut;
-        const nextUnitPrice = updates.unitPrice !== undefined ? updates.unitPrice : m.unitPrice;
-        const qtyBase = nextQtyIn > 0 ? nextQtyIn : nextQtyOut;
-        return {
-          ...m,
-          ...updates,
-          quantityIn: nextQtyIn,
-          quantityOut: nextQtyOut,
-          unitPrice: nextUnitPrice,
-          totalPrice: qtyBase * nextUnitPrice,
-        };
-      })
-    );
+    const nextRawMuts = stockMutationsRef.current.map(m => {
+      if (m.id !== id) return m;
+      const nextQtyIn = updates.quantityIn !== undefined ? updates.quantityIn : m.quantityIn;
+      const nextQtyOut = updates.quantityOut !== undefined ? updates.quantityOut : m.quantityOut;
+      const nextUnitPrice = updates.unitPrice !== undefined ? updates.unitPrice : m.unitPrice;
+      const qtyBase = nextQtyIn > 0 ? nextQtyIn : nextQtyOut;
+      return {
+        ...m,
+        ...updates,
+        quantityIn: nextQtyIn,
+        quantityOut: nextQtyOut,
+        unitPrice: nextUnitPrice,
+        totalPrice: qtyBase * nextUnitPrice,
+      };
+    });
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: qualityControlRecordsRef.current,
+      purchaseOrders: purchaseOrdersRef.current,
+      rabItems: rabItemsRef.current,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: nextRawMuts,
+    });
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+    setStockMutations(invSync.stockMutations);
+    setInventory(invSync.inventory);
     await logAudit('UPDATE', 'inventory', `Memperbarui catatan mutasi stok ID: ${id}`);
     addToast('success', 'Mutasi Diperbarui', 'Catatan mutasi stok berhasil diperbarui.');
   };
@@ -4817,7 +4901,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     reason: string;
     inspectorName: string;
   }): Promise<StockOpnameRecord | null> => {
-    const targetItem = inventory.find(i => i.id === input.itemId);
+    const targetItem = inventoryRef.current.find(i => i.id === input.itemId);
     if (!targetItem) return null;
 
     const diff = input.physicalStock - targetItem.currentStock;
@@ -4864,19 +4948,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notes: `Penyesuaian Stok Opname (${diff > 0 ? '+' : ''}${diff} ${targetItem.unit}). Alasan: ${input.reason}`,
         operatorName: input.inspectorName,
       };
-      setStockMutations(prev => [...prev, opMut]);
-
-      setInventory(prev =>
-        prev.map(i =>
-          i.id === targetItem.id
-            ? {
-                ...i,
-                currentStock: input.physicalStock,
-                qualityStatus: input.physicalStock <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-              }
-            : i
-        )
-      );
+      const nextRawMuts = [...stockMutationsRef.current, opMut];
+      const invSync = reconcileInventoryFromQualityControl({
+        qualityControlRecords: qualityControlRecordsRef.current,
+        purchaseOrders: purchaseOrdersRef.current,
+        rabItems: rabItemsRef.current,
+        masterBahan,
+        existingInventory: inventoryRef.current,
+        existingMutations: nextRawMuts,
+      });
+      inventoryRef.current = invSync.inventory;
+      stockMutationsRef.current = invSync.stockMutations;
+      setStockMutations(invSync.stockMutations);
+      setInventory(invSync.inventory);
     }
 
     await logAudit(
@@ -4893,23 +4977,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const adjustStock = async (id: string, delta: number, reason: string) => {
-    const targetItem = inventory.find(i => i.id === id);
+    const targetItem = inventoryRef.current.find(i => i.id === id);
     if (!targetItem || delta === 0) return;
     const nextStock = Math.max(0, targetItem.currentStock + delta);
     const todayStr = new Date().toISOString().slice(0, 10);
     const nowTime = new Date().toTimeString().slice(0, 8);
-
-    setInventory(prev =>
-      prev.map(i =>
-        i.id === id
-          ? {
-              ...i,
-              currentStock: nextStock,
-              qualityStatus: nextStock <= i.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-            }
-          : i
-      )
-    );
 
     const adjMut: StockMutation = {
       id: `mut-adj-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -4918,7 +4990,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       itemName: targetItem.name,
       date: todayStr,
       timestamp: `${todayStr} ${nowTime}`,
-      type: delta > 0 ? 'Barang Masuk' : 'Barang Keluar',
+      type: 'Stok Opname',
       referenceNumber: `ADJ-${Date.now().toString().slice(-6)}`,
       unit: targetItem.unit,
       quantityIn: delta > 0 ? delta : 0,
@@ -4929,7 +5001,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: reason,
       operatorName: currentUser.name,
     };
-    setStockMutations(prev => [...prev, adjMut]);
+    const nextRawMuts = [...stockMutationsRef.current, adjMut];
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: qualityControlRecordsRef.current,
+      purchaseOrders: purchaseOrdersRef.current,
+      rabItems: rabItemsRef.current,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: nextRawMuts,
+    });
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+    setStockMutations(invSync.stockMutations);
+    setInventory(invSync.inventory);
 
     await logAudit('UPDATE', 'inventory', `Penyesuaian stok (${delta > 0 ? '+' : ''}${delta}) ${targetItem.name}. Alasan: ${reason}`);
     addToast('info', 'Stok & Kartu Stok Disesuaikan', `${targetItem.name} dimutakhirkan (${delta > 0 ? '+' : ''}${delta} ${targetItem.unit}).`);
@@ -4938,142 +5022,129 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Purchase Orders Workflow (Single-pass RAB Reconciliation prevents double-counting & releases cancelled/rejected PO allocations)
   const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
     const newPO: PurchaseOrder = { ...po, id: 'po-' + Date.now() };
-    const nextPOs = [newPO, ...purchaseOrders];
+    const nextPOs = [newPO, ...purchaseOrdersRef.current];
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
     setPurchaseOrders(nextPOs);
-    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
+    setRabItems(nextRABs);
 
     await logAudit('CREATE', 'procurement', `Membuat Purchase Order baru: ${po.poNumber} (${po.supplierName})`);
     addToast('success', 'PO Berhasil Dibuat', `Purchase Order ${po.poNumber} berhasil diajukan & alokasi RAB disinkronkan.`);
   };
 
   const updatePurchaseOrder = async (id: string, po: Partial<PurchaseOrder>) => {
-    const nextPOs = purchaseOrders.map(p => (p.id === id ? { ...p, ...po } : p));
+    const nextPOs = purchaseOrdersRef.current.map(p => (p.id === id ? { ...p, ...po } : p));
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
     setPurchaseOrders(nextPOs);
-    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
+    setRabItems(nextRABs);
     await logAudit('UPDATE', 'procurement', `Memperbarui Purchase Order ID: ${id}`);
     addToast('success', 'PO Diperbarui', 'Data Purchase Order & sisa alokasi RAB diperbarui.');
   };
 
   const verifyPurchaseOrderFinance = async (id: string, verifierName: string) => {
-    setPurchaseOrders(prev =>
-      prev.map(p =>
-        p.id === id
-          ? {
-              ...p,
-              verifiedByFinance: verifierName,
-              status: 'Disetujui Kepala',
-            }
-          : p
-      )
+    const nextPOs = purchaseOrdersRef.current.map(p =>
+      p.id === id
+        ? {
+            ...p,
+            verifiedByFinance: verifierName,
+            status: 'Disetujui Kepala' as const,
+          }
+        : p
     );
+    purchaseOrdersRef.current = nextPOs;
+    setPurchaseOrders(nextPOs);
     await logAudit('APPROVE', 'procurement', `Verifikasi anggaran keuangan PO ID: ${id} oleh ${verifierName}`);
     addToast('success', 'PO Terverifikasi', 'Purchase Order diverifikasi oleh Pengawas Keuangan.');
   };
 
   const approvePurchaseOrderHead = async (id: string, approverName: string) => {
-    setPurchaseOrders(prev =>
-      prev.map(p =>
-        p.id === id
-          ? {
-              ...p,
-              approvedBy: approverName,
-              status: 'Disetujui Kepala',
-            }
-          : p
-      )
+    const nextPOs = purchaseOrdersRef.current.map(p =>
+      p.id === id
+        ? {
+            ...p,
+            approvedBy: approverName,
+            status: 'Disetujui Kepala' as const,
+          }
+        : p
     );
+    purchaseOrdersRef.current = nextPOs;
+    setPurchaseOrders(nextPOs);
     await logAudit('APPROVE', 'procurement', `Persetujuan PO ID: ${id} oleh Kepala SPPG: ${approverName}`);
     addToast('success', 'PO Disetujui', 'Purchase Order resmi disetujui Kepala SPPG.');
   };
 
   const updatePOQualityControl = async (id: string, qcStatus: PurchaseOrder['qcStatus'], notes: string) => {
-    setPurchaseOrders(prev =>
-      prev.map(p =>
-        p.id === id
-          ? {
-              ...p,
-              qcStatus,
-              qcNotes: notes,
-            }
-          : p
-      )
+    const nextPOs = purchaseOrdersRef.current.map(p =>
+      p.id === id
+        ? {
+            ...p,
+            qcStatus,
+            qcNotes: notes,
+          }
+        : p
     );
+    purchaseOrdersRef.current = nextPOs;
+    setPurchaseOrders(nextPOs);
     await logAudit('UPDATE', 'procurement', `Pemeriksaan QC PO ID: ${id} hasil: ${qcStatus}`);
     addToast('info', 'QC Dicatat', `Hasil uji mutu penerimaan: ${qcStatus}`);
   };
 
   const receivePOToWarehouse = async (id: string) => {
-    const po = purchaseOrders.find(p => p.id === id);
+    const po = purchaseOrdersRef.current.find(p => p.id === id);
     if (!po) return;
+    // Record QC records per PO item so Warehouse Stock strictly flows through QC -> Inventory
+    const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const createdQCs: QualityControlRecord[] = (po.items || []).map((it, idx) => ({
+      id: `qc-${Date.now()}-${idx}`,
+      poId: po.id,
+      poNumber: po.poNumber,
+      supplierName: po.supplierName,
+      itemName: it.itemName,
+      orderedQuantity: it.quantity,
+      unit: it.unit || 'kg',
+      receivedQuantity: it.quantity,
+      differenceQuantity: 0,
+      condition: 'Baik',
+      qualityGrade: 'Grade A (Sangat Baik)',
+      receivingTemp: 24,
+      expiryDate: defaultExp,
+      notes: `Penerimaan gudang via QC otomatis PO ${po.poNumber}`,
+      inspectorName: currentUser.name,
+      status: 'Diterima',
+      inspectedAt,
+      inventoryAdded: true,
+    }));
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const nowTime = new Date().toTimeString().slice(0, 8);
-    const generatedMutations: StockMutation[] = [];
-    let updatedInventory = [...inventory];
-
-    po.items.forEach((poItem, idx) => {
-      const targetIdx = updatedInventory.findIndex(
-        inv => inv.id === poItem.itemId || isMatchingMaterialName(inv.name, poItem.itemName)
-      );
-      if (targetIdx >= 0) {
-        const curr = updatedInventory[targetIdx];
-        const nextStock = curr.currentStock + poItem.quantity;
-        const batchNumber = `BATCH-PO-${Date.now().toString().slice(-5)}-${idx + 1}`;
-        const expDate = curr.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-        updatedInventory[targetIdx] = {
-          ...curr,
-          currentStock: nextStock,
-          lastRestocked: todayStr,
-          qualityStatus: nextStock <= curr.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-          batches: [
-            ...(curr.batches || []),
-            {
-              id: `b-po-${Date.now()}-${idx}`,
-              batchNumber,
-              receivedDate: todayStr,
-              expiryDate: expDate,
-              initialQty: poItem.quantity,
-              remainingQty: poItem.quantity,
-              unitPrice: poItem.unitPrice || curr.pricePerUnit,
-              supplierName: po.supplierName,
-            },
-          ],
-        };
-        generatedMutations.push({
-          id: `mut-po-${Date.now()}-${idx}`,
-          itemId: curr.id,
-          itemCode: curr.code,
-          itemName: curr.name,
-          date: todayStr,
-          timestamp: `${todayStr} ${nowTime}`,
-          type: 'Barang Masuk',
-          referenceNumber: po.poNumber,
-          batchNumber,
-          expiryDate: expDate,
-          supplierName: po.supplierName,
-          unit: curr.unit,
-          orderedQuantity: poItem.quantity,
-          quantityIn: poItem.quantity,
-          quantityOut: 0,
-          balance: nextStock,
-          unitPrice: poItem.unitPrice || curr.pricePerUnit,
-          totalPrice: poItem.quantity * (poItem.unitPrice || curr.pricePerUnit),
-          notes: `Penerimaan fisik gudang dari PO ${po.poNumber}`,
-          operatorName: currentUser.name,
-        });
-      }
+    const nextQCs = [...createdQCs, ...qualityControlRecordsRef.current];
+    const nextPOs = reconcilePurchaseOrdersWithQC(purchaseOrdersRef.current, nextQCs);
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
     });
 
-    setPurchaseOrders(prev =>
-      prev.map(p => (p.id === id ? { ...p, status: 'Diterima di Gudang' } : p))
-    );
-    setInventory(updatedInventory);
-    if (generatedMutations.length > 0) {
-      setStockMutations(prev => [...prev, ...generatedMutations]);
-    }
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
 
-    await logAudit('UPDATE', 'inventory', `Penerimaan fisik barang PO ${po.poNumber} masuk ke stok & kartu mutasi gudang`);
-    addToast('success', 'Bahan Diterima di Gudang', `Stok & kartu mutasi PO ${po.poNumber} otomatis ditambahkan ke inventaris.`);
+    setQualityControlRecords(nextQCs);
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    await logAudit('UPDATE', 'inventory', `Penerimaan PO ${po.poNumber} diverifikasi QC & masuk ke stok gudang`);
+    addToast('success', 'Bahan Diterima di Gudang', `PO ${po.poNumber} telah dicatat pada QC dan otomatis memperbarui Stok Gudang.`);
   };
 
   // Modul PLOK: RAB Handlers & Single-Entry Sync Generators
@@ -5183,6 +5254,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newEntries.length;
   };
 
+  const syncAllMenuNeedsToRAB = async (): Promise<number> => {
+    const res = syncRABWithMenuPlans({
+      menuItems,
+      menuIngredientsMap,
+      masterUnits,
+      institutions,
+      rabItems: rabItemsRef.current,
+      inventory: inventoryRef.current,
+      masterBahan,
+    });
+    const reconciledRABs = reconcileRABWithPurchaseOrders(purchaseOrdersRef.current, res.rabItems);
+    rabItemsRef.current = reconciledRABs;
+    setRabItems(reconciledRABs);
+
+    const changed = res.createdCount + res.updatedCount;
+    await logAudit(
+      'CREATE',
+      'procurement',
+      `Sinkronisasi menyeluruh Perencanaan Menu (PLOG) ke RAB (+${res.createdCount} item baru, ${res.updatedCount} item diperbarui)`
+    );
+    addToast(
+      'success',
+      'RAB Tersinkron dari Perencanaan Menu',
+      changed > 0
+        ? `${res.createdCount} item RAB baru ditambahkan & ${res.updatedCount} item RAB diperbarui dari Perencanaan Menu PLOG.`
+        : 'Seluruh item Perencanaan Menu sudah tersinkron dengan RAB Bahan Pangan.'
+    );
+    return changed;
+  };
+
+  const syncInventoryFromQualityControl = async (): Promise<number> => {
+    const nextPOs = reconcilePurchaseOrdersWithQC(
+      purchaseOrdersRef.current,
+      qualityControlRecordsRef.current
+    );
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: qualityControlRecordsRef.current,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
+    });
+
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    await logAudit(
+      'UPDATE',
+      'inventory',
+      `Sinkronisasi ulang Stok Gudang dari ${qualityControlRecordsRef.current.length} record Quality Control (${invSync.inventory.length} SKU aktif)`
+    );
+    addToast(
+      'success',
+      'Stok Gudang Tersinkron dari Quality Control',
+      `${invSync.inventory.length} komoditas gudang & kartu stok diperbarui langsung dari hasil input QC.`
+    );
+    return invSync.inventory.length;
+  };
+
   const syncMenuNeedsToRAB = async (
     menuId: string,
     needs: Array<{
@@ -5198,57 +5337,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let createdCount = 0;
     let updatedCount = 0;
 
-    setRabItems(prev => {
-      const next = [...prev];
-      needs.forEach((need, idx) => {
-        if (need.quantity <= 0) return;
-        // Prefer latest price from Inventory or Master Bahan if matched
-        const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, need.name));
-        const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, need.name));
-        const resolvedPrice = invMatch?.pricePerUnit || mbMatch?.actualPrice || need.unitPrice || 15000;
-        const resolvedUnit = invMatch?.unit || mbMatch?.unit || need.unit || 'kg';
+    const next = [...rabItemsRef.current];
+    needs.forEach((need, idx) => {
+      if (need.quantity <= 0) return;
+      const invMatch = inventoryRef.current.find(inv => isMatchingMaterialName(inv.name, need.name));
+      const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, need.name));
+      const resolvedPrice = need.unitPrice || mbMatch?.actualPrice || invMatch?.pricePerUnit || 15000;
+      const resolvedUnit = need.unit || mbMatch?.unit || invMatch?.unit || 'kg';
+      const menuLabel = targetMenu
+        ? `${targetMenu.menuCode} (${targetMenu.dayName}, ${targetMenu.date})`
+        : menuId;
 
-        const existingDraftIdx = next.findIndex(
-          r =>
-            r.category === 'RAB Bahan Pangan' &&
-            (r.status === 'Draft' || r.status === 'Menunggu Persetujuan') &&
-            isMatchingMaterialName(r.itemName, need.name)
-        );
+      const existingDraftIdx = next.findIndex(
+        r =>
+          r.category === 'RAB Bahan Pangan' &&
+          r.status !== 'Ditolak' &&
+          (r.status === 'Draft' || r.status === 'Menunggu Persetujuan' || (r.poCreatedQuantity || 0) === 0) &&
+          isMatchingMaterialName(r.itemName, need.name)
+      );
 
-        if (existingDraftIdx >= 0) {
-          const curr = next[existingDraftIdx];
-          next[existingDraftIdx] = {
-            ...curr,
-            volume: need.quantity,
-            unit: resolvedUnit,
-            unitPrice: resolvedPrice,
-            totalBudget: need.quantity * resolvedPrice,
-            notes: `Disinkronkan dari Perencanaan Menu ${targetMenu?.menuCode || menuId}`,
-          };
-          updatedCount++;
-        } else {
-          const codeNum = String(next.length + 1).padStart(3, '0');
-          next.unshift({
-            id: `rab-menu-${Date.now()}-${idx}`,
-            category: 'RAB Bahan Pangan',
-            budgetCode: `RAB-BP-${todayStr.slice(2, 7).replace('-', '')}-${codeNum}`,
-            planDate: targetMenu?.date || todayStr,
-            periodMonth: 'November 2026',
-            itemName: invMatch?.name || need.name,
-            volume: need.quantity,
-            unit: resolvedUnit,
-            unitPrice: resolvedPrice,
-            totalBudget: need.quantity * resolvedPrice,
-            status: 'Menunggu Persetujuan',
-            poCreatedQuantity: 0,
-            poCreatedAmount: 0,
-            notes: `Sinkron otomatis Resep Menu ${targetMenu?.menuCode || menuId} (${need.category})`,
-          });
-          createdCount++;
-        }
-      });
-      return next;
+      if (existingDraftIdx >= 0) {
+        const curr = next[existingDraftIdx];
+        next[existingDraftIdx] = {
+          ...curr,
+          volume: need.quantity,
+          unit: resolvedUnit,
+          unitPrice: resolvedPrice,
+          totalBudget: need.quantity * resolvedPrice,
+          sourceType: 'menu_planning',
+          sourceMenuId: menuId,
+          sourceMenuCode: targetMenu?.menuCode || menuId,
+          sourceMenuLabel: menuLabel,
+          notes: `Sumber Perencanaan Menu PLOG: ${menuLabel}`,
+        };
+        updatedCount++;
+      } else {
+        const codeNum = String(next.length + 1).padStart(3, '0');
+        next.unshift({
+          id: `rab-menu-${Date.now()}-${idx}`,
+          category: 'RAB Bahan Pangan',
+          budgetCode: `RAB-BP-${todayStr.slice(2, 7).replace('-', '')}-${codeNum}`,
+          planDate: targetMenu?.date || todayStr,
+          periodMonth: 'November 2026',
+          itemName: need.name,
+          volume: need.quantity,
+          unit: resolvedUnit,
+          unitPrice: resolvedPrice,
+          totalBudget: need.quantity * resolvedPrice,
+          status: 'Menunggu Persetujuan',
+          poCreatedQuantity: 0,
+          poCreatedAmount: 0,
+          sourceType: 'menu_planning',
+          sourceMenuId: menuId,
+          sourceMenuCode: targetMenu?.menuCode || menuId,
+          sourceMenuLabel: menuLabel,
+          notes: `Sumber Perencanaan Menu PLOG: ${menuLabel} (${need.category})`,
+        });
+        createdCount++;
+      }
     });
+
+    const reconciled = reconcileRABWithPurchaseOrders(purchaseOrdersRef.current, next);
+    rabItemsRef.current = reconciled;
+    setRabItems(reconciled);
 
     await logAudit(
       'CREATE',
@@ -5263,11 +5414,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return createdCount + updatedCount;
   };
 
-  // Modul PLOK: Quality Control Handlers with Automated Stock + Kartu Stok Mutation + Batch Addition
+  // Modul PLOK: Quality Control Handlers with Strict 4-Stage Pipeline Reconciliation (Menu -> RAB -> PO -> QC -> Stok Gudang)
   const addQualityControlRecord = async (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => {
     const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    const todayDate = inspectedAt.slice(0, 10);
-    const nowTime = new Date().toTimeString().slice(0, 8);
     const uniqueSuffix = Math.random().toString(36).slice(2, 6);
     const differenceQuantity =
       qc.differenceQuantity !== undefined
@@ -5279,178 +5428,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `qc-${Date.now()}-${uniqueSuffix}`,
       inspectedAt,
     };
-    setQualityControlRecords(prev => [newQC, ...prev]);
 
-    // Relational sync 1: update PO status, QC record, and item receivedQuantity
-    const nextPOs = purchaseOrders.map(p => {
-      if (p.id === qc.poId || p.poNumber === qc.poNumber) {
-        const nextStatus =
-          qc.status === 'Diterima' || qc.status === 'Lolos Penuh'
-            ? ('Diterima di Gudang' as const)
-            : qc.status === 'Diterima sebagian'
-            ? ('Sebagian diterima' as const)
-            : qc.status === 'Ditolak'
-            ? ('Ditolak' as const)
-            : p.status;
-        const nextItems = (p.items || []).map(it =>
-          isMatchingMaterialName(it.itemName, qc.itemName)
-            ? { ...it, receivedQuantity: (it.receivedQuantity || 0) + qc.receivedQuantity }
-            : it
-        );
-        return {
-          ...p,
-          qcStatus: qc.status,
-          status: nextStatus,
-          qcNotes: qc.notes,
-          items: nextItems,
-          qcRecords: [...(p.qcRecords || []), newQC],
-        };
-      }
-      return p;
+    const nextQCs = [newQC, ...qualityControlRecordsRef.current];
+    const nextPOs = reconcilePurchaseOrdersWithQC(purchaseOrdersRef.current, nextQCs);
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
     });
+
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setQualityControlRecords(nextQCs);
     setPurchaseOrders(nextPOs);
-    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
-
-    // Relational sync 2: If accepted, increase warehouse stock, append FEFO batch, AND record StockMutation!
-    if (
-      (qc.status === 'Diterima' || qc.status === 'Lolos Penuh' || qc.status === 'Diterima sebagian') &&
-      qc.receivedQuantity > 0 &&
-      qc.inventoryAdded
-    ) {
-      const matchedPO = purchaseOrders.find(p => p.id === qc.poId || p.poNumber === qc.poNumber);
-      const poItemMatch = matchedPO?.items?.find(it => isMatchingMaterialName(it.itemName, qc.itemName));
-      const existingIdx = inventory.findIndex(i => isMatchingMaterialName(i.name, qc.itemName));
-      const batchNum = `BATCH-QC-${Date.now().toString().slice(-6)}`;
-      const expDate = qc.expiryDate || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-
-      if (existingIdx !== -1) {
-        const curr = inventory[existingIdx];
-        const nextStock = curr.currentStock + qc.receivedQuantity;
-        const effectiveUnitPrice = poItemMatch?.unitPrice || curr.pricePerUnit;
-
-        setInventory(prev =>
-          prev.map((inv, idx) =>
-            idx === existingIdx
-              ? {
-                  ...inv,
-                  currentStock: nextStock,
-                  lastRestocked: todayDate,
-                  qualityStatus: nextStock <= inv.minimumStock ? 'Perlu Pemantauan' : 'Baik',
-                  batches: [
-                    ...(inv.batches || []),
-                    {
-                      id: `b-qc-${Date.now()}-${uniqueSuffix}`,
-                      batchNumber: batchNum,
-                      receivedDate: todayDate,
-                      expiryDate: expDate,
-                      initialQty: qc.receivedQuantity,
-                      remainingQty: qc.receivedQuantity,
-                      unitPrice: effectiveUnitPrice,
-                      supplierName: qc.supplierName,
-                    },
-                  ],
-                }
-              : inv
-          )
-        );
-
-        const newMut: StockMutation = {
-          id: `mut-qc-${Date.now()}-${uniqueSuffix}`,
-          itemId: curr.id,
-          itemCode: curr.code,
-          itemName: curr.name,
-          date: todayDate,
-          timestamp: `${todayDate} ${nowTime}`,
-          type: 'Barang Masuk',
-          referenceNumber: qc.poNumber,
-          batchNumber: batchNum,
-          expiryDate: expDate,
-          supplierName: qc.supplierName,
-          unit: curr.unit,
-          orderedQuantity: qc.orderedQuantity,
-          quantityIn: qc.receivedQuantity,
-          quantityOut: 0,
-          differenceQuantity,
-          balance: nextStock,
-          unitPrice: effectiveUnitPrice,
-          totalPrice: qc.receivedQuantity * effectiveUnitPrice,
-          photoUrls: qc.photoUrls,
-          notes: `Penerimaan QC (${qc.status}) PO ${qc.poNumber} — ${qc.notes || 'Lolos standar mutu'}`,
-          operatorName: qc.inspectorName,
-        };
-        setStockMutations(prev => [...prev, newMut]);
-      } else {
-        const newInvId = `inv-${Date.now()}-${uniqueSuffix}`;
-        const newInvCode = 'BAHAN-' + Date.now().toString().slice(-4);
-        const unitPrice = poItemMatch?.unitPrice || 20000;
-        const newItem: InventoryItem = {
-          id: newInvId,
-          code: newInvCode,
-          name: qc.itemName,
-          category: 'Bahan Segar',
-          initialStock: qc.receivedQuantity,
-          currentStock: qc.receivedQuantity,
-          unit: qc.unit,
-          minimumStock: Math.round(qc.receivedQuantity * 0.2),
-          pricePerUnit: unitPrice,
-          storageLocation: qc.receivingTemp && qc.receivingTemp < 5 ? 'Cold Storage 1' : 'Gudang Kering A',
-          supplierName: qc.supplierName,
-          lastRestocked: todayDate,
-          expiryDate: expDate,
-          qualityStatus: 'Baik',
-          batches: [
-            {
-              id: `b-qc-${Date.now()}-${uniqueSuffix}`,
-              batchNumber: batchNum,
-              receivedDate: todayDate,
-              expiryDate: expDate,
-              initialQty: qc.receivedQuantity,
-              remainingQty: qc.receivedQuantity,
-              unitPrice,
-              supplierName: qc.supplierName,
-            },
-          ],
-        };
-        setInventory(prev => [newItem, ...prev]);
-
-        const newMut: StockMutation = {
-          id: `mut-qc-${Date.now()}-${uniqueSuffix}`,
-          itemId: newInvId,
-          itemCode: newInvCode,
-          itemName: qc.itemName,
-          date: todayDate,
-          timestamp: `${todayDate} ${nowTime}`,
-          type: 'Barang Masuk',
-          referenceNumber: qc.poNumber,
-          batchNumber: batchNum,
-          expiryDate: expDate,
-          supplierName: qc.supplierName,
-          unit: qc.unit,
-          orderedQuantity: qc.orderedQuantity,
-          quantityIn: qc.receivedQuantity,
-          quantityOut: 0,
-          differenceQuantity,
-          balance: qc.receivedQuantity,
-          unitPrice,
-          totalPrice: qc.receivedQuantity * unitPrice,
-          photoUrls: qc.photoUrls,
-          notes: `Penerimaan QC (${qc.status}) SKU baru dari PO ${qc.poNumber}`,
-          operatorName: qc.inspectorName,
-        };
-        setStockMutations(prev => [...prev, newMut]);
-      }
-    }
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
 
     await logAudit('CREATE', 'procurement', `Pemeriksaan QC PO ${qc.poNumber}: ${qc.itemName} status ${qc.status} (${qc.receivedQuantity} ${qc.unit})`);
-    addToast('success', 'QC Dicatat & Tersinkron ke Gudang', `Pemeriksaan QC PO ${qc.poNumber} tersimpan & otomatis masuk Kartu Stok.`);
+    addToast('success', 'QC Dicatat & Tersinkron ke Gudang', `Pemeriksaan QC PO ${qc.poNumber} tersimpan & otomatis memperbarui Stok Gudang.`);
   };
 
   const updateQualityControlRecord = async (id: string, qc: Partial<QualityControlRecord>) => {
-    setQualityControlRecords(prev =>
-      prev.map(r => (r.id === id ? { ...r, ...qc } : r))
-    );
-    await logAudit('UPDATE', 'procurement', `Memperbarui data QC ID: ${id}`);
-    addToast('success', 'QC Diperbarui', 'Data pemeriksaan mutu diperbarui.');
+    const nextQCs = qualityControlRecordsRef.current.map(r => {
+      if (r.id !== id) return r;
+      const merged = { ...r, ...qc };
+      const ordered = Number(merged.orderedQuantity || 0);
+      const received = Number(merged.receivedQuantity || 0);
+      merged.differenceQuantity =
+        qc.differenceQuantity !== undefined ? qc.differenceQuantity : received - ordered;
+      return merged;
+    });
+    const nextPOs = reconcilePurchaseOrdersWithQC(purchaseOrdersRef.current, nextQCs);
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
+    });
+
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setQualityControlRecords(nextQCs);
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    await logAudit('UPDATE', 'procurement', `Memperbarui data QC ID: ${id} & menyinkronkan PO + Stok Gudang`);
+    addToast('success', 'QC & Stok Gudang Diperbarui', 'Perubahan pemeriksaan mutu otomatis menyinkronkan PO dan saldo Stok Gudang.');
   };
 
   // Distribution Tracking
@@ -6200,6 +6241,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteRABItem,
         approveRABItem,
         syncCriticalInventoryToRAB,
+        syncAllMenuNeedsToRAB,
+        syncInventoryFromQualityControl,
         syncMenuNeedsToRAB,
         qualityControlRecords,
         addQualityControlRecord,
