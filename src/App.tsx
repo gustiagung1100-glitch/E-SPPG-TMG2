@@ -242,6 +242,69 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
   );
 };
 
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errorMessage: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMessage: '' };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      hasError: true,
+      errorMessage: error instanceof Error ? error.message : 'Terjadi kesalahan tampilan.',
+    };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('App render error caught by boundary:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-6">
+          <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-lg text-center space-y-4">
+            <div className="w-12 h-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center font-bold text-xl">
+              !
+            </div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              Terjadi Gangguan Tampilan Modul
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Data tersimpan tetap aman. Klik tombol di bawah untuk memulihkan tampilan modul.
+            </p>
+            {this.state.errorMessage && (
+              <div className="text-[11px] font-mono bg-slate-100 dark:bg-slate-800 text-rose-700 dark:text-rose-300 px-3 py-2 rounded-lg break-words">
+                {this.state.errorMessage}
+              </div>
+            )}
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => this.setState({ hasError: false, errorMessage: '' })}
+                className="px-4 py-2 rounded-xl bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold transition cursor-pointer"
+              >
+                Pulihkan Tampilan
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Muat Ulang Halaman
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const AuthGate: React.FC = () => {
   return (
     <>
@@ -260,9 +323,11 @@ const AuthGate: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AuthGate />
-    </AppProvider>
+    <AppErrorBoundary>
+      <AppProvider>
+        <AuthGate />
+      </AppProvider>
+    </AppErrorBoundary>
   );
 }
 

@@ -115,6 +115,7 @@ import { calculateWHOZScore, validateNikFormat, normalizeNik } from './whoZScore
 import {
   isMatchingMaterialNameShared,
   normalizeMaterialSyncName,
+  resolveRecipeIngredientFormula,
   syncRABWithMenuPlans,
   reconcileRABWithPurchaseOrders as reconcileRABWithPurchaseOrdersShared,
   reconcilePurchaseOrdersWithQC,
@@ -354,6 +355,7 @@ interface AppContextType {
   volunteerAttendance: VolunteerAttendance[];
   recordAttendance: (att: Omit<VolunteerAttendance, 'id'>) => Promise<void>;
   updateAttendance: (id: string, att: Partial<VolunteerAttendance>) => Promise<void>;
+  syncVolunteerAttendanceFromMaster: (date: string) => Promise<{ createdCount: number; updatedCount: number }>;
 
   // Modul Ketidakhadiran Relawan
   volunteerAbsences: VolunteerAbsenceRecord[];
@@ -397,7 +399,7 @@ interface AppContextType {
   updatePrepRecord: (id: string, rec: Partial<PreparationInspectionRecord>) => Promise<void>;
 
   cookingRecords: CookingInspectionRecord[];
-  addCookingRecord: (rec: Omit<CookingInspectionRecord, 'id'>) => Promise<void>;
+  addCookingRecord: (rec: Omit<CookingInspectionRecord, 'id'>) => Promise<CookingInspectionRecord>;
   updateCookingRecord: (id: string, rec: Partial<CookingInspectionRecord>) => Promise<void>;
 
   portioningRecords: PortioningInspectionRecord[];
@@ -1511,30 +1513,30 @@ const defaultVolunteerAbsences: VolunteerAbsenceRecord[] = [
     id: 'abs-2',
     date: '2026-11-09',
     volunteerId: 'vol-06',
-    volunteerName: 'Rina Maryana',
+    volunteerName: 'Lina Marlina',
     division: 'Pemorsian',
     reason: 'Izin Keperluan Keluarga',
     reasonDetails: 'Menghadiri wisuda adik kandung di Kraksaan',
-    replacementVolunteerId: 'vol-cad-2',
-    replacementVolunteerName: 'Mbak Ririn',
+    replacementVolunteerId: 'vol-05',
+    replacementVolunteerName: 'Nurul Hidayati',
     replacementDivision: 'Pemorsian',
     approvalStatus: 'Disetujui',
     approvedBy: 'Siti Aminah, S.Gz.',
     approvedAt: '2026-11-08 19:30:00',
-    notes: 'Surat permohonan izin diajukan H-1, pengganti telah konfirmasi sanggup hadir.',
+    notes: 'Surat permohonan izin diajukan H-1, pengganti dari Master Relawan telah konfirmasi sanggup hadir.',
     createdAt: '2026-11-08 16:00:00',
   },
   {
     id: 'abs-3',
     date: '2026-11-10',
-    volunteerId: 'vol-04',
-    volunteerName: 'Hariyanto',
+    volunteerId: 'vol-07',
+    volunteerName: 'Agus Santoso',
     division: 'Distribusi',
     reason: 'Kendala Transportasi / Cuaca',
     reasonDetails: 'Perbaikan motor operasional pribadi',
-    replacementVolunteerId: 'vol-cad-3',
-    replacementVolunteerName: 'Bambang Irawan',
-    replacementDivision: 'Distribusi',
+    replacementVolunteerId: 'vol-08',
+    replacementVolunteerName: 'Kholifah',
+    replacementDivision: 'Cuci Ompreng',
     approvalStatus: 'Menunggu Persetujuan',
     notes: 'Menunggu verifikasi Asisten Lapangan & Kepala SPPG.',
     createdAt: '2026-11-09 08:30:00',
@@ -1900,36 +1902,8 @@ function recomputeMenuItemsFromRecipes(
     let totalCost = 0;
 
     for (const ing of ings) {
-      const bddRatio = Math.max(1, ing.ediblePortionPercent || 100) / 100;
-      const bkSmall = ing.netWeightSmall / bddRatio;
-      const bkLarge = ing.netWeightLarge / bddRatio;
-
-      const unitMeta = masterUnits.find(
-        u => u.code.trim().toLowerCase() === (ing.purchaseUnit || 'kg').trim().toLowerCase()
-      );
-      const isUnitBased =
-        unitMeta?.baseUnit === 'satuan' ||
-        ing.purchaseUnit === 'pcs' ||
-        ing.purchaseUnit === 'ikat' ||
-        ing.purchaseUnit === 'butir';
-
-      let kebSmall = (quotaSmall * bkSmall) / 1000;
-      let kebLarge = (quotaLarge * bkLarge) / 1000;
-
-      if ((unitMeta?.baseUnit === 'gram' || unitMeta?.baseUnit === 'ml') && unitMeta.conversionToBase > 0) {
-        kebSmall = (quotaSmall * bkSmall) / unitMeta.conversionToBase;
-        kebLarge = (quotaLarge * bkLarge) / unitMeta.conversionToBase;
-      } else if (isUnitBased) {
-        kebSmall = quotaSmall;
-        kebLarge = quotaLarge;
-      }
-
-      const bufSmall = typeof ing.bufferPercentSmall === 'number' ? ing.bufferPercentSmall : 2;
-      const bufLarge = typeof ing.bufferPercentLarge === 'number' ? ing.bufferPercentLarge : 2;
-      const bulSmall = kebSmall > 0 ? Math.ceil(kebSmall * (1 + Math.max(0, bufSmall) / 100)) : 0;
-      const bulLarge = kebLarge > 0 ? Math.ceil(kebLarge * (1 + Math.max(0, bufLarge) / 100)) : 0;
-      const totalQty = bulSmall + bulLarge;
-      totalCost += totalQty * (ing.unitPrice || 0);
+      const formula = resolveRecipeIngredientFormula(ing, masterUnits, quotaSmall, quotaLarge);
+      totalCost += formula.totalCost;
 
       calSmall += (ing.netWeightSmall / 100) * (ing.calories100g || 0);
       calLarge += (ing.netWeightLarge / 100) * (ing.calories100g || 0);
@@ -2108,8 +2082,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Existing Operational States (Single Source of Truth)
   const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
-    const saved = localStorage.getItem('esppg_menu_items');
-    return saved ? JSON.parse(saved) : initialMenuItems;
+    try {
+      const saved = localStorage.getItem('esppg_menu_items');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return initialMenuItems;
   });
 
   const [menuIngredientsMap, setMenuIngredientsMap] = useState<Record<string, RecipeIngredient[]>>(() => {
@@ -2261,11 +2243,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [qualityControlRecords, setQualityControlRecords] = useState<QualityControlRecord[]>(() => initialSupplyChainState.qualityControlRecords);
 
   // Ref mirrors to prevent stale-closure drift across rapid sequential / batch updates
+  const menuItemsRef = React.useRef<MenuItem[]>(menuItems);
+  const menuIngredientsMapRef = React.useRef<Record<string, RecipeIngredient[]>>(menuIngredientsMap);
   const inventoryRef = React.useRef<InventoryItem[]>(inventory);
   const stockMutationsRef = React.useRef<StockMutation[]>(stockMutations);
   const purchaseOrdersRef = React.useRef<PurchaseOrder[]>(purchaseOrders);
   const rabItemsRef = React.useRef<RABItem[]>(rabItems);
   const qualityControlRecordsRef = React.useRef<QualityControlRecord[]>(qualityControlRecords);
+
+  useEffect(() => {
+    menuItemsRef.current = menuItems;
+  }, [menuItems]);
+
+  useEffect(() => {
+    menuIngredientsMapRef.current = menuIngredientsMap;
+  }, [menuIngredientsMap]);
 
   useEffect(() => {
     inventoryRef.current = inventory;
@@ -2308,44 +2300,113 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
-    const saved = localStorage.getItem('esppg_audit_logs');
-    return saved ? JSON.parse(saved) : initialAuditLogs;
+    try {
+      const saved = localStorage.getItem('esppg_audit_logs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return initialAuditLogs;
   });
 
   // 5 Divisi Dapur & Operasional
   const [prepRecords, setPrepRecords] = useState<PreparationInspectionRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_prep_records');
-    return saved ? JSON.parse(saved) : defaultPrepRecords;
+    try {
+      const saved = localStorage.getItem('esppg_prep_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultPrepRecords;
   });
 
   const [cookingRecords, setCookingRecords] = useState<CookingInspectionRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_cooking_records');
-    return saved ? JSON.parse(saved) : defaultCookingRecords;
+    try {
+      const saved = localStorage.getItem('esppg_cooking_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultCookingRecords;
   });
 
+  const cookingRecordsRef = React.useRef<CookingInspectionRecord[]>(cookingRecords);
+  useEffect(() => {
+    cookingRecordsRef.current = cookingRecords;
+  }, [cookingRecords]);
+
   const [portioningRecords, setPortioningRecords] = useState<PortioningInspectionRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_portioning_records');
-    return saved ? JSON.parse(saved) : defaultPortioningRecords;
+    try {
+      const saved = localStorage.getItem('esppg_portioning_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultPortioningRecords;
   });
 
   const [distributionDeliveries, setDistributionDeliveries] = useState<DistributionDeliveryRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_distribution_deliveries');
-    return saved ? JSON.parse(saved) : defaultDistributionDeliveries;
+    try {
+      const saved = localStorage.getItem('esppg_distribution_deliveries');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultDistributionDeliveries;
   });
 
   const [omprengReturns, setOmprengReturns] = useState<OmprengReturnRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_ompreng_returns');
-    return saved ? JSON.parse(saved) : defaultOmprengReturns;
+    try {
+      const saved = localStorage.getItem('esppg_ompreng_returns');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultOmprengReturns;
   });
 
   const [fuelLogs, setFuelLogs] = useState<FuelLogRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_fuel_logs');
-    return saved ? JSON.parse(saved) : defaultFuelLogs;
+    try {
+      const saved = localStorage.getItem('esppg_fuel_logs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultFuelLogs;
   });
 
   const [washingWasteRecords, setWashingWasteRecords] = useState<WashingWasteRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_washing_waste_records');
-    return saved ? JSON.parse(saved) : defaultWashingWasteRecords;
+    try {
+      const saved = localStorage.getItem('esppg_washing_waste_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return defaultWashingWasteRecords;
   });
 
   // 14. Modul Administrasi Surat & 15. Modul Surat Masuk
@@ -2501,7 +2562,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('esppg_menu_items', JSON.stringify(menuItems));
+    try {
+      localStorage.setItem('esppg_menu_items', JSON.stringify(menuItems));
+    } catch {
+      // ignore quota errors
+    }
   }, [menuItems]);
 
   useEffect(() => {
@@ -2520,142 +2585,157 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [divisionJobdesks]);
 
-  useEffect(() => {
-    localStorage.setItem('esppg_inventory', JSON.stringify(inventory));
-  }, [inventory]);
-
-  useEffect(() => {
+  const safeWriteLocalStorage = React.useCallback((key: string, serialized: string): boolean => {
     try {
-      localStorage.setItem('esppg_stock_mutations_v1', JSON.stringify(stockMutations));
+      localStorage.setItem(key, serialized);
+      return true;
     } catch {
-      // ignore quota errors
+      try {
+        // Attempt to reclaim space from non-critical audit logs on QuotaExceededError
+        const rawLogs = localStorage.getItem('esppg_audit_logs');
+        if (rawLogs) {
+          const parsed = JSON.parse(rawLogs);
+          if (Array.isArray(parsed) && parsed.length > 25) {
+            localStorage.setItem('esppg_audit_logs', JSON.stringify(parsed.slice(0, 25)));
+          }
+        }
+        localStorage.setItem(key, serialized);
+        return true;
+      } catch (err2) {
+        console.warn(`LocalStorage write skipped for ${key} (quota/access error):`, err2);
+        return false;
+      }
     }
-  }, [stockMutations]);
+  }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('esppg_stock_opnames_v1', JSON.stringify(stockOpnames));
-    } catch {
-      // ignore quota errors
-    }
-  }, [stockOpnames]);
+    safeWriteLocalStorage('esppg_inventory', JSON.stringify(inventory));
+  }, [inventory, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_purchase_orders', JSON.stringify(purchaseOrders));
-  }, [purchaseOrders]);
+    safeWriteLocalStorage('esppg_stock_mutations_v1', JSON.stringify(stockMutations));
+  }, [stockMutations, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_distribution_logs', JSON.stringify(distributionLogs));
-  }, [distributionLogs]);
+    safeWriteLocalStorage('esppg_stock_opnames_v1', JSON.stringify(stockOpnames));
+  }, [stockOpnames, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_transactions', JSON.stringify(financialTransactions));
-  }, [financialTransactions]);
+    safeWriteLocalStorage('esppg_purchase_orders', JSON.stringify(purchaseOrders));
+  }, [purchaseOrders, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_volunteers', JSON.stringify(volunteerAttendance));
-  }, [volunteerAttendance]);
+    safeWriteLocalStorage('esppg_distribution_logs', JSON.stringify(distributionLogs));
+  }, [distributionLogs, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_letters', JSON.stringify(officialLetters));
-  }, [officialLetters]);
+    safeWriteLocalStorage('esppg_transactions', JSON.stringify(financialTransactions));
+  }, [financialTransactions, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
+    safeWriteLocalStorage('esppg_volunteers', JSON.stringify(volunteerAttendance));
+  }, [volunteerAttendance, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_rab_items', JSON.stringify(rabItems));
-  }, [rabItems]);
+    safeWriteLocalStorage('esppg_letters', JSON.stringify(officialLetters));
+  }, [officialLetters, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_qc_records', JSON.stringify(qualityControlRecords));
-  }, [qualityControlRecords]);
+    safeWriteLocalStorage('esppg_audit_logs', JSON.stringify(auditLogs.slice(0, 120)));
+  }, [auditLogs, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_prep_records', JSON.stringify(prepRecords));
-  }, [prepRecords]);
+    safeWriteLocalStorage('esppg_rab_items', JSON.stringify(rabItems));
+  }, [rabItems, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_cooking_records', JSON.stringify(cookingRecords));
-  }, [cookingRecords]);
+    safeWriteLocalStorage('esppg_qc_records', JSON.stringify(qualityControlRecords));
+  }, [qualityControlRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_portioning_records', JSON.stringify(portioningRecords));
-  }, [portioningRecords]);
+    safeWriteLocalStorage('esppg_prep_records', JSON.stringify(prepRecords));
+  }, [prepRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_distribution_deliveries', JSON.stringify(distributionDeliveries));
-  }, [distributionDeliveries]);
+    safeWriteLocalStorage('esppg_cooking_records', JSON.stringify(cookingRecords));
+  }, [cookingRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_ompreng_returns', JSON.stringify(omprengReturns));
-  }, [omprengReturns]);
+    safeWriteLocalStorage('esppg_portioning_records', JSON.stringify(portioningRecords));
+  }, [portioningRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_fuel_logs', JSON.stringify(fuelLogs));
-  }, [fuelLogs]);
+    safeWriteLocalStorage('esppg_distribution_deliveries', JSON.stringify(distributionDeliveries));
+  }, [distributionDeliveries, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_washing_waste_records', JSON.stringify(washingWasteRecords));
-  }, [washingWasteRecords]);
+    safeWriteLocalStorage('esppg_ompreng_returns', JSON.stringify(omprengReturns));
+  }, [omprengReturns, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_outgoing_docs', JSON.stringify(outgoingDocuments));
-  }, [outgoingDocuments]);
+    safeWriteLocalStorage('esppg_fuel_logs', JSON.stringify(fuelLogs));
+  }, [fuelLogs, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_incoming_letters', JSON.stringify(incomingLetters));
-  }, [incomingLetters]);
+    safeWriteLocalStorage('esppg_washing_waste_records', JSON.stringify(washingWasteRecords));
+  }, [washingWasteRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_volunteer_absences', JSON.stringify(volunteerAbsences));
-  }, [volunteerAbsences]);
+    safeWriteLocalStorage('esppg_outgoing_docs', JSON.stringify(outgoingDocuments));
+  }, [outgoingDocuments, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_web_access_users_v1', JSON.stringify(webAccessUsers));
-  }, [webAccessUsers]);
+    safeWriteLocalStorage('esppg_incoming_letters', JSON.stringify(incomingLetters));
+  }, [incomingLetters, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_web_access_policy_v1', JSON.stringify(webAccessPolicy));
-  }, [webAccessPolicy]);
+    safeWriteLocalStorage('esppg_volunteer_absences', JSON.stringify(volunteerAbsences));
+  }, [volunteerAbsences, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(dynamicFormSchemas));
-  }, [dynamicFormSchemas]);
+    safeWriteLocalStorage('esppg_web_access_users_v1', JSON.stringify(webAccessUsers));
+  }, [webAccessUsers, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_pic_incentive_config_v1', JSON.stringify(picIncentiveConfig));
-  }, [picIncentiveConfig]);
+    safeWriteLocalStorage('esppg_web_access_policy_v1', JSON.stringify(webAccessPolicy));
+  }, [webAccessPolicy, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_pic_incentive_payouts_v1', JSON.stringify(picIncentivePayouts));
-  }, [picIncentivePayouts]);
+    safeWriteLocalStorage('esppg_dynamic_form_schemas_v1', JSON.stringify(dynamicFormSchemas));
+  }, [dynamicFormSchemas, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_volunteer_incentive_config_v1', JSON.stringify(volunteerIncentiveConfig));
-  }, [volunteerIncentiveConfig]);
+    safeWriteLocalStorage('esppg_pic_incentive_config_v1', JSON.stringify(picIncentiveConfig));
+  }, [picIncentiveConfig, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_volunteer_incentive_payouts_v1', JSON.stringify(volunteerIncentivePayouts));
-  }, [volunteerIncentivePayouts]);
+    safeWriteLocalStorage('esppg_pic_incentive_payouts_v1', JSON.stringify(picIncentivePayouts));
+  }, [picIncentivePayouts, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_petty_cash_opening_v1', String(pettyCashOpeningBalance));
-  }, [pettyCashOpeningBalance]);
+    safeWriteLocalStorage('esppg_volunteer_incentive_config_v1', JSON.stringify(volunteerIncentiveConfig));
+  }, [volunteerIncentiveConfig, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_petty_cash_transactions_v1', JSON.stringify(pettyCashTransactions));
-  }, [pettyCashTransactions]);
+    safeWriteLocalStorage('esppg_volunteer_incentive_payouts_v1', JSON.stringify(volunteerIncentivePayouts));
+  }, [volunteerIncentivePayouts, safeWriteLocalStorage]);
 
   useEffect(() => {
-    localStorage.setItem('esppg_dark_mode', String(darkMode));
+    safeWriteLocalStorage('esppg_petty_cash_opening_v1', String(pettyCashOpeningBalance));
+  }, [pettyCashOpeningBalance, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_petty_cash_transactions_v1', JSON.stringify(pettyCashTransactions));
+  }, [pettyCashTransactions, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_dark_mode', String(darkMode));
     if (darkMode) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
-  }, [darkMode]);
+  }, [darkMode, safeWriteLocalStorage]);
 
   // Toast Helpers
   const addToast = (type: ToastMessage['type'], title: string, message: string) => {
@@ -2981,14 +3061,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (e.key === 'esppg_menu_items' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) setMenuItems(parsed);
+          if (Array.isArray(parsed)) {
+            menuItemsRef.current = parsed;
+            setMenuItems(parsed);
+          }
         } catch {
           // Ignore
         }
       } else if (e.key === 'esppg_menu_ingredients_v1' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && typeof parsed === 'object') setMenuIngredientsMap(parsed);
+          if (parsed && typeof parsed === 'object') {
+            menuIngredientsMapRef.current = parsed;
+            setMenuIngredientsMap(parsed);
+          }
         } catch {
           // Ignore
         }
@@ -3810,9 +3896,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 3. Real-time recalculate MenuItem targetPortions & estimatedCostPerPortion
     const nextQuotaSmall = nextInstitutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
     const nextQuotaLarge = nextInstitutions.reduce((s, i) => s + (i.largePortions || 0), 0);
-    setMenuItems(prev =>
-      recomputeMenuItemsFromRecipes(prev, menuIngredientsMap, masterUnits, nextQuotaSmall, nextQuotaLarge)
+    const recomputedMenus = recomputeMenuItemsFromRecipes(
+      menuItemsRef.current,
+      menuIngredientsMapRef.current,
+      masterUnits,
+      nextQuotaSmall,
+      nextQuotaLarge
     );
+    menuItemsRef.current = recomputedMenus;
+    setMenuItems(recomputedMenus);
 
     await logAudit(
       'UPDATE',
@@ -3906,7 +3998,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Cascade to Menu Recipes & Food Cost (PLOG)
       const updatedMap: Record<string, RecipeIngredient[]> = {};
       let mapChanged = false;
-      Object.entries(menuIngredientsMap).forEach(([menuId, ingredients]) => {
+      Object.entries(menuIngredientsMapRef.current).forEach(([menuId, ingredients]) => {
         updatedMap[menuId] = ingredients.map(ing => {
           if (isMatchingMaterialName(ing.name, sourceName)) {
             syncedRecipeRows++;
@@ -3922,10 +4014,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       if (mapChanged) {
+        menuIngredientsMapRef.current = updatedMap;
         setMenuIngredientsMap(updatedMap);
         const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
         const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
-        setMenuItems(prev => recomputeMenuItemsFromRecipes(prev, updatedMap, masterUnits, qSmall, qLarge));
+        const recomputedMenus = recomputeMenuItemsFromRecipes(
+          menuItemsRef.current,
+          updatedMap,
+          masterUnits,
+          qSmall,
+          qLarge
+        );
+        menuItemsRef.current = recomputedMenus;
+        setMenuItems(recomputedMenus);
       }
     }
 
@@ -4032,9 +4133,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateMasterVolunteer = async (id: string, vol: Partial<MasterVolunteer>) => {
+    const existing = masterVolunteers.find(v => v.id === id);
+    const nextName = vol.name !== undefined ? vol.name : existing?.name || '';
+    const nextDivision = vol.division !== undefined ? vol.division : existing?.division || '';
+
     setMasterVolunteers(prev => prev.map(v => (v.id === id ? { ...v, ...vol } : v)));
-    await logAudit('UPDATE', 'master_data', `Memperbarui data relawan ID: ${id}`);
-    addToast('success', 'Relawan Diperbarui', 'Data relawan berhasil dimutakhirkan.');
+
+    if (existing && (vol.name !== undefined || vol.division !== undefined)) {
+      const oldNameLower = existing.name.trim().toLowerCase();
+
+      setVolunteerAttendance(prev =>
+        prev.map(att => {
+          const isPrimaryMatch =
+            att.volunteerId === id || att.volunteerName.trim().toLowerCase() === oldNameLower;
+          const isRepMatch =
+            att.replacementVolunteer &&
+            att.replacementVolunteer.trim().toLowerCase() === oldNameLower;
+          if (!isPrimaryMatch && !isRepMatch) return att;
+          return {
+            ...att,
+            ...(isPrimaryMatch
+              ? {
+                  volunteerId: id,
+                  volunteerName: nextName,
+                  division: (nextDivision as VolunteerAttendance['division']) || att.division,
+                }
+              : {}),
+            ...(isRepMatch ? { replacementVolunteer: nextName } : {}),
+          };
+        })
+      );
+
+      setVolunteerAbsences(prev =>
+        prev.map(abs => {
+          const isPrimaryMatch =
+            abs.volunteerId === id || abs.volunteerName.trim().toLowerCase() === oldNameLower;
+          const isRepMatch =
+            abs.replacementVolunteerId === id ||
+            abs.replacementVolunteerName.trim().toLowerCase() === oldNameLower;
+          if (!isPrimaryMatch && !isRepMatch) return abs;
+          return {
+            ...abs,
+            ...(isPrimaryMatch
+              ? {
+                  volunteerId: id,
+                  volunteerName: nextName,
+                  division: nextDivision || abs.division,
+                }
+              : {}),
+            ...(isRepMatch
+              ? {
+                  replacementVolunteerId: id,
+                  replacementVolunteerName: nextName,
+                  replacementDivision: nextDivision || abs.replacementDivision,
+                }
+              : {}),
+          };
+        })
+      );
+
+      setVolunteerIncentivePayouts(prev =>
+        prev.map(p => {
+          if (p.status !== 'Menunggu Pencairan') return p;
+          const isPrimaryMatch =
+            p.volunteerId === id || p.volunteerName.trim().toLowerCase() === oldNameLower;
+          const isReplacedMatch =
+            p.replacedVolunteerName &&
+            p.replacedVolunteerName.trim().toLowerCase() === oldNameLower;
+          if (!isPrimaryMatch && !isReplacedMatch) return p;
+          return {
+            ...p,
+            ...(isPrimaryMatch
+              ? {
+                  volunteerId: id,
+                  volunteerName: nextName,
+                  division: nextDivision || p.division,
+                }
+              : {}),
+            ...(isReplacedMatch ? { replacedVolunteerName: nextName } : {}),
+          };
+        })
+      );
+    }
+
+    await logAudit('UPDATE', 'master_data', `Memperbarui data relawan ID: ${id} (tersinkron ke Presensi, Ketidakhadiran & Insentif)`);
+    addToast('success', 'Relawan Diperbarui & Tersinkron', 'Data relawan di Master, Presensi, Ketidakhadiran, dan Insentif telah dimutakhirkan.');
   };
 
   const deleteMasterVolunteer = async (id: string) => {
@@ -4598,49 +4781,98 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addMenuItem = async (item: Omit<MenuItem, 'id'>): Promise<MenuItem> => {
-    const newItem: MenuItem = { ...item, id: 'menu-' + Date.now() };
-    const nextMenus = [...menuItems, newItem];
-    setMenuItems(nextMenus);
+    const newId = `menu-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const normalizedGrammages = Array.isArray(item.itemGrammages)
+      ? item.itemGrammages.map(g => ({
+          ...g,
+          id:
+            g.id && !g.id.startsWith('menu-tmp-')
+              ? g.id
+              : `${newId}-gram-${g.categoryKey}`,
+        }))
+      : undefined;
+
+    const baseItem: MenuItem = {
+      ...item,
+      id: newId,
+      ...(normalizedGrammages ? { itemGrammages: normalizedGrammages } : {}),
+    };
+
+    let nextMenus = [...menuItemsRef.current, baseItem];
+    let createdItem: MenuItem = baseItem;
+
     if (item.ingredients && item.ingredients.length > 0) {
-      const nextMap = { ...menuIngredientsMap, [newItem.id]: item.ingredients };
+      const nextMap = { ...menuIngredientsMapRef.current, [baseItem.id]: item.ingredients };
+      menuIngredientsMapRef.current = nextMap;
       setMenuIngredientsMap(nextMap);
+
+      const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+      const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+      nextMenus = recomputeMenuItemsFromRecipes(nextMenus, nextMap, masterUnits, qSmall, qLarge);
+      createdItem = nextMenus.find(m => m.id === baseItem.id) || baseItem;
+      menuItemsRef.current = nextMenus;
+      setMenuItems(nextMenus);
       syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+    } else {
+      menuItemsRef.current = nextMenus;
+      setMenuItems(nextMenus);
     }
+
     await logAudit('CREATE', 'menu', `Menyusun menu gizi baru tanggal: ${item.date} (${item.stapleFood})`);
     addToast('success', 'Menu Disimpan', `Menu siklus untuk tanggal ${item.date} berhasil ditambahkan.`);
-    return newItem;
+    return createdItem;
   };
 
   const updateMenuItem = async (id: string, item: Partial<MenuItem>) => {
-    const nextMenus = menuItems.map(m => (m.id === id ? { ...m, ...item } : m));
-    setMenuItems(nextMenus);
+    let nextMenus = menuItemsRef.current.map(m => (m.id === id ? { ...m, ...item } : m));
     if (item.ingredients) {
-      const nextMap = { ...menuIngredientsMap, [id]: item.ingredients };
+      const nextMap = { ...menuIngredientsMapRef.current, [id]: item.ingredients };
+      menuIngredientsMapRef.current = nextMap;
       setMenuIngredientsMap(nextMap);
+
+      const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+      const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+      nextMenus = recomputeMenuItemsFromRecipes(nextMenus, nextMap, masterUnits, qSmall, qLarge);
+      menuItemsRef.current = nextMenus;
+      setMenuItems(nextMenus);
       syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+    } else {
+      menuItemsRef.current = nextMenus;
+      setMenuItems(nextMenus);
     }
     await logAudit('UPDATE', 'menu', `Memperbarui rincian menu gizi ID: ${id}`);
     addToast('success', 'Menu Diperbarui', 'Komposisi gizi menu berhasil diperbarui.');
   };
 
   const deleteMenuItem = async (id: string) => {
-    setMenuItems(prev => prev.filter(m => m.id !== id));
+    const nextMenus = menuItemsRef.current.filter(m => m.id !== id);
+    menuItemsRef.current = nextMenus;
+    setMenuItems(nextMenus);
+    if (menuIngredientsMapRef.current[id]) {
+      const nextMap = { ...menuIngredientsMapRef.current };
+      delete nextMap[id];
+      menuIngredientsMapRef.current = nextMap;
+      setMenuIngredientsMap(nextMap);
+      syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+    }
     await logAudit('DELETE', 'menu', `Menghapus menu ID: ${id}`);
     addToast('warning', 'Menu Dihapus', 'Rencana menu telah dihapus.');
   };
 
   const approveMenuItem = async (id: string, approvedBy: string) => {
-    setMenuItems(prev =>
-      prev.map(m =>
-        m.id === id
-          ? {
-              ...m,
-              status: currentUser.role === 'Kepala SPPG' ? 'Disetujui Kepala' : 'Diverifikasi Gizi',
-              approvedBy,
-            }
-          : m
-      )
+    const nextStatus: MenuItem['status'] =
+      currentUser.role === 'Kepala SPPG' ? 'Disetujui Kepala' : 'Diverifikasi Gizi';
+    const nextMenus = menuItemsRef.current.map(m =>
+      m.id === id
+        ? {
+            ...m,
+            status: nextStatus,
+            approvedBy,
+          }
+        : m
     );
+    menuItemsRef.current = nextMenus;
+    setMenuItems(nextMenus);
     await logAudit('APPROVE', 'menu', `Menyetujui menu ID: ${id} oleh ${approvedBy}`);
     addToast('success', 'Menu Disetujui', 'Status persetujuan menu gizi berhasil diproses.');
   };
@@ -4648,13 +4880,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Menu Ingredients & Jobdesk Central Sync Handlers
   const updateMenuIngredients = (menuId: string, ingredients: RecipeIngredient[]) => {
     const nextMap = {
-      ...menuIngredientsMap,
+      ...menuIngredientsMapRef.current,
       [menuId]: ingredients,
     };
+    menuIngredientsMapRef.current = nextMap;
     setMenuIngredientsMap(nextMap);
     const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
     const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
-    const nextMenus = recomputeMenuItemsFromRecipes(menuItems, nextMap, masterUnits, qSmall, qLarge);
+    const nextMenus = recomputeMenuItemsFromRecipes(
+      menuItemsRef.current,
+      nextMap,
+      masterUnits,
+      qSmall,
+      qLarge
+    );
+    menuItemsRef.current = nextMenus;
     setMenuItems(nextMenus);
     syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
   };
@@ -5801,16 +6041,159 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Volunteers Attendance
   const recordAttendance = async (att: Omit<VolunteerAttendance, 'id'>) => {
-    const newAtt: VolunteerAttendance = { ...att, id: 'v-' + Date.now() };
+    const matchedMaster = masterVolunteers.find(
+      m => m.id === att.volunteerId || m.name.trim().toLowerCase() === att.volunteerName.trim().toLowerCase()
+    );
+    const newAtt: VolunteerAttendance = {
+      ...att,
+      id: 'v-' + Date.now(),
+      volunteerId: matchedMaster?.id || att.volunteerId,
+      volunteerName: matchedMaster?.name || att.volunteerName,
+      division: (matchedMaster?.division as VolunteerAttendance['division']) || att.division,
+    };
     setVolunteerAttendance(prev => [newAtt, ...prev]);
-    await logAudit('CREATE', 'volunteers', `Absensi relawan: ${att.volunteerName} (${att.status})`);
-    addToast('success', 'Presensi Dicatat', `Kehadiran ${att.volunteerName} berhasil disimpan.`);
+    await logAudit('CREATE', 'volunteers', `Absensi relawan: ${newAtt.volunteerName} (${newAtt.status})`);
+    addToast('success', 'Presensi Dicatat', `Kehadiran ${newAtt.volunteerName} berhasil disimpan.`);
   };
 
   const updateAttendance = async (id: string, att: Partial<VolunteerAttendance>) => {
-    setVolunteerAttendance(prev => prev.map(v => (v.id === id ? { ...v, ...att } : v)));
+    const matchedMaster = att.volunteerName
+      ? masterVolunteers.find(
+          m => m.id === att.volunteerId || m.name.trim().toLowerCase() === att.volunteerName!.trim().toLowerCase()
+        )
+      : undefined;
+    setVolunteerAttendance(prev =>
+      prev.map(v =>
+        v.id === id
+          ? {
+              ...v,
+              ...att,
+              ...(matchedMaster
+                ? {
+                    volunteerId: matchedMaster.id,
+                    volunteerName: matchedMaster.name,
+                    division: (matchedMaster.division as VolunteerAttendance['division']) || att.division || v.division,
+                  }
+                : {}),
+            }
+          : v
+      )
+    );
     await logAudit('UPDATE', 'volunteers', `Memperbarui data kehadiran relawan ID: ${id}`);
     addToast('info', 'Presensi Dimutakhirkan', 'Status kehadiran relawan telah diperbarui.');
+  };
+
+  const syncVolunteerAttendanceFromMaster = async (
+    date: string
+  ): Promise<{ createdCount: number; updatedCount: number }> => {
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const activeMasters = masterVolunteers.filter(m => m.isActive);
+    if (activeMasters.length === 0) {
+      addToast('warning', 'Master Relawan Kosong', 'Tidak ada relawan berstatus Aktif di Master Data Relawan.');
+      return { createdCount: 0, updatedCount: 0 };
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    setVolunteerAttendance(prev => {
+      const next = [...prev];
+
+      for (const vol of activeMasters) {
+        const matchedAbsence = volunteerAbsences.find(
+          abs =>
+            abs.date === targetDate &&
+            abs.approvalStatus === 'Disetujui' &&
+            (abs.volunteerId === vol.id ||
+              abs.volunteerName.trim().toLowerCase() === vol.name.trim().toLowerCase())
+        );
+
+        const existingIdx = next.findIndex(
+          att =>
+            att.date === targetDate &&
+            (att.volunteerId === vol.id ||
+              att.volunteerName.trim().toLowerCase() === vol.name.trim().toLowerCase())
+        );
+
+        if (existingIdx >= 0) {
+          const existing = next[existingIdx];
+          const nextDivision = (vol.division as VolunteerAttendance['division']) || existing.division;
+          const needsMasterSync =
+            existing.volunteerId !== vol.id ||
+            existing.volunteerName !== vol.name ||
+            existing.division !== nextDivision;
+          const needsAbsenceSync =
+            matchedAbsence &&
+            (existing.status === 'Hadir' || !existing.replacementVolunteer);
+
+          if (needsMasterSync || needsAbsenceSync) {
+            next[existingIdx] = {
+              ...existing,
+              volunteerId: vol.id,
+              volunteerName: vol.name,
+              division: nextDivision,
+              ...(matchedAbsence
+                ? {
+                    status: matchedAbsence.reason === 'Sakit' ? 'Sakit' : 'Izin',
+                    healthCheckPassed: matchedAbsence.reason !== 'Sakit',
+                    hygieneGearComplete: false,
+                    reason: `${matchedAbsence.reason}${matchedAbsence.reasonDetails ? `: ${matchedAbsence.reasonDetails}` : ''}`,
+                    replacementVolunteer: matchedAbsence.replacementVolunteerName,
+                    notes: `Tersinkron izin disetujui. Pengganti: ${matchedAbsence.replacementVolunteerName} (Divisi ${matchedAbsence.replacementDivision}).`,
+                  }
+                : {}),
+            };
+            updatedCount += 1;
+          }
+        } else {
+          const defaultShift: VolunteerAttendance['shift'] =
+            vol.division === 'Cuci Ompreng' || vol.division === 'Kebersihan'
+              ? 'Siang (08:00 - 13:00)'
+              : 'Pagi (03:30 - 08:30)';
+
+          const newAtt: VolunteerAttendance = {
+            id: `v-sync-${targetDate}-${vol.id}-${Date.now().toString().slice(-4)}`,
+            date: targetDate,
+            volunteerId: vol.id,
+            volunteerName: vol.name,
+            division: (vol.division as VolunteerAttendance['division']) || 'Persiapan',
+            shift: defaultShift,
+            status: matchedAbsence ? (matchedAbsence.reason === 'Sakit' ? 'Sakit' : 'Izin') : 'Hadir',
+            healthCheckPassed: matchedAbsence ? matchedAbsence.reason !== 'Sakit' : true,
+            hygieneGearComplete: matchedAbsence ? false : true,
+            reason: matchedAbsence
+              ? `${matchedAbsence.reason}${matchedAbsence.reasonDetails ? `: ${matchedAbsence.reasonDetails}` : ''}`
+              : undefined,
+            replacementVolunteer: matchedAbsence?.replacementVolunteerName,
+            notes: matchedAbsence
+              ? `Tersinkron dari Master Relawan & Izin Disetujui. Pengganti: ${matchedAbsence.replacementVolunteerName}.`
+              : `Sinkronisasi otomatis dari Master Relawan (${vol.code || vol.id} • ${vol.position}).`,
+          };
+          next.unshift(newAtt);
+          createdCount += 1;
+        }
+      }
+
+      return next;
+    });
+
+    await logAudit(
+      'UPDATE',
+      'volunteers',
+      `Sinkronisasi presensi harian tanggal ${targetDate} dari Master Relawan (${createdCount} baru, ${updatedCount} diperbarui).`
+    );
+
+    if (createdCount === 0 && updatedCount === 0) {
+      addToast('info', 'Presensi Sudah Sinkron', `Seluruh ${activeMasters.length} relawan aktif pada ${targetDate} sudah tercatat & sinkron.`);
+    } else {
+      addToast(
+        'success',
+        'Presensi Tersinkron dari Master',
+        `${createdCount} presensi ditambahkan & ${updatedCount} data dimutakhirkan untuk ${targetDate}.`
+      );
+    }
+
+    return { createdCount, updatedCount };
   };
 
   // Letters
@@ -5850,19 +6233,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Persiapan (${id})`);
   };
 
-  const addCookingRecord = async (rec: Omit<CookingInspectionRecord, 'id'>) => {
+  const addCookingRecord = async (rec: Omit<CookingInspectionRecord, 'id'>): Promise<CookingInspectionRecord> => {
     const newRec: CookingInspectionRecord = {
       ...rec,
-      id: `cook-${Date.now()}`,
+      id: `cook-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     };
-    setCookingRecords(prev => [newRec, ...prev]);
-    addToast('success', 'Data Pengolahan Tersimpan', `Titik kendali kritis (CCP) suhu matang masakan dicatat.`);
+    const nextRecords = [newRec, ...cookingRecordsRef.current];
+    cookingRecordsRef.current = nextRecords;
+    setCookingRecords(nextRecords);
+    const persisted = safeWriteLocalStorage('esppg_cooking_records', JSON.stringify(nextRecords));
+    if (!persisted) {
+      addToast(
+        'warning',
+        'Memori Browser Penuh',
+        'Data pengolahan tersimpan di sesi aktif, namun sebagian foto terlalu besar untuk cache lokal browser.'
+      );
+    } else {
+      addToast('success', 'Data Pengolahan Tersimpan', `Titik kendali kritis (CCP) suhu matang masakan dicatat.`);
+    }
     await logAudit('CREATE', 'production', `Mencatat suhu makanan matang Divisi Pengolahan oleh ${rec.officerName}`);
+    return newRec;
   };
 
   const updateCookingRecord = async (id: string, update: Partial<CookingInspectionRecord>) => {
-    setCookingRecords(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
-    addToast('success', 'Laporan Pengolahan Diperbarui', 'Pembaruan suhu & bukti foto Divisi Pengolahan berhasil disimpan.');
+    const nextRecords = cookingRecordsRef.current.map(r => (r.id === id ? { ...r, ...update } : r));
+    cookingRecordsRef.current = nextRecords;
+    setCookingRecords(nextRecords);
+    const persisted = safeWriteLocalStorage('esppg_cooking_records', JSON.stringify(nextRecords));
+    if (!persisted) {
+      addToast(
+        'warning',
+        'Memori Browser Penuh',
+        'Perubahan tersimpan di sesi aktif, namun ukuran total foto melebihi batas penyimpanan lokal browser.'
+      );
+    } else {
+      addToast('success', 'Laporan Pengolahan Diperbarui', 'Pembaruan suhu & bukti foto Divisi Pengolahan berhasil disimpan.');
+    }
     await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Pengolahan (${id})`);
   };
 
@@ -6011,56 +6417,108 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = volunteerAbsences.find(a => a.id === id);
     if (!target) return;
 
+    const matchedVolunteer = masterVolunteers.find(
+      m => m.id === target.volunteerId || m.name.trim().toLowerCase() === target.volunteerName.trim().toLowerCase()
+    );
+    const matchedReplacement = masterVolunteers.find(
+      m =>
+        (target.replacementVolunteerId && m.id === target.replacementVolunteerId) ||
+        m.name.trim().toLowerCase() === target.replacementVolunteerName.trim().toLowerCase()
+    );
+
     const approvedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    setVolunteerAbsences(prev => prev.map(a => a.id === id ? {
-      ...a,
-      approvalStatus: 'Disetujui',
-      approvedBy: approverName,
-      approvedAt,
-    } : a));
+    setVolunteerAbsences(prev =>
+      prev.map(a =>
+        a.id === id
+          ? {
+              ...a,
+              volunteerId: matchedVolunteer?.id || a.volunteerId,
+              volunteerName: matchedVolunteer?.name || a.volunteerName,
+              division: matchedVolunteer?.division || a.division,
+              replacementVolunteerId: matchedReplacement?.id || a.replacementVolunteerId,
+              replacementVolunteerName: matchedReplacement?.name || a.replacementVolunteerName,
+              replacementDivision: matchedReplacement?.division || a.replacementDivision,
+              approvalStatus: 'Disetujui',
+              approvedBy: approverName,
+              approvedAt,
+            }
+          : a
+      )
+    );
 
     // Otomatis sinkronisasi ke presensi relawan
     setVolunteerAttendance(prev => {
-      const existing = prev.find(att => att.date === target.date && (att.volunteerName === target.volunteerName || att.volunteerId === target.volunteerId));
+      const targetVolId = matchedVolunteer?.id || target.volunteerId;
+      const targetVolName = matchedVolunteer?.name || target.volunteerName;
+      const targetDivision = (matchedVolunteer?.division || target.division) as VolunteerAttendance['division'];
+      const repName = matchedReplacement?.name || target.replacementVolunteerName;
+      const repDivision = matchedReplacement?.division || target.replacementDivision;
+
+      const existing = prev.find(
+        att =>
+          att.date === target.date &&
+          (att.volunteerId === targetVolId ||
+            att.volunteerName.trim().toLowerCase() === targetVolName.trim().toLowerCase())
+      );
       if (existing) {
-        return prev.map(att => att.id === existing.id ? {
-          ...att,
-          status: target.reason === 'Sakit' ? 'Sakit' : 'Izin',
-          healthCheckPassed: target.reason !== 'Sakit',
-          reason: `${target.reason}: ${target.reasonDetails || ''}`.trim(),
-          replacementVolunteer: target.replacementVolunteerName,
-          notes: `Disetujui oleh ${approverName}. Pengganti: ${target.replacementVolunteerName} (Divisi ${target.replacementDivision})`,
-        } : att);
+        return prev.map(att =>
+          att.id === existing.id
+            ? {
+                ...att,
+                volunteerId: targetVolId,
+                volunteerName: targetVolName,
+                division: targetDivision,
+                status: target.reason === 'Sakit' ? 'Sakit' : 'Izin',
+                healthCheckPassed: target.reason !== 'Sakit',
+                hygieneGearComplete: false,
+                reason: `${target.reason}${target.reasonDetails ? `: ${target.reasonDetails}` : ''}`,
+                replacementVolunteer: repName,
+                notes: `Disetujui oleh ${approverName}. Pengganti: ${repName} (Divisi ${repDivision})`,
+              }
+            : att
+        );
       } else {
         const newAtt: VolunteerAttendance = {
-          id: `att-abs-${Date.now()}`,
+          id: `att-abs-${target.id}`,
           date: target.date,
-          volunteerId: target.volunteerId,
-          volunteerName: target.volunteerName,
-          division: target.division as any,
-          shift: 'Pagi (03:30 - 08:30)',
+          volunteerId: targetVolId,
+          volunteerName: targetVolName,
+          division: targetDivision,
+          shift:
+            targetDivision === 'Cuci Ompreng' || targetDivision === 'Kebersihan'
+              ? 'Siang (08:00 - 13:00)'
+              : 'Pagi (03:30 - 08:30)',
           status: target.reason === 'Sakit' ? 'Sakit' : 'Izin',
           healthCheckPassed: target.reason !== 'Sakit',
           hygieneGearComplete: false,
-          replacementVolunteer: target.replacementVolunteerName,
-          reason: target.reason,
-          notes: `Disetujui oleh ${approverName}. Pengganti: ${target.replacementVolunteerName} (Divisi ${target.replacementDivision})`,
+          replacementVolunteer: repName,
+          reason: `${target.reason}${target.reasonDetails ? `: ${target.reasonDetails}` : ''}`,
+          notes: `Disetujui oleh ${approverName}. Pengganti: ${repName} (Divisi ${repDivision})`,
         };
         return [newAtt, ...prev];
       }
     });
 
-    addToast('success', 'Ketidakhadiran Disetujui', `Pergantian relawan ${target.volunteerName} oleh ${target.replacementVolunteerName} disetujui.`);
+    addToast('success', 'Ketidakhadiran Disetujui', `Pergantian relawan ${target.volunteerName} oleh ${target.replacementVolunteerName} disetujui & tersinkron ke Presensi & Insentif.`);
     await logAudit('APPROVE', 'volunteers', `Menyetujui ketidakhadiran & pergantian relawan: ${target.volunteerName} -> ${target.replacementVolunteerName}`);
   };
 
   const rejectVolunteerAbsence = async (id: string, reason: string) => {
     const target = volunteerAbsences.find(a => a.id === id);
-    setVolunteerAbsences(prev => prev.map(a => a.id === id ? {
-      ...a,
-      approvalStatus: 'Ditolak',
-      rejectionReason: reason,
-    } : a));
+    setVolunteerAbsences(prev =>
+      prev.map(a =>
+        a.id === id
+          ? {
+              ...a,
+              approvalStatus: 'Ditolak',
+              rejectionReason: reason,
+            }
+          : a
+      )
+    );
+    if (target) {
+      setVolunteerAttendance(prev => prev.filter(att => att.id !== `att-abs-${target.id}`));
+    }
     addToast('info', 'Ketidakhadiran Ditolak', `Pengajuan ketidakhadiran ${target?.volunteerName || id} ditolak.`);
     await logAudit('UPDATE', 'volunteers', `Menolak pengajuan ketidakhadiran: ${target?.volunteerName || id} (Alasan: ${reason})`);
   };
@@ -6068,6 +6526,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteVolunteerAbsence = async (id: string) => {
     const target = volunteerAbsences.find(a => a.id === id);
     setVolunteerAbsences(prev => prev.filter(a => a.id !== id));
+    if (target) {
+      setVolunteerAttendance(prev => prev.filter(att => att.id !== `att-abs-${target.id}`));
+    }
     addToast('info', 'Data Dihapus', `Catatan ketidakhadiran ${target?.volunteerName || id} dihapus.`);
     await logAudit('DELETE', 'volunteers', `Menghapus catatan ketidakhadiran ID: ${id}`);
   };
@@ -6276,6 +6737,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         volunteerAttendance,
         recordAttendance,
         updateAttendance,
+        syncVolunteerAttendanceFromMaster,
         volunteerAbsences,
         addVolunteerAbsence,
         updateVolunteerAbsence,

@@ -149,17 +149,42 @@ export function resolvePlogOrganolepticData(
   }, ID 67284. Email : ${sppgConfig.email}`;
 
   // Build wet menu rows from active MenuItem + Cooking/Portioning records
-  const riceTemp = matchedCooking?.cookedFoods.rice?.temp ?? 78.5;
-  const animalTemp = matchedCooking?.cookedFoods.animalProtein?.temp ?? 82.0;
-  const plantTemp = matchedCooking?.cookedFoods.plantProtein?.temp ?? 80.0;
-  const vegTemp = matchedCooking?.cookedFoods.vegetable?.temp ?? 84.5;
-  const fruitTemp = matchedCooking?.cookedFoods.fruit?.temp ?? 22.0;
+  const resolveCookingItemTemp = (
+    entryKey: 'stapleFood' | 'animalProtein' | 'plantProtein' | 'vegetable' | 'fruit',
+    legacySlot?: { temp?: number },
+    fallbackTemp: number = 75
+  ): number => {
+    const fromEntry = matchedCooking?.itemEntries?.find(e => e.categoryKey === entryKey)?.temp;
+    if (typeof fromEntry === 'number' && Number.isFinite(fromEntry)) return fromEntry;
+    if (typeof legacySlot?.temp === 'number' && Number.isFinite(legacySlot.temp)) {
+      return legacySlot.temp;
+    }
+    return fallbackTemp;
+  };
+
+  const riceTemp = resolveCookingItemTemp('stapleFood', matchedCooking?.cookedFoods?.rice, 78.5);
+  const animalTemp = resolveCookingItemTemp(
+    'animalProtein',
+    matchedCooking?.cookedFoods?.animalProtein,
+    82.0
+  );
+  const plantTemp = resolveCookingItemTemp(
+    'plantProtein',
+    matchedCooking?.cookedFoods?.plantProtein,
+    80.0
+  );
+  const vegTemp = resolveCookingItemTemp(
+    'vegetable',
+    matchedCooking?.cookedFoods?.vegetable,
+    84.5
+  );
+  const fruitTemp = resolveCookingItemTemp('fruit', matchedCooking?.cookedFoods?.fruit, 22.0);
 
   const rawWetItems: PlogOrganolepticItemRow[] = menu
     ? [
         {
           no: 1,
-          menuName: menu.stapleFood.toLowerCase(),
+          menuName: (menu.stapleFood || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Putih bersih, harum alami, netral gurih, pulen',
@@ -169,7 +194,7 @@ export function resolvePlogOrganolepticData(
         },
         {
           no: 2,
-          menuName: menu.animalProtein.toLowerCase(),
+          menuName: (menu.animalProtein || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Cokelat kilap, wangi bumbu, gurih meresap, empuk',
@@ -179,7 +204,7 @@ export function resolvePlogOrganolepticData(
         },
         {
           no: 3,
-          menuName: menu.plantProtein.toLowerCase(),
+          menuName: (menu.plantProtein || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Kuning keemasan, harum rempah, gurih pas, lembut',
@@ -189,7 +214,7 @@ export function resolvePlogOrganolepticData(
         },
         {
           no: 4,
-          menuName: menu.vegetable.toLowerCase(),
+          menuName: (menu.vegetable || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Warna segar alami, harum kuah/tumis, segar, renyah',
@@ -199,7 +224,7 @@ export function resolvePlogOrganolepticData(
         },
         {
           no: 5,
-          menuName: menu.fruit.toLowerCase(),
+          menuName: (menu.fruit || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Segar tidak memar, manis alami, matang optimal',
@@ -259,7 +284,7 @@ export function resolvePlogOrganolepticData(
     ? [
         {
           no: 1,
-          menuName: menu.milkOrExtra.toLowerCase(),
+          menuName: (menu.milkOrExtra || '-').toLowerCase(),
           organolepticDetail: blankMode
             ? ''
             : 'Kemasan utuh tersegel, tidak kembung, aroma & rasa normal',
@@ -273,7 +298,8 @@ export function resolvePlogOrganolepticData(
   const defaultWetPhoto =
     matchedPortioning?.largePortionPhoto ||
     matchedPortioning?.smallPortionPhoto ||
-    matchedCooking?.cookedFoods.animalProtein?.photoUrl ||
+    matchedCooking?.itemEntries?.find(e => e.categoryKey === 'animalProtein')?.photoUrl ||
+    matchedCooking?.cookedFoods?.animalProtein?.photoUrl ||
     '';
 
   const defaultNotes = blankMode

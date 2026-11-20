@@ -51,6 +51,18 @@ import {
   exportSuratTugasPDF,
 } from '../common/SuratTugasSheet';
 import {
+  RoomTempChecklistSheet,
+  RoomTempChecklistData,
+  resolveRoomTempChecklistData,
+  exportRoomTempChecklistPDF,
+} from '../common/RoomTempChecklistSheet';
+import {
+  FoodCostReportSheet,
+  resolveFoodCostReportData,
+  exportFoodCostReportPDF,
+  formatRpNoSpace,
+} from '../common/FoodCostReportSheet';
+import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
   getCustomTableFields,
@@ -88,7 +100,21 @@ import {
   Upload,
 } from 'lucide-react';
 
-// Definisi 20 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
+// Pemetaan sub-menu laporan suhu ruangan & fasilitas pendingin ke ID unit fasilitas
+const FACILITY_REPORT_UNIT_MAP: Partial<Record<OfficialReportKey, string>> = {
+  suhu_ruang_pengolahan: 'cooking-room',
+  suhu_ruang_pemorsian: 'portioning-room',
+  suhu_gudang_basah: 'wet-warehouse',
+  suhu_gudang_kering: 'dry-warehouse',
+  suhu_freezer_1: 'freezer-1',
+  suhu_freezer_2: 'freezer-2',
+  suhu_chiller_1: 'fridge-1',
+  suhu_chiller_2: 'fridge-2',
+  suhu_chiller_3: 'fridge-3',
+  suhu_chiller_4: 'fridge-4',
+};
+
+// Definisi 30 Laporan Resmi Pusat Laporan & Cetak SPPG TMG2
 export const REPORT_CONFIGS: ReportMetaConfig[] = [
   // 1. Distribusi & Lapangan
   {
@@ -165,11 +191,11 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'food_cost',
-    title: 'Informasi Food Cost & Efisiensi Menu',
+    title: 'Laporan Food Cost & Efisiensi Menu (PLOG)',
     category: 'Gizi & Menu',
     codePrefix: 'FC-ANALYSIS',
-    description: 'Analisis biaya riil bahan pangan (Modul QC × harga RAB/PO) terhadap porsi aktual harian (Presensi/Distribusi) & plafon pagu BGN (Porsi Besar Rp 10.000 / Porsi Kecil Rp 8.000).',
-    sourceModule: 'Quality Control (QC), RAB & PO, Presensi/Distribusi',
+    description: 'Laporan rincian Food Cost per tanggal & hidangan (Kebutuhan, Satuan, Harga Dasar, Total, Harga Porsi Kecil/Besar & Dokumentasi Ompreng) sinkron Input Food Cost Menu & Anggaran PLOG.',
+    sourceModule: 'PLOG (Input Food Cost Menu & Anggaran) & Divisi Pemorsian',
     defaultOrientation: 'landscape',
     approverRole: 'Pengawas Keuangan & Ahli Gizi',
   },
@@ -195,6 +221,106 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
 
   // 3. Dapur & Keamanan Pangan
+  {
+    key: 'suhu_ruang_pengolahan',
+    title: 'Laporan Pemantauan Suhu dan Kelembapan Ruang Pengolahan',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-OLAH',
+    description: 'Check list pemantauan waktu, suhu (°C), kelembapan (%), dan dokumentasi foto Ruang Pengolahan (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_ruang_pemorsian',
+    title: 'Laporan Pemantauan Suhu dan Kelembapan Ruang Pemorsian',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-PORSI',
+    description: 'Check list pemantauan waktu, suhu (°C), kelembapan (%), dan dokumentasi foto Ruang Pemorsian (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_gudang_basah',
+    title: 'Laporan Pemantauan Suhu dan Kelembapan Gudang Basah',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-GBASAH',
+    description: 'Check list pemantauan waktu, suhu (°C), kelembapan (%), dan dokumentasi foto Gudang Basah (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_gudang_kering',
+    title: 'Laporan Pemantauan Suhu dan Kelembapan Gudang Kering',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-GKERING',
+    description: 'Check list pemantauan waktu, suhu (°C), kelembapan (%), dan dokumentasi foto Gudang Kering (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_freezer_1',
+    title: 'Laporan Pemantauan Suhu Freezer 1',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-FRZ1',
+    description: 'Check list pemantauan waktu, suhu (< -18°C), dan dokumentasi foto Freezer 1 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_freezer_2',
+    title: 'Laporan Pemantauan Suhu Freezer 2',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-FRZ2',
+    description: 'Check list pemantauan waktu, suhu (< -18°C), dan dokumentasi foto Freezer 2 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_chiller_1',
+    title: 'Laporan Pemantauan Suhu Chiller 1',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-CHL1',
+    description: 'Check list pemantauan waktu, suhu (4–7°C), dan dokumentasi foto Chiller 1 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_chiller_2',
+    title: 'Laporan Pemantauan Suhu Chiller 2',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-CHL2',
+    description: 'Check list pemantauan waktu, suhu (5–8°C), dan dokumentasi foto Chiller 2 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_chiller_3',
+    title: 'Laporan Pemantauan Suhu Chiller 3',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-CHL3',
+    description: 'Check list pemantauan waktu, suhu (5–8°C), dan dokumentasi foto Chiller 3 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
+  {
+    key: 'suhu_chiller_4',
+    title: 'Laporan Pemantauan Suhu Chiller 4',
+    category: 'Dapur & Keamanan Pangan',
+    codePrefix: 'SUHU-CHL4',
+    description: 'Check list pemantauan waktu, suhu (4–6°C), dan dokumentasi foto Chiller 4 (Sesi 1 Persiapan, Sesi 2 Pengolahan, Sesi 3 Pemorsian) dalam format cetak Landscape.',
+    sourceModule: 'Divisi Persiapan (Sesi 1), Pengolahan (Sesi 2) & Pemorsian (Sesi 3)',
+    defaultOrientation: 'landscape',
+    approverRole: 'Kepala SPPG & Koordinator Sanitasi Dapur',
+  },
   {
     key: 'suhu_makanan_pemorsian',
     title: 'Pemantauan Standar Porsi & Suhu Makanan Pemorsian',
@@ -249,13 +375,13 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'quality_control',
-    title: 'Quality Control (QC) Bahan Pangan Datang',
+    title: 'Laporan Quality Control (QC) Bahan dan Operasional',
     category: 'Operasional & Rantai Pasok',
     codePrefix: 'QC-INSPECT',
-    description: 'Hasil inspeksi penerimaan bahan: suhu chiller, kesegaran fisik, tanggal kedaluwarsa, dan berat.',
-    sourceModule: 'Gudang & QC (qcId, poId, materialId)',
+    description: 'Laporan Quality Control (QC) bahan pangan & operasional: jumlah dipesan, diterima, selisih, grade mutu, suhu datang, status QC, dan dokumentasi multi-foto sinkron PLOK.',
+    sourceModule: 'Modul PLOK (Quality Control & Stok Gudang)',
     defaultOrientation: 'landscape',
-    approverRole: 'Petugas QC & Penerimaan Gudang',
+    approverRole: 'Asisten Lapangan',
   },
   {
     key: 'kartu_stok',
@@ -516,6 +642,9 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [showStEditor, setShowStEditor] = useState<boolean>(false);
   const [stOverrides, setStOverrides] = useState<Partial<SuratTugasData>>({});
 
+  // Suhu & Kelembapan Ruangan notes per tanggal (Ruang Pengolahan, Ruang Pemorsian, Gudang Basah, Gudang Kering)
+  const [roomTempNotesByDate, setRoomTempNotesByDate] = useState<Record<string, string>>({});
+
   // Active Report Metadata
   const currentConfig = useMemo(() => {
     return REPORT_CONFIGS.find(r => r.key === activeReportKey) || REPORT_CONFIGS[0];
@@ -752,6 +881,83 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     startDate,
     endDate,
     periodType,
+  ]);
+
+  // Pemetaan sub-menu laporan suhu ruangan & pendingin ke unit fasilitas terkait
+  const activeRoomUnitId = FACILITY_REPORT_UNIT_MAP[activeReportKey] || 'cooking-room';
+
+  // Auto-resolved Pemantauan Suhu & Kelembapan Ruangan (Sesi 1: Persiapan, Sesi 2: Pengolahan, Sesi 3: Pemorsian)
+  const activeRoomTempDataset = useMemo<RoomTempChecklistData>(() => {
+    return resolveRoomTempChecklistData({
+      unitId: activeRoomUnitId,
+      prepRecords,
+      cookingRecords,
+      portioningRecords,
+      sppgConfig,
+      selectedDate,
+      selectedMonth,
+      startDate,
+      endDate,
+      periodType,
+      notesByDate: roomTempNotesByDate,
+    });
+  }, [
+    activeRoomUnitId,
+    prepRecords,
+    cookingRecords,
+    portioningRecords,
+    sppgConfig,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
+    periodType,
+    roomTempNotesByDate,
+  ]);
+
+  // Auto-resolved LAPORAN FOOD COST resmi sinkron Input Food Cost Menu & Anggaran PLOG
+  const foodCostReportData = useMemo(() => {
+    return resolveFoodCostReportData({
+      menuItems,
+      menuIngredientsMap,
+      institutions,
+      beneficiaryAttendance,
+      distributionDeliveries,
+      distributionLogs,
+      masterUnits,
+      masterBahan,
+      rabItems,
+      portioningRecords,
+      sppgConfig,
+      periodType,
+      selectedDate,
+      selectedMonth,
+      startDate,
+      endDate,
+      selectedInstitutionId,
+      selectedPortionCategory,
+      searchKeyword,
+    });
+  }, [
+    menuItems,
+    menuIngredientsMap,
+    institutions,
+    beneficiaryAttendance,
+    distributionDeliveries,
+    distributionLogs,
+    masterUnits,
+    masterBahan,
+    rabItems,
+    portioningRecords,
+    sppgConfig,
+    periodType,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
+    selectedInstitutionId,
+    selectedPortionCategory,
+    searchKeyword,
   ]);
 
   // Auto-resolved BAST Harian Sheets — 100% sinkron dengan Modul Tugas Divisi Distribusi, Presensi Harian & Master Lembaga
@@ -1164,7 +1370,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       ];
     };
 
-    let signatures: Array<{ role: string; name: string; idNum?: string }> = resolveDefaultSignatures();
+    let signatures: Array<{ role: string; name: string; idNum?: string; heading?: string }> = resolveDefaultSignatures();
 
     const targetInstFilter =
       selectedInstitutionId !== 'ALL'
@@ -1875,351 +2081,125 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 8. Food Cost & Efisiensi Menu (Bahan & Qty dari QC, Harga dari RAB & PO, Porsi Aktual dari Presensi/Distribusi, Pagu BGN per Kategori)
+      // 8. Laporan Food Cost & Efisiensi Menu (Sinkron Input Food Cost Menu & Anggaran PLOG + Dokumentasi Ompreng)
       case 'food_cost': {
         headers = [
           'No',
-          'Nama Bahan Makanan (QC)',
-          'Jumlah Total (QC)',
-          'Harga RAB',
-          'Harga PO',
-          'Harga Riil (PO/RAB)',
-          'Total Biaya Bahan',
-          'Biaya Riil / Porsi',
-          'Share (%)',
+          'Tanggal',
+          'Menu',
+          'Bahan Pokok',
+          'Kebutuhan',
+          'Satuan',
+          'Harga Dasar',
+          'Total',
+          'Harga Porsi Kecil',
+          'Harga Porsi Besar',
         ];
-        const targetInsts = targetInstFilter
-          ? [targetInstFilter]
-          : institutions.filter(i => i.isActive);
 
-        // 1) Hitung porsi aktual harian dari Presensi Harian / Divisi Distribusi
-        let usedAttendanceCount = 0;
-        let usedDistributionCount = 0;
-        let usedQuotaFallbackCount = 0;
+        const flattenedRows: (string | number)[][] = [];
+        const excelRows: Record<string, unknown>[] = [];
 
-        const resolvePortionsForDate = (targetDate: string) => {
-          return targetInsts.reduce(
-            (acc, inst) => {
-              const att = beneficiaryAttendance.find(
-                a => a.date === targetDate && isSameInstitutionMatch(inst, a.institutionId, a.institutionName)
-              );
-              const del = distributionDeliveries.find(
-                d => d.date === targetDate && isSameInstitutionMatch(inst, d.institutionId, d.institutionName)
-              );
-              const log = distributionLogs.find(
-                l => l.date === targetDate && isSameInstitutionMatch(inst, l.institutionId, l.institutionName)
-              );
+        foodCostReportData.groups.forEach(group => {
+          group.dishes.forEach(dish => {
+            dish.ingredients.forEach(ing => {
+              flattenedRows.push([
+                group.no,
+                group.tanggalDisplay,
+                dish.menuName,
+                ing.name,
+                formatNumber(ing.kebutuhan),
+                ing.satuan,
+                formatRpNoSpace(ing.unitPrice),
+                formatRpNoSpace(ing.totalCost),
+                formatRpNoSpace(dish.costSmallPerPortion),
+                formatRpNoSpace(dish.costLargePerPortion),
+              ]);
 
-              if (att) {
-                usedAttendanceCount += 1;
-                return { small: acc.small + (att.presentSmall || 0), large: acc.large + (att.presentLarge || 0) };
-              }
-              if (del) {
-                usedDistributionCount += 1;
-                return { small: acc.small + (del.smallPortions || 0), large: acc.large + (del.largePortions || 0) };
-              }
-              if (log) {
-                usedDistributionCount += 1;
-                return { small: acc.small + (log.smallPortions || 0), large: acc.large + (log.largePortions || 0) };
-              }
-              usedQuotaFallbackCount += 1;
-              return { small: acc.small + (inst.smallPortions || 0), large: acc.large + (inst.largePortions || 0) };
-            },
-            { small: 0, large: 0 }
-          );
-        };
-
-        let resolvedTotals = { small: 0, large: 0 };
-        if (periodType === 'harian') {
-          resolvedTotals = resolvePortionsForDate(selectedDate);
-        } else {
-          const periodDates = Array.from(
-            new Set([
-              ...beneficiaryAttendance
-                .filter(a => matchesReportPeriod(a.date, periodType, selectedDate, selectedMonth, startDate, endDate))
-                .map(a => a.date),
-              ...distributionDeliveries
-                .filter(d => matchesReportPeriod(d.date, periodType, selectedDate, selectedMonth, startDate, endDate))
-                .map(d => d.date),
-              ...distributionLogs
-                .filter(l => matchesReportPeriod(l.date, periodType, selectedDate, selectedMonth, startDate, endDate))
-                .map(l => l.date),
-            ])
-          ).sort();
-
-          if (periodDates.length > 0) {
-            for (const dt of periodDates) {
-              const daySum = resolvePortionsForDate(dt);
-              resolvedTotals = {
-                small: resolvedTotals.small + daySum.small,
-                large: resolvedTotals.large + daySum.large,
-              };
-            }
-          } else {
-            resolvedTotals = resolvePortionsForDate(selectedDate);
-          }
-        }
-
-        const portionSourceLabel =
-          usedAttendanceCount > 0 && usedDistributionCount > 0
-            ? 'Presensi Harian & Divisi Distribusi'
-            : usedAttendanceCount > 0
-            ? 'Presensi Harian'
-            : usedDistributionCount > 0
-            ? 'Divisi Distribusi'
-            : usedQuotaFallbackCount > 0
-            ? 'Kuota Lembaga'
-            : 'Data Porsi Aktif';
-
-        const quotaSmall = selectedPortionCategory === 'besar' ? 0 : resolvedTotals.small;
-        const quotaLarge = selectedPortionCategory === 'kecil' ? 0 : resolvedTotals.large;
-        const totalPortions = quotaSmall + quotaLarge;
-        const safeTotalPortions = Math.max(1, totalPortions);
-
-        // 2) Plafon Pagu BGN per Kategori Porsi (Porsi Besar Rp 10.000 & Porsi Kecil Rp 8.000)
-        const smallBudgetCap = sppgConfig.smallPortionBudget || 8000;
-        const largeBudgetCap = sppgConfig.largePortionBudget || 10000;
-        const totalPaguSmall = quotaSmall * smallBudgetCap;
-        const totalPaguLarge = quotaLarge * largeBudgetCap;
-        const totalPaguBGN = totalPaguSmall + totalPaguLarge;
-        const budgetCap =
-          selectedPortionCategory === 'besar'
-            ? largeBudgetCap
-            : selectedPortionCategory === 'kecil'
-            ? smallBudgetCap
-            : totalPortions > 0
-            ? Math.round(totalPaguBGN / totalPortions)
-            : largeBudgetCap;
-
-        // 3) Nama Bahan Makanan & Jumlah Total Bahan dari Modul Quality Control (QC)
-        const activeQcs = qualityControlRecords.filter(
-          q => q.status !== 'Ditolak' && (Number(q.receivedQuantity) || 0) > 0
-        );
-        const periodQcs = activeQcs.filter(q =>
-          matchesReportPeriod(
-            (q.inspectedAt || '').slice(0, 10),
-            periodType,
-            selectedDate,
-            selectedMonth,
-            startDate,
-            endDate
-          )
-        );
-        const usedFallbackAllQcs = periodType === 'harian' && periodQcs.length === 0;
-        let qcListForCost = usedFallbackAllQcs ? activeQcs : periodQcs;
-
-        if (searchKeyword.trim()) {
-          const kw = searchKeyword.toLowerCase();
-          qcListForCost = qcListForCost.filter(
-            q =>
-              q.itemName.toLowerCase().includes(kw) ||
-              q.poNumber.toLowerCase().includes(kw) ||
-              q.supplierName.toLowerCase().includes(kw)
-          );
-        }
-
-        // Agregasi bahan QC per nama bahan + satuan
-        const aggregatedMap = new Map<
-          string,
-          {
-            name: string;
-            unit: string;
-            totalQty: number;
-            poNumbers: Set<string>;
-            poIds: Set<string>;
-            suppliers: Set<string>;
-            grades: Set<string>;
-          }
-        >();
-
-        for (const q of qcListForCost) {
-          const normUnit = (q.unit || 'kg').trim().toLowerCase();
-          let existingKey: string | null = null;
-          for (const [k, grp] of aggregatedMap.entries()) {
-            if (grp.unit.toLowerCase() === normUnit && matchesMaterialFlexible(grp.name, q.itemName)) {
-              existingKey = k;
-              break;
-            }
-          }
-          const key = existingKey || `${q.itemName.trim().toLowerCase()}__${normUnit}`;
-          const curr = aggregatedMap.get(key);
-          if (curr) {
-            curr.totalQty += Number(q.receivedQuantity) || 0;
-            if (q.poNumber) curr.poNumbers.add(q.poNumber);
-            if (q.poId) curr.poIds.add(q.poId);
-            if (q.supplierName) curr.suppliers.add(q.supplierName);
-            if (q.qualityGrade) curr.grades.add(q.qualityGrade);
-          } else {
-            aggregatedMap.set(key, {
-              name: q.itemName,
-              unit: q.unit || 'kg',
-              totalQty: Number(q.receivedQuantity) || 0,
-              poNumbers: new Set(q.poNumber ? [q.poNumber] : []),
-              poIds: new Set(q.poId ? [q.poId] : []),
-              suppliers: new Set(q.supplierName ? [q.supplierName] : []),
-              grades: new Set(q.qualityGrade ? [q.qualityGrade] : []),
+              excelRows.push({
+                'NO.': group.no,
+                'TANGGAL': group.tanggalDisplay,
+                'KODE MENU': group.menuCode,
+                'PORSI KECIL': group.smallPortions,
+                'PORSI BESAR': group.largePortions,
+                'MENU': dish.menuName,
+                'BAHAN POKOK': ing.name,
+                'KEBUTUHAN': ing.kebutuhan,
+                'SATUAN': ing.satuan,
+                'HARGA DASAR/kg/bks (Rp)': ing.unitPrice,
+                'TOTAL (Rp)': ing.totalCost,
+                'SUB TOTAL MENU (Rp)': dish.totalCost,
+                'HARGA PORSI KECIL / PORSI (Rp)': dish.costSmallPerPortion,
+                'HARGA PORSI BESAR / PORSI (Rp)': dish.costLargePerPortion,
+              });
             });
-          }
-        }
-
-        // 4) Resolusi Harga Bahan dari Modul Purchase Order (PO) & RAB
-        const computed = Array.from(aggregatedMap.values()).map(item => {
-          // Cari di Purchase Order (cocokkan nama bahan agar tidak salah PO)
-          const linkedPoMatch = purchaseOrders
-            .filter(po => item.poIds.has(po.id) || item.poNumbers.has(po.poNumber))
-            .flatMap(po => po.items.map(it => ({ po, it })))
-            .find(({ it }) => matchesMaterialFlexible(it.itemName, item.name));
-
-          const anyPoMatch =
-            linkedPoMatch ||
-            purchaseOrders
-              .flatMap(po => po.items.map(it => ({ po, it })))
-              .find(({ it }) => matchesMaterialFlexible(it.itemName, item.name));
-
-          const poPrice = anyPoMatch?.it.unitPrice || 0;
-
-          // Cari di RAB (prioritas link rabId PO atau kategori RAB Bahan Pangan disetujui)
-          const rabByPoLink = anyPoMatch?.it.rabId || anyPoMatch?.po.rabId
-            ? rabItems.find(r => r.id === (anyPoMatch?.it.rabId || anyPoMatch?.po.rabId))
-            : undefined;
-          const approvedFoodRab = rabItems.find(
-            r =>
-              r.category === 'RAB Bahan Pangan' &&
-              r.status === 'Disetujui' &&
-              matchesMaterialFlexible(r.itemName, item.name)
-          );
-          const anyRab = rabItems.find(r => matchesMaterialFlexible(r.itemName, item.name));
-          const rabMatch = rabByPoLink || approvedFoodRab || anyRab;
-          const rabPrice = rabMatch?.unitPrice || 0;
-
-          // Harga riil: utamakan harga PO aktual, jika belum ada gunakan harga RAB, terakhir fallback Master/Gudang
-          const invFallback = inventory.find(inv => matchesMaterialFlexible(inv.name, item.name));
-          const mbFallback = masterBahan.find(mb => matchesMaterialFlexible(mb.name, item.name));
-          const effectivePrice =
-            poPrice > 0
-              ? poPrice
-              : rabPrice > 0
-              ? rabPrice
-              : invFallback?.pricePerUnit || mbFallback?.actualPrice || 0;
-
-          const priceSourceLabel =
-            poPrice > 0 && rabPrice > 0
-              ? 'PO & RAB'
-              : poPrice > 0
-              ? 'Purchase Order'
-              : rabPrice > 0
-              ? 'RAB Bahan Pangan'
-              : effectivePrice > 0
-              ? 'Gudang/Master'
-              : 'Belum Ada Harga';
-
-          const totalCost = item.totalQty * effectivePrice;
-          const costPerPortion = totalCost / safeTotalPortions;
-
-          return {
-            name: item.name,
-            totalQty: item.totalQty,
-            unit: item.unit,
-            poList: Array.from(item.poNumbers).join(', ') || '-',
-            rabPrice,
-            poPrice,
-            effectivePrice,
-            priceSourceLabel,
-            totalCost,
-            costPerPortion,
-          };
+          });
         });
 
-        const totalMenuCost = computed.reduce((s, c) => s + c.totalCost, 0);
-        const totalCostPerPortion = totalPortions > 0 ? Math.round(totalMenuCost / totalPortions) : 0;
-        const absorptionRatio = totalPaguBGN > 0 ? totalMenuCost / totalPaguBGN : 0;
-        const ratioPct = (absorptionRatio * 100).toFixed(1);
-        const totalEfficiency = totalPaguBGN - totalMenuCost;
-        const efficiencyPerPortion = budgetCap - totalCostPerPortion;
+        rows = flattenedRows;
+        excelData = excelRows;
 
-        // Proporsi biaya riil per kategori porsi berdasarkan bobot plafon kategori (8.000 vs 10.000)
-        const realCostSmallPerPortion =
-          selectedPortionCategory === 'besar'
-            ? 0
-            : selectedPortionCategory === 'kecil'
-            ? totalCostPerPortion
-            : Math.round(smallBudgetCap * absorptionRatio);
-        const realCostLargePerPortion =
-          selectedPortionCategory === 'kecil'
-            ? 0
-            : selectedPortionCategory === 'besar'
-            ? totalCostPerPortion
-            : Math.round(largeBudgetCap * absorptionRatio);
-
-        rows = computed.map((c, idx) => {
-          const share = totalMenuCost > 0 ? ((c.totalCost / totalMenuCost) * 100).toFixed(1) : '0.0';
-          return [
-            idx + 1,
-            `${c.name} (${c.poList})`,
-            `${formatNumber(c.totalQty)} ${c.unit}`,
-            c.rabPrice > 0 ? `${formatRupiah(c.rabPrice)} / ${c.unit}` : '-',
-            c.poPrice > 0 ? `${formatRupiah(c.poPrice)} / ${c.unit}` : '-',
-            `${formatRupiah(c.effectivePrice)} (${c.priceSourceLabel})`,
-            formatRupiah(c.totalCost),
-            formatRupiah(Math.round(c.costPerPortion)),
-            `${share}%`,
-          ];
-        });
-
-        excelData = computed.map((c, idx) => ({
-          'No': idx + 1,
-          'Nama Bahan Makanan (QC)': c.name,
-          'Referensi PO': c.poList,
-          'Jumlah Total Bahan (QC)': c.totalQty,
-          'Satuan': c.unit,
-          'Harga RAB (Rp)': c.rabPrice,
-          'Harga PO (Rp)': c.poPrice,
-          'Harga Terpakai (Rp)': c.effectivePrice,
-          'Sumber Harga': c.priceSourceLabel,
-          'Total Biaya Bahan (Rp)': c.totalCost,
-          'Biaya Riil / Porsi Aktual (Rp)': Math.round(c.costPerPortion),
-          'Share Biaya (%)': totalMenuCost > 0 ? Number(((c.totalCost / totalMenuCost) * 100).toFixed(1)) : 0,
-        }));
-
-        const effSign = totalEfficiency >= 0 ? '+' : '-';
-        const effPerPortionSign = efficiencyPerPortion >= 0 ? '+' : '-';
+        const latestGroup = foodCostReportData.groups[foodCostReportData.groups.length - 1];
+        const avgCostSmall =
+          foodCostReportData.groups.length > 0
+            ? Math.round(
+                foodCostReportData.groups.reduce((s, g) => s + g.totalCostSmallPerPortion, 0) /
+                  foodCostReportData.groups.length
+              )
+            : 0;
+        const avgCostLarge =
+          foodCostReportData.groups.length > 0
+            ? Math.round(
+                foodCostReportData.groups.reduce((s, g) => s + g.totalCostLargePerPortion, 0) /
+                  foodCostReportData.groups.length
+              )
+            : 0;
+        const grandSpend = foodCostReportData.groups.reduce((s, g) => s + g.grandTotalCost, 0);
+        const totalPaguAll = foodCostReportData.groups.reduce(
+          (s, g) =>
+            s +
+            g.smallPortions * foodCostReportData.smallBudgetCap +
+            g.largePortions * foodCostReportData.largeBudgetCap,
+          0
+        );
+        const effTotal = totalPaguAll - grandSpend;
 
         metrics = [
           {
-            label: 'Biaya Riil / Porsi Aktual',
-            value: formatRupiah(totalCostPerPortion),
-            sublabel: `Total QC: ${formatRupiah(totalMenuCost)} (${computed.length} Bahan QC)`,
-            color: totalEfficiency >= 0 ? 'text-emerald-700' : 'text-rose-700',
+            label: 'Harga Porsi Kecil (PLOG)',
+            value: formatRpNoSpace(latestGroup?.totalCostSmallPerPortion ?? avgCostSmall),
+            sublabel: `Pagu BGN Kecil: ${formatRpNoSpace(foodCostReportData.smallBudgetCap)} (${latestGroup?.smallPortions || 0} porsi)`,
+            color:
+              (latestGroup?.totalCostSmallPerPortion ?? avgCostSmall) <=
+              foodCostReportData.smallBudgetCap
+                ? 'text-emerald-700'
+                : 'text-rose-700',
           },
           {
-            label: 'Plafon Pagu BGN / Kategori',
-            value:
-              selectedPortionCategory === 'ALL'
-                ? `${formatRupiah(budgetCap)} (Rata2)`
-                : `${formatRupiah(budgetCap)} / Porsi`,
-            sublabel:
-              selectedPortionCategory === 'ALL'
-                ? `Besar: ${formatRupiah(largeBudgetCap)} (Riil ${formatRupiah(realCostLargePerPortion)}) • Kecil: ${formatRupiah(smallBudgetCap)} (Riil ${formatRupiah(realCostSmallPerPortion)})`
-                : selectedPortionCategory === 'besar'
-                ? `Plafon Porsi Besar • Total ${formatRupiah(totalPaguBGN)}`
-                : `Plafon Porsi Kecil • Total ${formatRupiah(totalPaguBGN)}`,
-            color: 'text-blue-700',
+            label: 'Harga Porsi Besar (PLOG)',
+            value: formatRpNoSpace(latestGroup?.totalCostLargePerPortion ?? avgCostLarge),
+            sublabel: `Pagu BGN Besar: ${formatRpNoSpace(foodCostReportData.largeBudgetCap)} (${latestGroup?.largePortions || 0} porsi)`,
+            color:
+              (latestGroup?.totalCostLargePerPortion ?? avgCostLarge) <=
+              foodCostReportData.largeBudgetCap
+                ? 'text-blue-700'
+                : 'text-rose-700',
           },
           {
-            label: totalEfficiency >= 0 ? 'Efisiensi Anggaran (Hemat)' : 'Selisih Anggaran (Over)',
-            value: `${effSign}${formatRupiah(Math.abs(totalEfficiency))}`,
-            sublabel: `${effPerPortionSign}${formatRupiah(Math.abs(efficiencyPerPortion))} / porsi vs Pagu BGN`,
-            color: totalEfficiency >= 0 ? 'text-emerald-700' : 'text-rose-700',
+            label: 'Total Belanja Bahan Menu',
+            value: formatRupiah(grandSpend),
+            sublabel: `${foodCostReportData.groups.length} Menu PLOG Tercatat`,
+            color: 'text-slate-900',
           },
           {
-            label: 'Porsi Aktual & Rasio Serapan',
-            value: `${ratioPct}% (${formatNumber(totalPortions)} Porsi)`,
-            sublabel: `${formatNumber(quotaSmall)} Kecil + ${formatNumber(quotaLarge)} Besar • ${portionSourceLabel}`,
-            color: 'text-slate-700',
+            label: effTotal >= 0 ? 'Efisiensi vs Pagu Anggaran' : 'Selisih Over Pagu',
+            value: `${effTotal >= 0 ? '+' : '-'}${formatRupiah(Math.abs(effTotal))}`,
+            sublabel: `Plafon Gabungan: ${formatRupiah(totalPaguAll)}`,
+            color: effTotal >= 0 ? 'text-emerald-700' : 'text-rose-700',
           },
         ];
 
-        notes = `Sumber Data: Nama & jumlah bahan dari Modul Quality Control (QC)${usedFallbackAllQcs ? ' (menampilkan seluruh stok QC aktif karena tanggal terpilih belum memiliki log QC)' : ''}; harga satuan dari Modul Purchase Order & RAB; porsi aktual dari ${portionSourceLabel} (${formatNumber(quotaSmall)} Porsi Kecil × Pagu ${formatRupiah(smallBudgetCap)} + ${formatNumber(quotaLarge)} Porsi Besar × Pagu ${formatRupiah(largeBudgetCap)} = Total Plafon ${formatRupiah(totalPaguBGN)}).`;
+        notes =
+          'Format Laporan Food Cost disinkronkan langsung dari Input Food Cost Menu & Anggaran PLOG serta dokumentasi foto ompreng Divisi Pemorsian.';
         break;
       }
 
@@ -2236,11 +2216,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           prepRecords.find(r => r.date === selectedDate) ||
           prepRecords[0];
 
-        const freezerTemp =
+        const rawFreezerTemp =
           prepRec?.facilityTemps?.freezer1Temp ??
           cookRec?.facilityTemps?.freezer1Temp ??
           portRec?.facilityTemps?.freezer1Temp ??
           -18.5;
+        const freezerTemp =
+          typeof rawFreezerTemp === 'number' && Number.isFinite(rawFreezerTemp)
+            ? rawFreezerTemp
+            : -18.5;
         const freezerTempDisplay = `${freezerTemp.toFixed(1)}°C`;
         const dateStamp = (selectedDate || '2026-11-08').replace(/-/g, '');
         const baseTime = portRec?.portioningTime || cookRec?.time || '06:30';
@@ -2579,9 +2563,9 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         }));
 
         const allHotTemps = filteredItems
-          .filter(x => x.item.categoryKey !== 'fruit')
+          .filter(x => x.item.categoryKey !== 'fruit' && x.item.categoryKey !== 'milkOrExtra')
           .flatMap(x => [x.item.sesi1.tempNum, x.item.sesi2.tempNum, x.item.sesi3.tempNum])
-          .filter((v): v is number => typeof v === 'number');
+          .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
         const maxTemp = allHotTemps.length ? Math.max(...allHotTemps) : 0;
         const minTemp = allHotTemps.length ? Math.min(...allHotTemps) : 0;
         const deviationCount = filteredItems.filter(x => !x.item.ccpPassed).length;
@@ -2621,6 +2605,118 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         ];
         notes =
           'Seluruh data suhu internal (Sesi 1-3), peralatan masak, nama makanan/menu (Master Menu), penanggung jawab (Master Relawan Divisi Pengolahan), dan dokumentasi foto terhubung otomatis dari Sub Menu Tugas Divisi Pengolahan.';
+        break;
+      }
+
+      // 12b–12k. Laporan Pemantauan Suhu & Kelembapan Ruangan / Freezer / Chiller Individual (3 Sesi)
+      case 'suhu_ruang_pengolahan':
+      case 'suhu_ruang_pemorsian':
+      case 'suhu_gudang_basah':
+      case 'suhu_gudang_kering':
+      case 'suhu_freezer_1':
+      case 'suhu_freezer_2':
+      case 'suhu_chiller_1':
+      case 'suhu_chiller_2':
+      case 'suhu_chiller_3':
+      case 'suhu_chiller_4': {
+        headers = [
+          'Ruangan / Lokasi',
+          'Tanggal',
+          'Batas Kritis (°C)',
+          'Sesi 1 Persiapan (Jam / Suhu / RH)',
+          'Sesi 2 Pengolahan (Jam / Suhu / RH)',
+          'Sesi 3 Pemorsian (Jam / Suhu / RH)',
+          'Dokumentasi Foto',
+          'Keterangan',
+        ];
+
+        const ds = activeRoomTempDataset;
+        const filteredRows = searchKeyword.trim()
+          ? ds.rows.filter(row => {
+              const kw = searchKeyword.toLowerCase();
+              return (
+                ds.unit.label.toLowerCase().includes(kw) ||
+                row.tanggalDisplay.toLowerCase().includes(kw) ||
+                row.keterangan.toLowerCase().includes(kw) ||
+                (row.shift1.officerName || '').toLowerCase().includes(kw) ||
+                (row.shift2.officerName || '').toLowerCase().includes(kw) ||
+                (row.shift3.officerName || '').toLowerCase().includes(kw)
+              );
+            })
+          : ds.rows;
+
+        rows = filteredRows.map(row => {
+          const photoCnt = [row.shift1.photoUrl, row.shift2.photoUrl, row.shift3.photoUrl].filter(
+            Boolean
+          ).length;
+          return [
+            ds.unit.label,
+            row.tanggalDisplay,
+            ds.unit.standard,
+            `${row.shift1.jam} | ${row.shift1.suhuHasil}°C | ${row.shift1.kelembapanHasil}`,
+            `${row.shift2.jam} | ${row.shift2.suhuHasil}°C | ${row.shift2.kelembapanHasil}`,
+            `${row.shift3.jam} | ${row.shift3.suhuHasil}°C | ${row.shift3.kelembapanHasil}`,
+            `${photoCnt}/3 Sesi Foto`,
+            row.keterangan || '-',
+          ];
+        });
+
+        excelData = filteredRows.map(row => ({
+          Ruangan: ds.unit.label,
+          Tanggal: row.tanggalDisplay,
+          'Batas Kritis Suhu': row.batasKritisSuhu,
+          'Batas Kritis Kelembapan': row.batasKritisKelembapan,
+          'Sesi 1 (Persiapan) Jam': row.shift1.jam,
+          'Sesi 1 (Persiapan) Suhu (°C)': row.shift1.suhuHasil,
+          'Sesi 1 (Persiapan) Kelembapan (%)': row.shift1.kelembapanHasil,
+          'Sesi 2 (Pengolahan) Jam': row.shift2.jam,
+          'Sesi 2 (Pengolahan) Suhu (°C)': row.shift2.suhuHasil,
+          'Sesi 2 (Pengolahan) Kelembapan (%)': row.shift2.kelembapanHasil,
+          'Sesi 3 (Pemorsian) Jam': row.shift3.jam,
+          'Sesi 3 (Pemorsian) Suhu (°C)': row.shift3.suhuHasil,
+          'Sesi 3 (Pemorsian) Kelembapan (%)': row.shift3.kelembapanHasil,
+          'Foto Sesi 1 (Persiapan)': row.shift1.photoUrl ? 'Terlampir' : 'Kosong',
+          'Foto Sesi 2 (Pengolahan)': row.shift2.photoUrl ? 'Terlampir' : 'Kosong',
+          'Foto Sesi 3 (Pemorsian)': row.shift3.photoUrl ? 'Terlampir' : 'Kosong',
+          Keterangan: row.keterangan || '-',
+        }));
+
+        const totalPhotos = filteredRows.reduce(
+          (sum, row) =>
+            sum +
+            [row.shift1.photoUrl, row.shift2.photoUrl, row.shift3.photoUrl].filter(Boolean).length,
+          0
+        );
+
+        metrics = [
+          {
+            label: 'Lokasi Pemantauan',
+            value: ds.unit.label,
+            sublabel: `Standar Kritis: ${ds.unit.standard} • RH ${ds.rows[0]?.batasKritisKelembapan || '40-60%'}`,
+            color: 'text-blue-700',
+          },
+          {
+            label: 'Sumber Data 3 Sesi',
+            value: '3 Divisi / Hari',
+            sublabel: 'Sesi 1 Persiapan • Sesi 2 Pengolahan • Sesi 3 Pemorsian',
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Hari Pemantauan Tercatat',
+            value: `${filteredRows.length} Hari`,
+            sublabel: `Periode: ${ds.periodeLabel}`,
+            color: 'text-slate-800',
+          },
+          {
+            label: 'Dokumentasi Foto',
+            value: `${totalPhotos} Foto`,
+            sublabel: 'Sinkron input suhu & kelembapan divisi (klik foto zoom)',
+            color: 'text-purple-700',
+          },
+        ];
+
+        notes =
+          `Check List Pemantauan Suhu & Kelembapan ${ds.unit.label} disinkronkan otomatis dari input Divisi Persiapan (Sesi 1), Divisi Pengolahan (Sesi 2), dan Divisi Pemorsian (Sesi 3) lengkap dengan jam, suhu (°C), kelembapan (%), dan dokumentasi foto dalam format cetak Landscape.`;
         break;
       }
 
@@ -2994,9 +3090,20 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 17. Quality Control Barang/Bahan
+      // 17. Laporan Quality Control (QC) Bahan dan Operasional (Sinkron PLOK QC & Stok Gudang)
       case 'quality_control': {
-        headers = ['No', 'No. QC', 'Nomor PO', 'Supplier', 'Bahan Pangan', 'Dipesan', 'Diterima', 'Selisih', 'Grade Mutu', 'Suhu Datang', 'Keterangan', 'Status QC', 'Petugas QC'];
+        headers = [
+          'No',
+          'Bahan Pangan',
+          'Dipesan',
+          'Diterima',
+          'Selisih',
+          'Grade Mutu',
+          'Suhu Datang',
+          'Keterangan',
+          'Status QC',
+          'Dokumentasi',
+        ];
         const periodQcs = qualityControlRecords.filter(q =>
           matchesReportPeriod((q.inspectedAt || '').slice(0, 10), periodType, selectedDate, selectedMonth, startDate, endDate)
         );
@@ -3009,67 +3116,173 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           qcs = qcs.filter(
             q =>
               q.itemName.toLowerCase().includes(kw) ||
-              q.supplierName.toLowerCase().includes(kw) ||
-              q.poNumber.toLowerCase().includes(kw)
+              (q.notes || '').toLowerCase().includes(kw) ||
+              q.qualityGrade.toLowerCase().includes(kw) ||
+              q.status.toLowerCase().includes(kw)
           );
         }
 
-        rows = qcs.map((q, idx) => {
-          const diff = q.receivedQuantity - q.orderedQuantity;
+        const extractQcPhotos = (q: typeof qcs[number]) => {
+          const matchedInv = inventory.find(
+            inv =>
+              inv.latestQcId === q.id ||
+              inv.qcRecordIds?.includes(q.id) ||
+              inv.name.trim().toLowerCase() === q.itemName.trim().toLowerCase()
+          );
+          const urls: string[] = [];
+          const pushUrl = (u?: unknown) => {
+            if (typeof u === 'string' && u.trim() !== '' && !urls.includes(u)) {
+              urls.push(u);
+            }
+          };
+          if (Array.isArray(q.photoUrls)) {
+            q.photoUrls.forEach(pushUrl);
+          }
+          pushUrl(q.photoUrl);
+          if (matchedInv?.customFields) {
+            Object.values(matchedInv.customFields).forEach(val => {
+              if (typeof val === 'string' && (val.startsWith('data:image/') || val.startsWith('http'))) {
+                pushUrl(val);
+              }
+            });
+          }
+          return { urls, matchedInv };
+        };
+
+        const resolveOrderedQty = (q: typeof qcs[number]) => {
+          if (typeof q.orderedQuantity === 'number' && q.orderedQuantity > 0) {
+            return q.orderedQuantity;
+          }
+          const matchedPo = purchaseOrders.find(po => po.id === q.poId || po.poNumber === q.poNumber);
+          const matchedPoItem = matchedPo?.items.find(
+            it => it.itemName.trim().toLowerCase() === q.itemName.trim().toLowerCase()
+          );
+          return matchedPoItem?.quantity ?? q.orderedQuantity ?? 0;
+        };
+
+        const resolvedQcEntries = qcs.map(q => {
+          const orderedQty = resolveOrderedQty(q);
+          const { urls, matchedInv } = extractQcPhotos(q);
+          return { q, orderedQty, urls, matchedInv };
+        });
+
+        rows = resolvedQcEntries.map(({ q, orderedQty, urls, matchedInv }, idx) => {
+          const unitLabel = q.unit || matchedInv?.unit || 'unit';
+          const diff = q.receivedQuantity - orderedQty;
           const diffLabel =
             diff === 0
-              ? `Sesuai (0 ${q.unit})`
-              : `${diff > 0 ? '+' : ''}${diff} ${q.unit}`;
+              ? `Sesuai (0 ${unitLabel})`
+              : `${diff > 0 ? '+' : ''}${diff} ${unitLabel}`;
+          if (urls.length > 0) {
+            imageCells.push({
+              rowIndex: idx,
+              colIndex: 9,
+              images: urls.map((url, pIdx) => ({
+                label: `Foto ${pIdx + 1}`,
+                url,
+              })),
+            });
+          }
           return [
             idx + 1,
-            q.id,
-            q.poNumber,
-            q.supplierName,
-            q.itemName,
-            `${q.orderedQuantity} ${q.unit}`,
-            `${q.receivedQuantity} ${q.unit}`,
+            q.itemName || matchedInv?.name || '-',
+            `${orderedQty} ${unitLabel}`,
+            `${q.receivedQuantity} ${unitLabel}`,
             diffLabel,
             q.qualityGrade,
-            q.receivingTemp ? `${q.receivingTemp}°C` : 'Suhu Ruang',
+            q.receivingTemp !== undefined ? `${q.receivingTemp}°C` : 'Suhu Ruang',
             q.notes || '-',
             q.status,
-            q.inspectorName,
+            urls.length > 0 ? `${urls.length} Foto Dokumentasi` : 'Belum ada foto',
           ];
         });
 
-        excelData = qcs.map((q, idx) => {
-          const diff = q.receivedQuantity - q.orderedQuantity;
+        displayRows = resolvedQcEntries.map(({ q, orderedQty, urls, matchedInv }, idx) => {
+          const baseRow = rows[idx];
+          const unitLabel = q.unit || matchedInv?.unit || 'unit';
+          const itemDisplayName = q.itemName || matchedInv?.name || '-';
+          const photoNode =
+            urls.length > 0 ? (
+              <div key={`qc-docs-${q.id}`} className="flex flex-wrap items-center gap-1.5 min-w-[180px] py-0.5">
+                {urls.map((url, photoIdx) => (
+                  <button
+                    key={`${q.id}-doc-${photoIdx}`}
+                    type="button"
+                    onClick={() =>
+                      setPreviewPhoto({
+                        label: `Dokumentasi QC: ${itemDisplayName} (#${photoIdx + 1})`,
+                        url,
+                        caption: `Dipesan: ${orderedQty} ${unitLabel} • Diterima: ${q.receivedQuantity} ${unitLabel} • Status: ${q.status}`,
+                      })
+                    }
+                    title={`Klik untuk perbesar foto #${photoIdx + 1}`}
+                    className="relative group flex flex-col items-center rounded-md border border-slate-200 bg-slate-50 p-0.5 hover:border-blue-600 hover:bg-blue-50/40 transition print:border-slate-300 print:bg-white"
+                  >
+                    <img
+                      src={url}
+                      alt={`Dokumentasi ${itemDisplayName} #${photoIdx + 1}`}
+                      className="w-12 h-11 object-cover rounded-sm"
+                    />
+                    <span className="text-[8.5px] font-mono font-bold text-slate-600 leading-none pt-0.5">
+                      #{photoIdx + 1}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="text-[11px] italic text-slate-400">Belum ada foto</span>
+            );
+
+          return [...baseRow.slice(0, 9), photoNode];
+        });
+
+        excelData = resolvedQcEntries.map(({ q, orderedQty, urls, matchedInv }, idx) => {
+          const diff = q.receivedQuantity - orderedQty;
           return {
             'No': idx + 1,
-            'ID QC': q.id,
-            'Nomor PO': q.poNumber,
-            'Supplier': q.supplierName,
-            'Bahan': q.itemName,
-            'Dipesan': q.orderedQuantity,
+            'Bahan Pangan': q.itemName || matchedInv?.name || '-',
+            'Dipesan': orderedQty,
             'Diterima': q.receivedQuantity,
             'Selisih': diff,
-            'Grade': q.qualityGrade,
-            'Suhu': q.receivingTemp ?? '-',
+            'Grade Mutu': q.qualityGrade,
+            'Suhu Datang': q.receivingTemp ?? '-',
             'Keterangan': q.notes || '-',
-            'Status': q.status,
-            'Inspektur': q.inspectorName,
+            'Status QC': q.status,
+            'Dokumentasi': urls.length > 0 ? `${urls.length} Foto Terlampir` : 'Belum ada foto',
           };
         });
 
-        const totalOrdered = qcs.reduce((acc, q) => acc + q.orderedQuantity, 0);
-        const totalReceived = qcs.reduce((acc, q) => acc + q.receivedQuantity, 0);
+        const totalOrdered = resolvedQcEntries.reduce((acc, e) => acc + e.orderedQty, 0);
+        const totalReceived = resolvedQcEntries.reduce((acc, e) => acc + e.q.receivedQuantity, 0);
         const totalDiff = totalReceived - totalOrdered;
-        const passedQcCount = qcs.filter(
-          q => q.status === 'Diterima' || q.status === 'Lolos Penuh'
+        const passedQcCount = resolvedQcEntries.filter(
+          ({ q }) => q.status === 'Diterima' || q.status === 'Lolos Penuh'
         ).length;
+        const totalDocsCount = resolvedQcEntries.reduce((acc, e) => acc + e.urls.length, 0);
 
         metrics = [
-          { label: 'Total QC Dilakukan', value: `${qcs.length} Batch`, color: 'text-blue-700' },
+          { label: 'Total Item QC & Stok', value: `${resolvedQcEntries.length} Item`, color: 'text-blue-700' },
           { label: 'Dipesan vs Diterima', value: `${formatNumber(totalOrdered)} / ${formatNumber(totalReceived)}`, sublabel: `Selisih: ${totalDiff > 0 ? '+' : ''}${totalDiff}`, color: 'text-emerald-700' },
-          { label: 'Total Bahan Masuk Gudang', value: `${formatNumber(totalReceived)} Satuan`, color: 'text-purple-700' },
-          { label: 'Lolos Mutu Penuh', value: `${passedQcCount} / ${qcs.length} Batch`, color: 'text-amber-700' },
+          { label: 'Dokumentasi Foto QC', value: `${totalDocsCount} Foto`, sublabel: 'Multi-foto tersinkron dari PLOK', color: 'text-purple-700' },
+          { label: 'Lolos Mutu Penuh', value: `${passedQcCount} / ${resolvedQcEntries.length} Item`, color: 'text-amber-700' },
         ];
-        notes = 'Bahan baku yang lolos QC otomatis menambahkan kuantitas kartu stok gudang bahan mentah SPPG sesuai perhitungan selisih penerimaan riil.';
+
+        const aslapVolunteer = masterVolunteers.find(
+          v =>
+            v.isActive &&
+            (v.position.toLowerCase().includes('asisten lapangan') ||
+              v.position.toLowerCase().includes('aslap'))
+        );
+        signatures = [
+          {
+            heading: 'Mengetahui / Memeriksa,',
+            role: 'Asisten Lapangan',
+            name: aslapVolunteer?.name || 'M. Eka Gusti Agung Pratama',
+            idNum: aslapVolunteer?.code || `SPPG-${sppgConfig.sppgId}`,
+          },
+        ];
+
+        notes = 'Data bahan pangan, jumlah dipesan, jumlah diterima, dan dokumentasi multi-foto disinkronkan otomatis dari Modul PLOK (Quality Control (QC) & Stok Gudang) serta diverifikasi oleh Asisten Lapangan.';
         break;
       }
 
@@ -3516,6 +3729,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     plogOrganolepticData,
     cookingFoodTempData,
     portioningFoodTempData,
+    activeRoomTempDataset,
+    foodCostReportData,
   ]);
 
   // Filter Categories
@@ -3552,6 +3767,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     }
     if (activeReportKey === 'suhu_makanan_pemorsian') {
       await exportPortioningFoodTempPDF(portioningFoodTempData);
+      return;
+    }
+    if (FACILITY_REPORT_UNIT_MAP[activeReportKey]) {
+      await exportRoomTempChecklistPDF(activeRoomTempDataset);
+      return;
+    }
+    if (activeReportKey === 'food_cost') {
+      await exportFoodCostReportPDF(foodCostReportData);
       return;
     }
     if (activeReportKey === 'surat_tugas') {
@@ -3591,13 +3814,20 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; BAST, Checklist Organoleptik, Organoleptik PLOG, Suhu Pengolahan & Pemorsian menggunakan Kop BGN bawaan) */}
+      {/* Paksa Orientasi A4 Landscape saat mencetak laporan berformat Landscape */}
+      {reportPayload.orientation === 'landscape' && (
+        <style media="print">{`@page { size: A4 landscape; margin: 8mm; }`}</style>
+      )}
+
+      {/* Print-Only Header (tersembunyi di layar normal, tampil otomatis saat dicetak untuk laporan umum; dokumen ber-Kop BGN resmi menggunakan Kop BGN bawaan) */}
       {activeReportKey !== 'bast_distribusi' &&
         activeReportKey !== 'surat_tugas' &&
         activeReportKey !== 'organoleptik_penerima' &&
         activeReportKey !== 'organoleptik_plog' &&
         activeReportKey !== 'suhu_makanan_pengolahan' &&
-        activeReportKey !== 'suhu_makanan_pemorsian' && (
+        activeReportKey !== 'suhu_makanan_pemorsian' &&
+        !FACILITY_REPORT_UNIT_MAP[activeReportKey] &&
+        activeReportKey !== 'food_cost' && (
         <div className="hidden print:block mb-6">
           <PrintHeader
             title={reportPayload.title}
@@ -3720,7 +3950,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              {cat === 'ALL' ? 'Semua Kategori (20 Laporan)' : cat}
+              {cat === 'ALL' ? `Semua Kategori (${REPORT_CONFIGS.length} Laporan)` : cat}
             </button>
           ))}
         </div>
@@ -3729,7 +3959,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
           {/* 1. Pilih Laporan */}
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-700">Pilih Jenis Laporan (20 Modul):</label>
+            <label className="text-xs font-semibold text-slate-700">Pilih Jenis Laporan ({REPORT_CONFIGS.length} Modul):</label>
             <select
               value={activeReportKey}
               onChange={e => setActiveReportKey(e.target.value as OfficialReportKey)}
@@ -4970,6 +5200,130 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 />
               </div>
             </div>
+          ) : FACILITY_REPORT_UNIT_MAP[activeReportKey] ? (
+            <div className="space-y-4">
+              {/* Control Bar Sub-Menu Surat Pemantauan Suhu & Kelembapan (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Format Surat Resmi Landscape — {activeRoomTempDataset.unit.shortLabel} (3 Sesi)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Data waktu, suhu (°C), dan dokumentasi foto diambil otomatis dari input Divisi Persiapan sebagai Sesi 1, Divisi Pengolahan sebagai Sesi 2, dan Divisi Pemorsian sebagai Sesi 3. Klik foto untuk memperbesar.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate('production')}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                      >
+                        <span>Input Suhu Divisi Dapur</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Navigasi Cepat Sub-Menu Surat Ruangan & Pendingin */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {(
+                    [
+                      { key: 'suhu_ruang_pengolahan', label: 'Ruang Pengolahan' },
+                      { key: 'suhu_ruang_pemorsian', label: 'Ruang Pemorsian' },
+                      { key: 'suhu_gudang_basah', label: 'Gudang Basah' },
+                      { key: 'suhu_gudang_kering', label: 'Gudang Kering' },
+                      { key: 'suhu_freezer_1', label: 'Freezer 1' },
+                      { key: 'suhu_freezer_2', label: 'Freezer 2' },
+                      { key: 'suhu_chiller_1', label: 'Chiller 1' },
+                      { key: 'suhu_chiller_2', label: 'Chiller 2' },
+                      { key: 'suhu_chiller_3', label: 'Chiller 3' },
+                      { key: 'suhu_chiller_4', label: 'Chiller 4' },
+                    ] as const
+                  ).map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setActiveReportKey(opt.key)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                        activeReportKey === opt.key
+                          ? 'bg-blue-900 text-white border-blue-950 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Catatan Tambahan per Tanggal (Opsional) */}
+                {activeRoomTempDataset.rows.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                    {activeRoomTempDataset.rows.slice(0, 3).map(r => (
+                      <div key={`note-${r.isoDate}`}>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                          Keterangan Tanggal {r.tanggalDisplay} (Opsional)
+                        </label>
+                        <input
+                          type="text"
+                          value={roomTempNotesByDate[r.isoDate] || ''}
+                          onChange={e =>
+                            setRoomTempNotesByDate(prev => ({
+                              ...prev,
+                              [r.isoDate]: e.target.value,
+                            }))
+                          }
+                          placeholder="Tambahkan keterangan audit ruangan..."
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Lembar Checklist Landscape Resmi */}
+              <div className="w-full">
+                <RoomTempChecklistSheet
+                  data={activeRoomTempDataset}
+                  onPreviewPhoto={setPreviewPhoto}
+                />
+              </div>
+            </div>
+          ) : activeReportKey === 'food_cost' ? (
+            <div className="space-y-4">
+              {/* Control Bar Integrasi Input Food Cost Menu & Anggaran PLOG (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    Sinkronisasi Otomatis: Input Food Cost Menu &amp; Anggaran (PLOG) + Dokumentasi Ompreng
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Rincian menu, bahan pokok, kebutuhan, satuan, harga dasar, sub total, dan harga porsi kecil/besar ditarik langsung dari modul PLOG (Perencanaan Menu &amp; Food Cost), dilengkapi dokumentasi foto ompreng Divisi Pemorsian dalam tampilan &amp; cetak Landscape.
+                  </p>
+                </div>
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('menu')}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                  >
+                    <span>Input Food Cost di PLOG</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi LAPORAN FOOD COST (Landscape) */}
+              <div className="w-full">
+                <FoodCostReportSheet
+                  data={foodCostReportData}
+                  onPreviewPhoto={setPreviewPhoto}
+                />
+              </div>
+            </div>
           ) : (
             <div className="p-6 bg-white border border-slate-200 rounded-xl shadow-xs relative">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-900 via-amber-500 to-blue-900 rounded-t-xl" />
@@ -5015,30 +5369,6 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 Pelaksanaan: {periodLabelString}
               </p>
             </div>
-
-            {/* Ringkasan Eksekutif Khusus Laporan Food Cost & Efisiensi (Tampil di Kertas & Cetak) */}
-            {activeReportKey === 'food_cost' && reportPayload.metrics.length > 0 && (
-              <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
-                {reportPayload.metrics.map((m, mIdx) => (
-                  <div
-                    key={mIdx}
-                    className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/80"
-                  >
-                    <div className="text-[10px] font-bold uppercase text-slate-500">
-                      {m.label}
-                    </div>
-                    <div className={`text-sm font-black mt-0.5 ${m.color || 'text-slate-900'}`}>
-                      {m.value}
-                    </div>
-                    {m.sublabel && (
-                      <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                        {m.sublabel}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* Dokumentasi Foto Porsi Kecil & Besar Otomatis dari Divisi Pemorsian (Khusus Laporan Flyer Menu) */}
             {activeReportKey === 'flyer_menu' && (
@@ -5155,13 +5485,24 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               </div>
             )}
 
-            {/* Three-Column Legalization & Signatures */}
-            <div className="mt-8 pt-6 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-6 text-center text-xs">
+            {/* Legalization & Signatures */}
+            <div
+              className={`mt-8 pt-6 border-t border-slate-200 grid gap-6 text-center text-xs ${
+                reportPayload.signatures.length === 1
+                  ? 'grid-cols-1 max-w-xs ml-auto'
+                  : reportPayload.signatures.length === 2
+                  ? 'grid-cols-1 md:grid-cols-2'
+                  : 'grid-cols-1 md:grid-cols-3'
+              }`}
+            >
               {reportPayload.signatures.map((sig, idx) => (
                 <div key={idx} className="flex flex-col items-center justify-between h-36 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-300">
                   <div>
                     <span className="text-slate-500 block">
-                      {idx === 2 ? `${sppgConfig.district}, ${formatIndonesianDate(selectedDate)}` : 'Mengetahui / Memeriksa,'}
+                      {sig.heading ||
+                        (idx === reportPayload.signatures.length - 1
+                          ? `${sppgConfig.district}, ${formatIndonesianDate(selectedDate)}`
+                          : 'Mengetahui / Memeriksa,')}
                     </span>
                     <strong className="text-slate-800 block mt-0.5">{sig.role}</strong>
                   </div>
@@ -5340,6 +5681,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   onPreviewPhoto={setPreviewPhoto}
                   className="max-w-6xl w-full border-slate-300 shadow-md"
                 />
+              ) : FACILITY_REPORT_UNIT_MAP[activeReportKey] ? (
+                <RoomTempChecklistSheet
+                  data={activeRoomTempDataset}
+                  onPreviewPhoto={setPreviewPhoto}
+                  className="max-w-6xl w-full border-slate-300 shadow-md"
+                />
+              ) : activeReportKey === 'food_cost' ? (
+                <FoodCostReportSheet
+                  data={foodCostReportData}
+                  onPreviewPhoto={setPreviewPhoto}
+                  className="max-w-6xl w-full border-slate-300 shadow-md"
+                />
               ) : (
                 <div className="bg-white p-8 rounded-lg shadow-md max-w-4xl w-full border border-slate-300 text-xs">
                   {/* Kop Surat */}
@@ -5359,18 +5712,6 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     <p className="text-[11px] text-slate-500 font-mono">No: {reportPayload.code}</p>
                     <p className="text-[11px] text-slate-600">Pelaksanaan: {periodLabelString}</p>
                   </div>
-
-                  {activeReportKey === 'food_cost' && reportPayload.metrics.length > 0 && (
-                    <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                      {reportPayload.metrics.map((m, mIdx) => (
-                        <div key={mIdx} className="p-2 rounded border border-slate-200 bg-slate-50">
-                          <div className="text-[9px] font-bold uppercase text-slate-500">{m.label}</div>
-                          <div className={`text-xs font-black mt-0.5 ${m.color || 'text-slate-900'}`}>{m.value}</div>
-                          {m.sublabel && <div className="text-[9px] text-slate-500 mt-0.5 leading-snug">{m.sublabel}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
 
                   {activeReportKey === 'flyer_menu' && (
                     <div className="mb-3 grid grid-cols-2 gap-3 text-[11px]">
@@ -5431,10 +5772,26 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   )}
 
                   {/* Signatures */}
-                  <div className="grid grid-cols-3 gap-4 pt-6 mt-6 border-t border-slate-200 text-center text-[11px]">
+                  <div
+                    className={`grid gap-4 pt-6 mt-6 border-t border-slate-200 text-center text-[11px] ${
+                      reportPayload.signatures.length === 1
+                        ? 'grid-cols-1 max-w-xs ml-auto'
+                        : reportPayload.signatures.length === 2
+                        ? 'grid-cols-2'
+                        : 'grid-cols-3'
+                    }`}
+                  >
                     {reportPayload.signatures.map((sig, sIdx) => (
                       <div key={sIdx} className="space-y-12">
-                        <span className="block text-slate-600">{sig.role}</span>
+                        <div>
+                          <span className="block text-slate-500 text-[10px]">
+                            {sig.heading ||
+                              (sIdx === reportPayload.signatures.length - 1
+                                ? `${sppgConfig.district}, ${formatIndonesianDate(selectedDate)}`
+                                : 'Mengetahui / Memeriksa,')}
+                          </span>
+                          <span className="block text-slate-700 font-semibold">{sig.role}</span>
+                        </div>
                         <div>
                           <strong className="block underline text-slate-900">{sig.name}</strong>
                           <span className="text-[10px] text-slate-400 font-mono">{sig.idNum || sppgConfig.sppgId}</span>

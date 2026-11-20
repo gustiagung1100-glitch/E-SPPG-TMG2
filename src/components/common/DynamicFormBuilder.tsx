@@ -62,68 +62,44 @@ interface DynamicFormEditToggleBarProps {
 }
 
 export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> = ({
-  formId,
   isEditing,
   onToggleEdit,
   compact = false,
   extraSelector,
 }) => {
-  const { isAdminUser, dynamicFormSchemas } = useApp();
+  const { isAdminUser } = useApp();
   if (!isAdminUser) return null;
 
-  const schema = dynamicFormSchemas[formId];
-  const totalFields = schema?.fields.length || 0;
-  const customCount = schema?.fields.filter(f => !f.isSystem).length || 0;
-
-  return (
-    <div
-      className={`print:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-        compact
-          ? 'px-3 py-2 rounded-xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70'
-          : 'px-4 py-3 rounded-2xl bg-linear-to-r from-slate-50 via-amber-50/60 to-blue-50/60 dark:from-slate-900 dark:via-amber-950/20 dark:to-slate-900 border border-amber-200/80 dark:border-amber-800/50 shadow-2xs'
+  const buttonNode = (
+    <button
+      type="button"
+      onClick={onToggleEdit}
+      className={`inline-flex items-center gap-1.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer whitespace-nowrap ${
+        compact ? 'px-3 py-1.5' : 'px-3 py-2'
+      } ${
+        isEditing
+          ? 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-600'
+          : 'bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
       }`}
     >
-      <div className="flex items-center gap-2.5 min-w-0">
-        <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
-          <SlidersHorizontal className="w-4 h-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-              {schema?.title || 'Konfigurasi Form'}
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-              {totalFields} Field
-            </span>
-            {customCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
-                +{customCount} Kolom Custom
-              </span>
-            )}
-          </div>
-          {!compact && (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-              Admin/Superuser dapat mengubah label, tipe input, urutan drag-and-drop, hingga menambah kolom tabel & ekspor.
-            </p>
-          )}
-        </div>
-      </div>
+      <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+      <span>{isEditing ? 'Tutup Mode Edit Form' : 'Edit Struktur Form'}</span>
+    </button>
+  );
 
-      <div className="flex items-center gap-2 flex-wrap shrink-0">
+  if (compact) {
+    return (
+      <div className="print:hidden flex items-center justify-end gap-2 flex-wrap">
         {extraSelector}
-        <button
-          type="button"
-          onClick={onToggleEdit}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs ${
-            isEditing
-              ? 'bg-amber-600 hover:bg-amber-700 text-white'
-              : 'bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-          }`}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>{isEditing ? 'Tutup Mode Edit Form' : 'Edit Struktur Form'}</span>
-        </button>
+        {buttonNode}
       </div>
+    );
+  }
+
+  return (
+    <div className="print:hidden inline-flex items-center gap-2 flex-wrap">
+      {extraSelector}
+      {buttonNode}
     </div>
   );
 };

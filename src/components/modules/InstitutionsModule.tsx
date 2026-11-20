@@ -788,7 +788,22 @@ export const InstitutionsModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DynamicFormEditToggleBar
+            formId={builderFormId}
+            isEditing={isEditingFormSchema}
+            onToggleEdit={() => setIsEditingFormSchema(v => !v)}
+            extraSelector={
+              <select
+                value={builderFormId}
+                onChange={e => setBuilderFormId(e.target.value as DynamicFormId)}
+                className="px-2.5 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+              >
+                <option value="institution_form">Form Data Penerima Gizi</option>
+                <option value="beneficiary_attendance_form">Form Presensi Harian</option>
+              </select>
+            }
+          />
           {hasPermission('institutions', 'create') && (
             <button
               type="button"
@@ -801,23 +816,6 @@ export const InstitutionsModule: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Dynamic & Editable Form Toggle Bar (Admin/Superuser Only) */}
-      <DynamicFormEditToggleBar
-        formId={builderFormId}
-        isEditing={isEditingFormSchema}
-        onToggleEdit={() => setIsEditingFormSchema(v => !v)}
-        extraSelector={
-          <select
-            value={builderFormId}
-            onChange={e => setBuilderFormId(e.target.value as DynamicFormId)}
-            className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
-          >
-            <option value="institution_form">Form Data Penerima Gizi</option>
-            <option value="beneficiary_attendance_form">Form Presensi Harian</option>
-          </select>
-        }
-      />
 
       {isEditingFormSchema && (
         <DynamicFormBuilderPanel

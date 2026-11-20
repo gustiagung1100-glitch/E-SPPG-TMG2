@@ -11,6 +11,7 @@ import {
 } from '../../lib/exportUtils';
 import {
   IncentivePayoutStatus,
+  VolunteerAttendance,
   VolunteerIncentivePayout,
 } from '../../types';
 import {
@@ -29,7 +30,7 @@ import {
   Wallet,
 } from 'lucide-react';
 
-const DIVISIONS = [
+const BASE_DIVISIONS = [
   'Persiapan',
   'Pengolahan',
   'Pemorsian',
@@ -41,6 +42,8 @@ const DIVISIONS = [
 interface ComputedVolunteerRow extends VolunteerIncentivePayout {
   positionLabel: string;
   phone: string;
+  volunteerCode?: string;
+  sourceLabel: 'Presensi Harian' | 'Izin Disetujui' | 'Pengganti Shift';
 }
 
 export const VolunteerIncentiveModule: React.FC = () => {
@@ -80,32 +83,79 @@ export const VolunteerIncentiveModule: React.FC = () => {
   const [deductPettyCash, setDeductPettyCash] = useState<boolean>(true);
   const [payoutNotes, setPayoutNotes] = useState<string>('');
 
-  // Real-time integration with volunteerAttendance + volunteerAbsences + masterVolunteers
+  const availableDivisions = useMemo(() => {
+    const set = new Set<string>(BASE_DIVISIONS);
+    masterVolunteers.forEach(v => v.division && set.add(v.division));
+    volunteerAttendance.forEach(a => a.division && set.add(a.division));
+    volunteerAbsences.forEach(ab => {
+      if (ab.division) set.add(ab.division);
+      if (ab.replacementDivision) set.add(ab.replacementDivision);
+    });
+    return Array.from(set);
+  }, [masterVolunteers, volunteerAttendance, volunteerAbsences]);
+
+  const approvedAbsencesCount = useMemo(
+    () => volunteerAbsences.filter(a => a.approvalStatus === 'Disetujui').length,
+    [volunteerAbsences]
+  );
+
+  const pendingAbsencesCount = useMemo(
+    () => volunteerAbsences.filter(a => a.approvalStatus === 'Menunggu Persetujuan').length,
+    [volunteerAbsences]
+  );
+
+  // Real-time integration with Menu "Relawan & Ketidakhadiran" (volunteerAttendance + volunteerAbsences) & Master Relawan
   const allComputedRows = useMemo<ComputedVolunteerRow[]>(() => {
     const rows: ComputedVolunteerRow[] = [];
+    const matchedAbsenceIds = new Set<string>();
+
+    const findMaster = (id?: string, name?: string) => {
+      const cleanName = (name || '').replace(/\s*\(.*?\)\s*/g, '').trim().toLowerCase();
+      return masterVolunteers.find(
+        m => (id && m.id === id) || (cleanName && m.name.trim().toLowerCase() === cleanName)
+      );
+    };
 
     volunteerAttendance.forEach(att => {
-      const master = masterVolunteers.find(
-        m => m.id === att.volunteerId || m.name.toLowerCase() === att.volunteerName.toLowerCase()
+      const master = findMaster(att.volunteerId, att.volunteerName);
+      const matchedAbsence = volunteerAbsences.find(
+        abs =>
+          abs.date === att.date &&
+          abs.approvalStatus === 'Disetujui' &&
+          ((abs.volunteerId && abs.volunteerId === att.volunteerId) ||
+            abs.volunteerName.trim().toLowerCase() === att.volunteerName.trim().toLowerCase())
       );
+
+      if (matchedAbsence) {
+        matchedAbsenceIds.add(matchedAbsence.id);
+      }
+
+      const effectiveStatus: VolunteerAttendance['status'] =
+        matchedAbsence && att.status === 'Hadir'
+          ? matchedAbsence.reason === 'Sakit'
+            ? 'Sakit'
+            : 'Izin'
+          : att.status;
+
       const saved = volunteerIncentivePayouts.find(p => p.attendanceId === att.id);
-      const isLocked = saved && (saved.status === 'Disetujui' || saved.status === 'Sudah Dibayarkan');
+      const isPresent = effectiveStatus === 'Hadir';
+      const isLocked = isPresent && saved && (saved.status === 'Disetujui' || saved.status === 'Sudah Dibayarkan');
+      const resolvedDivision = master?.division || att.division;
       const divRate = isLocked
         ? saved.dailyRate
-        : volunteerIncentiveConfig.divisionRates[att.division] ?? volunteerIncentiveConfig.defaultDailyRate;
+        : volunteerIncentiveConfig.divisionRates[resolvedDivision] ?? volunteerIncentiveConfig.defaultDailyRate;
 
-      const isPresent = att.status === 'Hadir';
       const computedTotal = isLocked ? saved.totalIncentive : isPresent ? divRate : 0;
 
       rows.push({
         id: saved?.id || `volp-${att.id}`,
         attendanceId: att.id,
         date: att.date,
-        volunteerId: att.volunteerId,
-        volunteerName: att.volunteerName,
-        division: att.division,
+        volunteerId: master?.id || att.volunteerId,
+        volunteerName: master?.name || att.volunteerName,
+        division: resolvedDivision,
         shift: att.shift,
-        attendanceStatus: att.status,
+        attendanceStatus: effectiveStatus,
         isSubstitute: false,
         dailyRate: divRate,
         totalIncentive: computedTotal,
@@ -116,30 +166,30 @@ export const VolunteerIncentiveModule: React.FC = () => {
         approvedAt: saved?.approvedAt,
         paidAt: saved?.paidAt,
         pettyCashTxId: saved?.pettyCashTxId,
-        notes: saved?.notes || (isPresent ? att.notes : `Tidak hadir (${att.status}) - Rp 0`),
+        notes:
+          saved?.notes ||
+          (isPresent
+            ? att.notes
+            : `Tidak hadir (${effectiveStatus}${matchedAbsence ? `: ${matchedAbsence.reason}` : ''}) - Rp 0`),
         positionLabel: master?.position || 'Relawan Dapur',
         phone: master?.phone || '-',
+        volunteerCode: master?.code,
+        sourceLabel: matchedAbsence ? 'Izin Disetujui' : 'Presensi Harian',
       });
 
       // If absent and replaced by substitute volunteer, generate substitute shift row automatically
       if (!isPresent) {
-        const matchedAbsence = volunteerAbsences.find(
-          abs =>
-            abs.date === att.date &&
-            (abs.volunteerId === att.volunteerId ||
-              abs.volunteerName.toLowerCase() === att.volunteerName.toLowerCase()) &&
-            abs.approvalStatus === 'Disetujui'
-        );
-        const subName =
+        const subNameRaw =
           matchedAbsence?.replacementVolunteerName ||
           (att.replacementVolunteer ? att.replacementVolunteer.replace(/\s*\(.*?\)\s*/g, '').trim() : '');
 
-        if (subName) {
+        if (subNameRaw) {
+          const subMaster = findMaster(matchedAbsence?.replacementVolunteerId, subNameRaw);
           const subAttendanceKey = `${att.id}-sub`;
           const savedSub = volunteerIncentivePayouts.find(p => p.attendanceId === subAttendanceKey);
           const subLocked =
             savedSub && (savedSub.status === 'Disetujui' || savedSub.status === 'Sudah Dibayarkan');
-          const subDiv = matchedAbsence?.replacementDivision || att.division;
+          const subDiv = subMaster?.division || matchedAbsence?.replacementDivision || resolvedDivision;
           const subRate = subLocked
             ? savedSub.dailyRate
             : volunteerIncentiveConfig.divisionRates[subDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
@@ -148,13 +198,13 @@ export const VolunteerIncentiveModule: React.FC = () => {
             id: savedSub?.id || `volp-${subAttendanceKey}`,
             attendanceId: subAttendanceKey,
             date: att.date,
-            volunteerId: matchedAbsence?.replacementVolunteerId || `sub-${att.id}`,
-            volunteerName: subName,
+            volunteerId: subMaster?.id || matchedAbsence?.replacementVolunteerId || `sub-${att.id}`,
+            volunteerName: subMaster?.name || subNameRaw,
             division: subDiv,
             shift: att.shift,
             attendanceStatus: 'Hadir',
             isSubstitute: true,
-            replacedVolunteerName: att.volunteerName,
+            replacedVolunteerName: master?.name || att.volunteerName,
             dailyRate: subRate,
             totalIncentive: subLocked ? savedSub.totalIncentive : subRate,
             status: (savedSub?.status || 'Menunggu Pencairan') as IncentivePayoutStatus,
@@ -162,13 +212,87 @@ export const VolunteerIncentiveModule: React.FC = () => {
             approvedAt: savedSub?.approvedAt,
             paidAt: savedSub?.paidAt,
             pettyCashTxId: savedSub?.pettyCashTxId,
-            notes: savedSub?.notes || `Relawan pengganti untuk ${att.volunteerName}`,
-            positionLabel: 'Relawan Pengganti Shift',
-            phone: '-',
+            notes: savedSub?.notes || `Relawan pengganti untuk ${master?.name || att.volunteerName}`,
+            positionLabel: subMaster?.position ? `${subMaster.position} (Pengganti Shift)` : 'Relawan Pengganti Shift',
+            phone: subMaster?.phone || '-',
+            volunteerCode: subMaster?.code,
+            sourceLabel: 'Pengganti Shift',
           });
         }
       }
     });
+
+    // Also include standalone approved absences from Menu "Relawan & Ketidakhadiran" that do not have a presensi log on that date
+    volunteerAbsences
+      .filter(abs => abs.approvalStatus === 'Disetujui' && !matchedAbsenceIds.has(abs.id))
+      .forEach(abs => {
+        const master = findMaster(abs.volunteerId, abs.volunteerName);
+        const absStatus: VolunteerAttendance['status'] = abs.reason === 'Sakit' ? 'Sakit' : 'Izin';
+        const resolvedDiv = master?.division || abs.division;
+        const defaultShift =
+          resolvedDiv === 'Cuci Ompreng' || resolvedDiv === 'Kebersihan'
+            ? 'Siang (08:00 - 13:00)'
+            : 'Pagi (03:30 - 08:30)';
+        const absDivRate =
+          volunteerIncentiveConfig.divisionRates[resolvedDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
+
+        rows.push({
+          id: `volp-abs-${abs.id}`,
+          attendanceId: `abs-${abs.id}`,
+          date: abs.date,
+          volunteerId: master?.id || abs.volunteerId,
+          volunteerName: master?.name || abs.volunteerName,
+          division: resolvedDiv,
+          shift: defaultShift,
+          attendanceStatus: absStatus,
+          isSubstitute: false,
+          dailyRate: absDivRate,
+          totalIncentive: 0,
+          status: 'Menunggu Pencairan',
+          notes: `Izin disetujui (${abs.reason}) — digantikan ${abs.replacementVolunteerName}`,
+          positionLabel: master?.position || 'Relawan Dapur',
+          phone: master?.phone || '-',
+          volunteerCode: master?.code,
+          sourceLabel: 'Izin Disetujui',
+        });
+
+        if (abs.replacementVolunteerName) {
+          const subMaster = findMaster(abs.replacementVolunteerId, abs.replacementVolunteerName);
+          const subAttendanceKey = `abs-${abs.id}-sub`;
+          const savedSub = volunteerIncentivePayouts.find(p => p.attendanceId === subAttendanceKey);
+          const subLocked =
+            savedSub && (savedSub.status === 'Disetujui' || savedSub.status === 'Sudah Dibayarkan');
+          const subDiv = subMaster?.division || abs.replacementDivision || resolvedDiv;
+          const subRate = subLocked
+            ? savedSub.dailyRate
+            : volunteerIncentiveConfig.divisionRates[subDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
+
+          rows.push({
+            id: savedSub?.id || `volp-${subAttendanceKey}`,
+            attendanceId: subAttendanceKey,
+            date: abs.date,
+            volunteerId: subMaster?.id || abs.replacementVolunteerId || subAttendanceKey,
+            volunteerName: subMaster?.name || abs.replacementVolunteerName,
+            division: subDiv,
+            shift: defaultShift,
+            attendanceStatus: 'Hadir',
+            isSubstitute: true,
+            replacedVolunteerName: master?.name || abs.volunteerName,
+            dailyRate: subRate,
+            totalIncentive: subLocked ? savedSub.totalIncentive : subRate,
+            status: (savedSub?.status || 'Menunggu Pencairan') as IncentivePayoutStatus,
+            approvedBy: savedSub?.approvedBy,
+            approvedAt: savedSub?.approvedAt,
+            paidAt: savedSub?.paidAt,
+            pettyCashTxId: savedSub?.pettyCashTxId,
+            notes: savedSub?.notes || `Pengganti shift ${master?.name || abs.volunteerName} (${abs.reason})`,
+            positionLabel: subMaster?.position ? `${subMaster.position} (Pengganti Shift)` : 'Relawan Pengganti Shift',
+            phone: subMaster?.phone || '-',
+            volunteerCode: subMaster?.code,
+            sourceLabel: 'Pengganti Shift',
+          });
+        }
+      });
 
     return rows.sort((a, b) => b.date.localeCompare(a.date) || a.volunteerName.localeCompare(b.volunteerName));
   }, [
@@ -396,9 +520,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">
                 Insentif Relawan Dapur SPPG
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
-                Terhubung otomatis dengan Data Absensi Relawan ({volunteerAttendance.length} log) &amp; Pengganti Shift Disetujui
+              <p className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>
+                  Terhubung langsung dengan menu <strong>Relawan &amp; Ketidakhadiran</strong> ({volunteerAttendance.length} log presensi, {approvedAbsencesCount} izin &amp; pengganti disetujui
+                  {pendingAbsencesCount > 0 ? `, ${pendingAbsencesCount} menunggu persetujuan` : ''})
+                </span>
               </p>
             </div>
           </div>
@@ -567,7 +694,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
             >
               <option value="ALL">Semua Divisi</option>
-              {DIVISIONS.map(d => (
+              {availableDivisions.map(d => (
                 <option key={d} value={d}>
                   Div. {d}
                 </option>
@@ -643,8 +770,13 @@ export const VolunteerIncentiveModule: React.FC = () => {
                           {row.date}
                         </td>
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                            {row.volunteerName}
+                          <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                            <span>{row.volunteerName}</span>
+                            {row.volunteerCode && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-mono">
+                                {row.volunteerCode}
+                              </span>
+                            )}
                             {row.isSubstitute && (
                               <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 text-[10px] font-semibold">
                                 Pengganti
@@ -655,6 +787,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
                             {row.isSubstitute
                               ? `Menggantikan shift ${row.replacedVolunteerName}`
                               : row.positionLabel}
+                            <span className="text-slate-400"> • {row.sourceLabel}</span>
                           </div>
                         </td>
                         <td className="py-3 px-4">
@@ -810,7 +943,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
               Tarif Khusus Per Divisi Dapur (Rp / Hari Hadir)
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {DIVISIONS.map(div => (
+              {availableDivisions.map(div => (
                 <div key={div}>
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">Div. {div}</label>
                   <input

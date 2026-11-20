@@ -62,6 +62,7 @@ function formatDdMmYyyy(dateStr: string): string {
 }
 
 function formatCommaDecimal(val: number): string {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return '-';
   return val.toFixed(1).replace('.', ',');
 }
 
@@ -88,11 +89,7 @@ function formatPeriodeRange(dates: string[], fallbackStart?: string, fallbackEnd
 }
 
 function getHeadingUnitTitle(unit: FacilityTempUnitConfig): string {
-  const clean = unit.label.replace(/^Ruang\s+/i, '').trim().toUpperCase();
-  if (/GUDANG|PEMORSIAN|PENGOLAHAN/i.test(clean)) {
-    return clean;
-  }
-  return `UNIT ${clean}`;
+  return (unit.shortLabel || unit.label).trim().toUpperCase();
 }
 
 export interface ResolveRoomTempChecklistParams {
@@ -101,6 +98,8 @@ export interface ResolveRoomTempChecklistParams {
   cookingRecords: CookingInspectionRecord[];
   portioningRecords: PortioningInspectionRecord[];
   sppgConfig: SPPGConfig;
+  selectedDate?: string;
+  selectedMonth?: string;
   startDate?: string;
   endDate?: string;
   periodType?: 'harian' | 'mingguan' | 'bulanan' | 'periode';
@@ -116,6 +115,8 @@ export function resolveRoomTempChecklistData(
     cookingRecords,
     portioningRecords,
     sppgConfig,
+    selectedDate,
+    selectedMonth,
     startDate,
     endDate,
     periodType,
@@ -133,18 +134,38 @@ export function resolveRoomTempChecklistData(
   portioningRecords.forEach(r => r.date && dateSet.add(r.date));
 
   let sortedDates = Array.from(dateSet).sort();
-  if (periodType === 'periode' && startDate && endDate) {
+  if (periodType === 'harian' && selectedDate) {
+    const exactDay = sortedDates.filter(d => d === selectedDate);
+    if (exactDay.length > 0) sortedDates = exactDay;
+  } else if ((periodType === 'bulanan' || periodType === 'mingguan') && selectedMonth) {
+    const monthDates = sortedDates.filter(d => d.startsWith(selectedMonth));
+    if (monthDates.length > 0) sortedDates = monthDates;
+  } else if (periodType === 'periode' && startDate && endDate) {
     const filtered = sortedDates.filter(d => d >= startDate && d <= endDate);
     if (filtered.length > 0) sortedDates = filtered;
   }
 
-  const batasSuhuClean = unit.standard.replace(/°C/g, '').trim();
-  const batasKelembapan = unit.id.startsWith('freezer') ? '40-50%' : '40-60%';
+  const batasSuhuClean = unit.id.startsWith('freezer')
+    ? '< -18'
+    : unit.standard.replace(/°C/g, '').trim();
+  const batasKelembapan = unit.id.startsWith('freezer') ? '<20%' : '40-60%';
+
+  const pickBestRecordForDate = <
+    T extends PreparationInspectionRecord | CookingInspectionRecord | PortioningInspectionRecord
+  >(
+    list: T[],
+    isoDate: string
+  ): T | undefined => {
+    const matching = list.filter(r => r.date === isoDate);
+    if (matching.length === 0) return undefined;
+    // Array dari store tersusun newest-first ([newRec, ...prev]); log terbaru/teredit selalu di index 0
+    return matching[0];
+  };
 
   const rows: RoomTempChecklistRow[] = sortedDates.map(isoDate => {
-    const prepRec = prepRecords.find(r => r.date === isoDate);
-    const cookRec = cookingRecords.find(r => r.date === isoDate);
-    const portRec = portioningRecords.find(r => r.date === isoDate);
+    const prepRec = pickBestRecordForDate(prepRecords, isoDate);
+    const cookRec = pickBestRecordForDate(cookingRecords, isoDate);
+    const portRec = pickBestRecordForDate(portioningRecords, isoDate);
 
     const makeReading = (
       rec: PreparationInspectionRecord | CookingInspectionRecord | PortioningInspectionRecord | undefined
@@ -158,13 +179,19 @@ export function resolveRoomTempChecklistData(
         };
       }
       const tempVal = getFacilityTempValue(rec.facilityTemps, unit.tempKey);
-      const humVal = getFacilityHumidityValue(rec.facilityTemps, unit.tempKey);
+      const explicitHumidity = rec.facilityTemps?.humidityMap?.[unit.tempKey];
+      const kelembapanHasil =
+        unit.group === 'cooling'
+          ? typeof explicitHumidity === 'number' && !Number.isNaN(explicitHumidity)
+            ? `${explicitHumidity}%`
+            : '-'
+          : `${getFacilityHumidityValue(rec.facilityTemps, unit.tempKey)}%`;
       const unitTimeVal = getFacilityTimeValue(rec.facilityTemps, unit.tempKey, rec.time);
       const photoUrl = getFacilityPhotoUrl(rec.facilityTemps, unit.photoKey);
       return {
         jam: stripWib(unitTimeVal || rec.time),
         suhuHasil: formatCommaDecimal(tempVal),
-        kelembapanHasil: `${humVal}%`,
+        kelembapanHasil,
         photoUrl,
         officerName: rec.officerName,
       };
@@ -245,7 +272,7 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
         <img
           src={reading.photoUrl}
           alt={`${data.unit.label} ${shiftLabel}`}
-          className="w-16 h-14 object-cover border border-slate-300 print:border-slate-500 group-hover:scale-[1.03] transition"
+          className="w-16 h-20 object-cover border border-slate-300 print:border-slate-500 group-hover:scale-[1.03] transition"
         />
       </button>
     );
@@ -256,7 +283,7 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
       className={`bg-white text-black p-5 sm:p-7 rounded-xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-2 print:rounded-none font-serif leading-tight ${className}`}
     >
       {/* KOP SURAT BGN + IDENTITAS SPPG */}
-      <div className="flex items-start gap-4 pb-3">
+      <div className="flex items-start gap-5 pb-3 pl-6 sm:pl-20">
         <div className="shrink-0">
           <BGNLogo size="lg" />
         </div>
@@ -279,7 +306,12 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
       {/* JUDUL CHECK LIST */}
       <div className="text-center pb-2">
         <h1 className="text-[12px] sm:text-[13.5px] font-bold uppercase tracking-wide text-black">
-          CHECK LIST PEMANTAUAN SUHU &amp; KELEMBAPAN {data.unitUpperTitle}
+          CHECK LIST PEMANTAUAN SUHU &amp; KELEMBAPAN{' '}
+          {data.unit.group === 'cooling' ? (
+            <span className="italic">{data.unitUpperTitle}</span>
+          ) : (
+            data.unitUpperTitle
+          )}
         </h1>
       </div>
 
@@ -292,7 +324,7 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
       <div className="overflow-x-auto">
         <table className="w-full border-collapse border border-black text-[9.5px] sm:text-[10.5px] text-black">
           <thead>
-            <tr className="bg-slate-100/90 print:bg-slate-100 font-bold text-center">
+            <tr className="bg-white font-bold text-center">
               <th rowSpan={3} className="border border-black px-1.5 py-1.5 align-middle whitespace-nowrap">
                 TANGGAL
               </th>
@@ -315,7 +347,7 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
                 DOKUMENTASI KEGIATAN
               </th>
             </tr>
-            <tr className="bg-slate-100/90 print:bg-slate-100 font-bold text-center text-[8.5px] sm:text-[9px]">
+            <tr className="bg-white font-bold text-center text-[8.5px] sm:text-[9px]">
               <th colSpan={2} className="border border-black px-1 py-1 leading-tight">
                 Shift 1 Persiapan
                 <div className="font-normal">(16.00-00.00)</div>
@@ -341,7 +373,7 @@ export const RoomTempChecklistSheet: React.FC<RoomTempChecklistSheetProps> = ({
                 <div className="font-normal">(08.00-16.00)</div>
               </th>
             </tr>
-            <tr className="bg-slate-100/90 print:bg-slate-100 font-bold text-center text-[9px]">
+            <tr className="bg-white font-bold text-center text-[9px]">
               {/* Suhu Jam/hasil */}
               <th className="border border-black px-1 py-1">Jam</th>
               <th className="border border-black px-1 py-1">hasil</th>
@@ -495,42 +527,22 @@ async function loadLogoPngDataUrl(url: string): Promise<string | null> {
   });
 }
 
-export async function exportRoomTempChecklistPDF(data: RoomTempChecklistData) {
-  const doc = new jsPDF({
-    orientation: 'landscape',
-    unit: 'mm',
-    format: 'a4',
-  });
-
+function renderRoomTempSheetToPdfDoc(
+  doc: jsPDF,
+  data: RoomTempChecklistData,
+  logoDataUrl: string | null,
+  photoMap: Map<string, string | null>
+) {
   const left = 10;
   const right = 287;
   const centerX = 148.5;
 
-  // Preload BGN logo + all shift documentation photos
-  const logoPromise = loadLogoPngDataUrl(
-    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
-  );
-
-  const uniquePhotoUrls = Array.from(
-    new Set(
-      data.rows
-        .flatMap(r => [r.shift1.photoUrl, r.shift2.photoUrl, r.shift3.photoUrl])
-        .filter((u): u is string => Boolean(u && u.trim() !== ''))
-    )
-  );
-  const photoMap = new Map<string, string | null>();
-  const [logoDataUrl] = await Promise.all([
-    logoPromise,
-    ...uniquePhotoUrls.map(async u => {
-      photoMap.set(u, await loadImageUrlAsJpegDataUrl(u));
-    }),
-  ]);
-
   // KOP SURAT BGN
+  const logoX = left + 26;
   if (logoDataUrl) {
-    doc.addImage(logoDataUrl, 'PNG', left + 8, 10, 17, 17);
+    doc.addImage(logoDataUrl, 'PNG', logoX, 10, 17, 17);
   }
-  const textStartX = left + 31;
+  const textStartX = logoX + 23;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(30, 58, 138);
@@ -643,10 +655,10 @@ export async function exportRoomTempChecklistPDF(data: RoomTempChecklistData) {
       cellPadding: 1.2,
       valign: 'middle',
       halign: 'center',
-      minCellHeight: 19,
+      minCellHeight: 22,
     },
     headStyles: {
-      fillColor: [232, 236, 241],
+      fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
       fontStyle: 'bold',
       fontSize: 6.8,
@@ -677,9 +689,9 @@ export async function exportRoomTempChecklistPDF(data: RoomTempChecklistData) {
       if (cellData.section === 'body' && cellData.column.index >= 16) {
         const photoUrl = cellPhotoUrlMap.get(`${cellData.row.index}:${cellData.column.index}`);
         if (photoUrl) {
-          const pad = 1.2;
-          const imgW = Math.min(20, cellData.cell.width - pad * 2);
-          const imgH = Math.min(16.5, cellData.cell.height - pad * 2);
+          const pad = 1.0;
+          const imgW = Math.min(18, cellData.cell.width - pad * 2);
+          const imgH = Math.min(20, cellData.cell.height - pad * 2);
           const drawX = cellData.cell.x + (cellData.cell.width - imgW) / 2;
           const drawY = cellData.cell.y + (cellData.cell.height - imgH) / 2;
           try {
@@ -691,7 +703,77 @@ export async function exportRoomTempChecklistPDF(data: RoomTempChecklistData) {
       }
     },
   });
+}
+
+export async function exportRoomTempChecklistPDF(data: RoomTempChecklistData) {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const logoPromise = loadLogoPngDataUrl(
+    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
+  );
+
+  const uniquePhotoUrls = Array.from(
+    new Set(
+      data.rows
+        .flatMap(r => [r.shift1.photoUrl, r.shift2.photoUrl, r.shift3.photoUrl])
+        .filter((u): u is string => Boolean(u && u.trim() !== ''))
+    )
+  );
+  const photoMap = new Map<string, string | null>();
+  const [logoDataUrl] = await Promise.all([
+    logoPromise,
+    ...uniquePhotoUrls.map(async u => {
+      photoMap.set(u, await loadImageUrlAsJpegDataUrl(u));
+    }),
+  ]);
+
+  renderRoomTempSheetToPdfDoc(doc, data, logoDataUrl, photoMap);
 
   const safeUnit = data.unit.shortLabel.replace(/[^a-zA-Z0-9]+/g, '_');
   doc.save(`Checklist_Suhu_Kelembapan_${safeUnit}_SPPG_TMG2.pdf`);
+}
+
+export async function exportBatchRoomTempChecklistPDF(datasets: RoomTempChecklistData[]) {
+  if (datasets.length === 0) return;
+  if (datasets.length === 1) {
+    await exportRoomTempChecklistPDF(datasets[0]);
+    return;
+  }
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const logoPromise = loadLogoPngDataUrl(
+    '/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'
+  );
+
+  const uniquePhotoUrls = Array.from(
+    new Set(
+      datasets
+        .flatMap(ds => ds.rows)
+        .flatMap(r => [r.shift1.photoUrl, r.shift2.photoUrl, r.shift3.photoUrl])
+        .filter((u): u is string => Boolean(u && u.trim() !== ''))
+    )
+  );
+  const photoMap = new Map<string, string | null>();
+  const [logoDataUrl] = await Promise.all([
+    logoPromise,
+    ...uniquePhotoUrls.map(async u => {
+      photoMap.set(u, await loadImageUrlAsJpegDataUrl(u));
+    }),
+  ]);
+
+  datasets.forEach((ds, idx) => {
+    if (idx > 0) doc.addPage('a4', 'landscape');
+    renderRoomTempSheetToPdfDoc(doc, ds, logoDataUrl, photoMap);
+  });
+
+  doc.save('Checklist_Suhu_Kelembapan_4_Ruangan_SPPG_TMG2.pdf');
 }

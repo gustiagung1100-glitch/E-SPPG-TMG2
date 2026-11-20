@@ -300,6 +300,35 @@ export function applyFacilityTimePatch(
   };
 }
 
+function compressImageToDataUrl(img: HTMLImageElement, rawResult: string): string {
+  try {
+    const drawResized = (maxDim: number, quality: number) => {
+      let width = img.width || 640;
+      let height = img.height || 480;
+      if (width > maxDim || height > maxDim) {
+        const ratio = Math.min(maxDim / width, maxDim / height);
+        width = Math.max(1, Math.round(width * ratio));
+        height = Math.max(1, Math.round(height * ratio));
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return rawResult;
+      ctx.drawImage(img, 0, 0, width, height);
+      return canvas.toDataURL('image/jpeg', quality);
+    };
+
+    let compressed = drawResized(720, 0.72);
+    if (compressed.length > 140000) {
+      compressed = drawResized(540, 0.56);
+    }
+    return compressed;
+  } catch {
+    return rawResult;
+  }
+}
+
 export function processFacilityImageUpload(
   e: React.ChangeEvent<HTMLInputElement>,
   onSuccess: (dataUrl: string) => void,
@@ -327,29 +356,7 @@ export function processFacilityImageUpload(
     const rawResult = reader.result as string;
     const img = new Image();
     img.onload = () => {
-      try {
-        const maxDim = 960;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxDim || height > maxDim) {
-          const ratio = Math.min(maxDim / width, maxDim / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', 0.8);
-          onSuccess(compressed);
-        } else {
-          onSuccess(rawResult);
-        }
-      } catch {
-        onSuccess(rawResult);
-      }
+      onSuccess(compressImageToDataUrl(img, rawResult));
       input.value = '';
     };
     img.onerror = () => {
@@ -397,28 +404,7 @@ export async function processMultipleImageUploads(
         const rawResult = reader.result as string;
         const img = new Image();
         img.onload = () => {
-          try {
-            const maxDim = 960;
-            let width = img.width;
-            let height = img.height;
-            if (width > maxDim || height > maxDim) {
-              const ratio = Math.min(maxDim / width, maxDim / height);
-              width = Math.round(width * ratio);
-              height = Math.round(height * ratio);
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL('image/jpeg', 0.8));
-            } else {
-              resolve(rawResult);
-            }
-          } catch {
-            resolve(rawResult);
-          }
+          resolve(compressImageToDataUrl(img, rawResult));
         };
         img.onerror = () => resolve(rawResult);
         img.src = rawResult;
@@ -688,10 +674,17 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
             <input
               type="number"
               step="0.1"
-              value={tempVal}
-              onChange={e =>
-                onChange(applyFacilityTempPatch(value, unit.tempKey, Number(e.target.value)))
-              }
+              value={Number.isFinite(tempVal) ? tempVal : ''}
+              onChange={e => {
+                const parsed = Number(e.target.value);
+                onChange(
+                  applyFacilityTempPatch(
+                    value,
+                    unit.tempKey,
+                    Number.isFinite(parsed) ? parsed : 0
+                  )
+                );
+              }}
               title="Suhu (°C)"
               className="w-full px-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
             />
@@ -706,9 +699,16 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
                 min="0"
                 max="100"
                 value={getFacilityHumidityValue(value, unit.tempKey)}
-                onChange={e =>
-                  onChange(applyFacilityHumidityPatch(value, unit.tempKey, Number(e.target.value)))
-                }
+                onChange={e => {
+                  const parsed = Number(e.target.value);
+                  onChange(
+                    applyFacilityHumidityPatch(
+                      value,
+                      unit.tempKey,
+                      Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0
+                    )
+                  );
+                }}
                 title="Kelembapan (%)"
                 className="w-full px-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
               />

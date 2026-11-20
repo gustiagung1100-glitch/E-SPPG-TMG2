@@ -138,45 +138,224 @@ export interface AggregatedMenuNeed {
   planDate: string;
 }
 
+function computeKebutuhanAndPortionCost(params: {
+  bkGrams: number;
+  portions: number;
+  unitCode: string;
+  unitPrice: number;
+  masterUnits: MasterUnit[];
+}): { autoKebutuhan: number; costPerPortion: number } {
+  const { bkGrams, portions, unitCode, unitPrice, masterUnits } = params;
+  const normalized = (unitCode || 'kg').trim().toLowerCase();
+  const unitMeta = masterUnits.find(u => u.code.trim().toLowerCase() === normalized);
+  const isUnitBased =
+    unitMeta?.baseUnit === 'satuan' ||
+    normalized === 'pcs' ||
+    normalized === 'ikat' ||
+    normalized === 'butir';
+
+  const grossTotal = portions * bkGrams;
+
+  if (
+    (unitMeta?.baseUnit === 'gram' || unitMeta?.baseUnit === 'ml') &&
+    unitMeta.conversionToBase > 0
+  ) {
+    return {
+      autoKebutuhan: grossTotal / unitMeta.conversionToBase,
+      costPerPortion: (bkGrams / unitMeta.conversionToBase) * unitPrice,
+    };
+  }
+  if (isUnitBased) {
+    return {
+      autoKebutuhan: portions,
+      costPerPortion: unitPrice,
+    };
+  }
+  return {
+    autoKebutuhan: grossTotal / 1000,
+    costPerPortion: (bkGrams / 1000) * unitPrice,
+  };
+}
+
+export interface ResolvedRecipeIngredientFormula {
+  bddSmall: number;
+  bddLarge: number;
+  bkSmall: number;
+  bkLarge: number;
+  porsiSmall: number;
+  porsiLarge: number;
+  unitSmall: string;
+  unitLarge: string;
+  kebutuhanSmall: number;
+  kebutuhanLarge: number;
+  bufferPctSmall: number;
+  bufferPctLarge: number;
+  bufferSmall: number;
+  bufferLarge: number;
+  totalSmall: number;
+  totalLarge: number;
+  pembulatanSmall: number;
+  pembulatanLarge: number;
+  totalKuantiti: number;
+  totalNetGrams: number;
+  totalNetKg: number;
+  totalGrossGrams: number;
+  totalGrossKg: number;
+  costPortionSmall: number;
+  costPortionLarge: number;
+  totalCost: number;
+}
+
+export function resolveRecipeIngredientFormula(
+  ing: RecipeIngredient,
+  masterUnits: MasterUnit[],
+  quotaSmall: number,
+  quotaLarge: number,
+  defaultBufferSmallPct = 2,
+  defaultBufferLargePct = 2,
+  overrideUnitPrice?: number
+): ResolvedRecipeIngredientFormula {
+  const ov = ing.manualOverrides || {};
+  const hasNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+  const unitPrice = typeof overrideUnitPrice === 'number' ? overrideUnitPrice : ing.unitPrice || 0;
+
+  const bbSmall = Math.max(0, Number(ing.netWeightSmall) || 0);
+  const bbLarge = Math.max(0, Number(ing.netWeightLarge) || 0);
+
+  const bddSmall = hasNum(ov.bddSmall)
+    ? Math.max(1, ov.bddSmall)
+    : Math.max(1, ing.ediblePortionPercent || 100);
+  const bddLarge = hasNum(ov.bddLarge)
+    ? Math.max(1, ov.bddLarge)
+    : Math.max(1, ing.ediblePortionPercent || 100);
+
+  const bkSmall = hasNum(ov.bkSmall) ? ov.bkSmall : bbSmall / (bddSmall / 100);
+  const bkLarge = hasNum(ov.bkLarge) ? ov.bkLarge : bbLarge / (bddLarge / 100);
+
+  const porsiSmall = hasNum(ov.porsiSmall) ? ov.porsiSmall : Math.max(0, quotaSmall);
+  const porsiLarge = hasNum(ov.porsiLarge) ? ov.porsiLarge : Math.max(0, quotaLarge);
+
+  const basePurchaseUnit = (ing.purchaseUnit || 'kg').trim() || 'kg';
+  const unitSmall =
+    typeof ov.unitSmall === 'string' && ov.unitSmall.trim() !== ''
+      ? ov.unitSmall.trim()
+      : basePurchaseUnit;
+  const unitLarge =
+    typeof ov.unitLarge === 'string' && ov.unitLarge.trim() !== ''
+      ? ov.unitLarge.trim()
+      : basePurchaseUnit;
+
+  const convSmall = computeKebutuhanAndPortionCost({
+    bkGrams: bkSmall,
+    portions: porsiSmall,
+    unitCode: unitSmall,
+    unitPrice,
+    masterUnits,
+  });
+  const convLarge = computeKebutuhanAndPortionCost({
+    bkGrams: bkLarge,
+    portions: porsiLarge,
+    unitCode: unitLarge,
+    unitPrice,
+    masterUnits,
+  });
+
+  const kebutuhanSmall = hasNum(ov.kebutuhanSmall) ? ov.kebutuhanSmall : convSmall.autoKebutuhan;
+  const kebutuhanLarge = hasNum(ov.kebutuhanLarge) ? ov.kebutuhanLarge : convLarge.autoKebutuhan;
+
+  const bufferPctSmall =
+    typeof ing.bufferPercentSmall === 'number' && Number.isFinite(ing.bufferPercentSmall)
+      ? Math.max(0, ing.bufferPercentSmall)
+      : defaultBufferSmallPct;
+  const bufferPctLarge =
+    typeof ing.bufferPercentLarge === 'number' && Number.isFinite(ing.bufferPercentLarge)
+      ? Math.max(0, ing.bufferPercentLarge)
+      : defaultBufferLargePct;
+
+  const bufferSmall = hasNum(ov.bufferSmall)
+    ? ov.bufferSmall
+    : kebutuhanSmall * (bufferPctSmall / 100);
+  const bufferLarge = hasNum(ov.bufferLarge)
+    ? ov.bufferLarge
+    : kebutuhanLarge * (bufferPctLarge / 100);
+
+  const totalSmall = hasNum(ov.totalSmall) ? ov.totalSmall : kebutuhanSmall + bufferSmall;
+  const totalLarge = hasNum(ov.totalLarge) ? ov.totalLarge : kebutuhanLarge + bufferLarge;
+
+  const pembulatanSmall = hasNum(ov.pembulatanSmall)
+    ? ov.pembulatanSmall
+    : totalSmall > 0
+    ? Math.ceil(totalSmall)
+    : 0;
+  const pembulatanLarge = hasNum(ov.pembulatanLarge)
+    ? ov.pembulatanLarge
+    : totalLarge > 0
+    ? Math.ceil(totalLarge)
+    : 0;
+
+  const totalKuantiti = hasNum(ov.totalKuantiti)
+    ? ov.totalKuantiti
+    : pembulatanSmall + pembulatanLarge;
+
+  const totalNetGrams = porsiSmall * bbSmall + porsiLarge * bbLarge;
+  const totalNetKg = totalNetGrams / 1000;
+  const totalGrossGrams = porsiSmall * bkSmall + porsiLarge * bkLarge;
+  const totalGrossKg = totalGrossGrams / 1000;
+
+  const costPortionSmall = hasNum(ov.kebutuhanSmall)
+    ? porsiSmall > 0
+      ? (kebutuhanSmall / porsiSmall) * unitPrice
+      : 0
+    : convSmall.costPerPortion;
+  const costPortionLarge = hasNum(ov.kebutuhanLarge)
+    ? porsiLarge > 0
+      ? (kebutuhanLarge / porsiLarge) * unitPrice
+      : 0
+    : convLarge.costPerPortion;
+
+  const totalCost = totalKuantiti * unitPrice;
+
+  return {
+    bddSmall,
+    bddLarge,
+    bkSmall,
+    bkLarge,
+    porsiSmall,
+    porsiLarge,
+    unitSmall,
+    unitLarge,
+    kebutuhanSmall,
+    kebutuhanLarge,
+    bufferPctSmall,
+    bufferPctLarge,
+    bufferSmall,
+    bufferLarge,
+    totalSmall,
+    totalLarge,
+    pembulatanSmall,
+    pembulatanLarge,
+    totalKuantiti,
+    totalNetGrams,
+    totalNetKg,
+    totalGrossGrams,
+    totalGrossKg,
+    costPortionSmall,
+    costPortionLarge,
+    totalCost,
+  };
+}
+
 export function calculateIngredientPurchaseQuantity(
   ing: RecipeIngredient,
   masterUnits: MasterUnit[],
   quotaSmall: number,
   quotaLarge: number
 ): { totalKuantiti: number; unit: string } {
-  const bddRatio = Math.max(1, ing.ediblePortionPercent || 100) / 100;
-  const bkSmall = (ing.netWeightSmall || 0) / bddRatio;
-  const bkLarge = (ing.netWeightLarge || 0) / bddRatio;
-
-  const resolvedUnit = (ing.purchaseUnit || 'kg').trim();
-  const unitMeta = masterUnits.find(
-    u => u.code.trim().toLowerCase() === resolvedUnit.toLowerCase()
-  );
-  const isUnitBased =
-    unitMeta?.baseUnit === 'satuan' ||
-    resolvedUnit.toLowerCase() === 'pcs' ||
-    resolvedUnit.toLowerCase() === 'ikat' ||
-    resolvedUnit.toLowerCase() === 'butir';
-
-  let kebSmall = (quotaSmall * bkSmall) / 1000;
-  let kebLarge = (quotaLarge * bkLarge) / 1000;
-
-  if ((unitMeta?.baseUnit === 'gram' || unitMeta?.baseUnit === 'ml') && unitMeta.conversionToBase > 0) {
-    kebSmall = (quotaSmall * bkSmall) / unitMeta.conversionToBase;
-    kebLarge = (quotaLarge * bkLarge) / unitMeta.conversionToBase;
-  } else if (isUnitBased) {
-    kebSmall = quotaSmall;
-    kebLarge = quotaLarge;
-  }
-
-  const bufSmall = typeof ing.bufferPercentSmall === 'number' ? ing.bufferPercentSmall : 2;
-  const bufLarge = typeof ing.bufferPercentLarge === 'number' ? ing.bufferPercentLarge : 2;
-  const bulSmall = kebSmall > 0 ? Math.ceil(kebSmall * (1 + Math.max(0, bufSmall) / 100)) : 0;
-  const bulLarge = kebLarge > 0 ? Math.ceil(kebLarge * (1 + Math.max(0, bufLarge) / 100)) : 0;
-
+  const formula = resolveRecipeIngredientFormula(ing, masterUnits, quotaSmall, quotaLarge);
   return {
-    totalKuantiti: bulSmall + bulLarge,
-    unit: resolvedUnit || 'kg',
+    totalKuantiti: formula.totalKuantiti,
+    unit: (ing.purchaseUnit || formula.unitLarge || formula.unitSmall || 'kg').trim() || 'kg',
   };
 }
 

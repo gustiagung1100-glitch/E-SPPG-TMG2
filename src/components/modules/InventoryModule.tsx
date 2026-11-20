@@ -699,6 +699,21 @@ export const InventoryModule: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <DynamicFormEditToggleBar
+            formId={builderInvFormId}
+            isEditing={isEditingInvSchema}
+            onToggleEdit={() => setIsEditingInvSchema(v => !v)}
+            extraSelector={
+              <select
+                value={builderInvFormId}
+                onChange={e => setBuilderInvFormId(e.target.value as DynamicFormId)}
+                className="px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
+              >
+                <option value="inventory_item_form">Form Data Barang Gudang</option>
+                <option value="inventory_mutation_form">Form Mutasi Barang Masuk/Keluar</option>
+              </select>
+            }
+          />
           <button
             type="button"
             onClick={() => syncInventoryFromQualityControl()}
@@ -720,22 +735,6 @@ export const InventoryModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
-      <DynamicFormEditToggleBar
-        formId={builderInvFormId}
-        isEditing={isEditingInvSchema}
-        onToggleEdit={() => setIsEditingInvSchema(v => !v)}
-        extraSelector={
-          <select
-            value={builderInvFormId}
-            onChange={e => setBuilderInvFormId(e.target.value as DynamicFormId)}
-            className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
-          >
-            <option value="inventory_item_form">Form Data Barang Gudang</option>
-            <option value="inventory_mutation_form">Form Mutasi Barang Masuk/Keluar</option>
-          </select>
-        }
-      />
       {isEditingInvSchema && (
         <DynamicFormBuilderPanel
           formId={builderInvFormId}

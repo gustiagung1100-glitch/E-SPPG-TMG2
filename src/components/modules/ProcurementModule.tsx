@@ -1058,6 +1058,13 @@ export const ProcurementModule: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {activeTab === 'rab' && (
+            <DynamicFormEditToggleBar
+              formId="procurement_rab_form"
+              isEditing={isEditingRabSchema}
+              onToggleEdit={() => setIsEditingRabSchema(v => !v)}
+            />
+          )}
           {activeTab === 'rab' && hasPermission('procurement', 'create') && (
             <>
               <button
@@ -1252,12 +1259,6 @@ export const ProcurementModule: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'rab' && (
         <div className="space-y-4">
-          {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
-          <DynamicFormEditToggleBar
-            formId="procurement_rab_form"
-            isEditing={isEditingRabSchema}
-            onToggleEdit={() => setIsEditingRabSchema(v => !v)}
-          />
           {isEditingRabSchema && (
             <DynamicFormBuilderPanel
               formId="procurement_rab_form"

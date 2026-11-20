@@ -18,10 +18,12 @@ import {
   MenuItem,
   MenuItemGrammage,
   RecipeIngredient,
+  RecipeIngredientManualOverrides,
   FoodCompositionItem,
   NutritionTargetConfig,
   DivisionJobdesk,
 } from '../../types';
+import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import {
   DynamicFormEditToggleBar,
   DynamicFormBuilderPanel,
@@ -82,6 +84,7 @@ import {
   X,
   Star,
   HeartPulse,
+  RotateCcw,
 } from 'lucide-react';
 
 type SubModuleTab =
@@ -90,6 +93,107 @@ type SubModuleTab =
   | 'kandungan_gizi'
   | 'food_cost'
   | 'jobdesk_divisi';
+
+interface FormulaNumericCellProps {
+  value: number;
+  decimals?: number;
+  isOverridden?: boolean;
+  allowResetOnEmpty?: boolean;
+  onCommit: (nextValue: number | undefined) => void;
+  ariaLabel: string;
+  suffix?: string;
+  min?: number;
+  max?: number;
+  inputClassName?: string;
+  align?: 'left' | 'center' | 'right';
+}
+
+const FormulaNumericCell: React.FC<FormulaNumericCellProps> = ({
+  value,
+  decimals = 0,
+  isOverridden = false,
+  allowResetOnEmpty = true,
+  onCommit,
+  ariaLabel,
+  suffix,
+  min = 0,
+  max,
+  inputClassName = '',
+  align = 'center',
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const safeVal = Number.isFinite(value) ? value : 0;
+  const formattedDisplay = isOverridden
+    ? String(Number(safeVal.toFixed(Math.max(decimals, 2))))
+    : decimals === 0
+    ? String(Math.round(safeVal))
+    : safeVal.toFixed(decimals);
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setIsFocused(true);
+    setDraft(String(Number(safeVal.toFixed(Math.max(decimals, 2)))));
+    setTimeout(() => e.target.select(), 0);
+  };
+
+  const commitDraft = () => {
+    setIsFocused(false);
+    const trimmed = draft.trim().replace(',', '.');
+    if (trimmed === '') {
+      if (allowResetOnEmpty) {
+        onCommit(undefined);
+      }
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    let clamped = Math.max(min, parsed);
+    if (typeof max === 'number') clamped = Math.min(max, clamped);
+    onCommit(clamped);
+  };
+
+  const alignClass =
+    align === 'right' ? 'text-right' : align === 'left' ? 'text-left' : 'text-center';
+
+  return (
+    <div className="inline-flex items-center justify-center gap-0.5 max-w-full">
+      <span className="hidden print:inline font-mono">
+        {formattedDisplay}
+        {suffix || ''}
+      </span>
+      <input
+        type="text"
+        inputMode="decimal"
+        aria-label={ariaLabel}
+        title={
+          isOverridden
+            ? 'Diedit manual • Kosongkan untuk kembali ke rumus otomatis'
+            : 'Klik untuk edit manual'
+        }
+        value={isFocused ? draft : formattedDisplay}
+        onFocus={handleFocus}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          } else if (e.key === 'Escape') {
+            setIsFocused(false);
+            setDraft('');
+            e.currentTarget.blur();
+          }
+        }}
+        className={`print:hidden px-1 py-0.5 rounded font-mono border transition focus:outline-none focus:ring-1 focus:ring-sky-500 ${alignClass} ${
+          isOverridden
+            ? 'border-amber-400 bg-amber-50/90 text-amber-950 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200 font-bold'
+            : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600 bg-transparent focus:bg-white dark:focus:bg-slate-800 focus:border-sky-400'
+        } ${inputClassName}`}
+      />
+      {suffix && <span className="print:hidden text-[9px] text-slate-400">{suffix}</span>}
+    </div>
+  );
+};
 
 export const NutritionMenuModule: React.FC = () => {
   const {
@@ -189,7 +293,6 @@ export const NutritionMenuModule: React.FC = () => {
   // Modal State for Adding Ingredient to Menu
   const [isAddIngredientModalOpen, setIsAddIngredientModalOpen] = useState(false);
   const [selectedCompositionId, setSelectedCompositionId] = useState<string>(foodCompositions[0]?.id || '');
-  const [customMenuName, setCustomMenuName] = useState<string>('');
   const [customGramSmall, setCustomGramSmall] = useState<number>(50);
   const [customGramLarge, setCustomGramLarge] = useState<number>(75);
   const [customBdd, setCustomBdd] = useState<number>(100);
@@ -200,6 +303,19 @@ export const NutritionMenuModule: React.FC = () => {
 
   // Modal State for Create Menu
   const [isCreateMenuModalOpen, setIsCreateMenuModalOpen] = useState(false);
+  const [isSavingNewMenu, setIsSavingNewMenu] = useState(false);
+
+  const buildSuggestedMenuCode = (existingMenus: MenuItem[]) => {
+    let idx = existingMenus.length + 1;
+    let candidate = `MBG-TMG2-H${String(idx).padStart(2, '0')}`;
+    const existingCodes = new Set(existingMenus.map(m => m.menuCode.trim().toUpperCase()));
+    while (existingCodes.has(candidate.toUpperCase())) {
+      idx += 1;
+      candidate = `MBG-TMG2-H${String(idx).padStart(2, '0')}`;
+    }
+    return candidate;
+  };
+
   const [newMenuForm, setNewMenuForm] = useState<{
     date: string;
     dayName: string;
@@ -214,11 +330,11 @@ export const NutritionMenuModule: React.FC = () => {
     estimatedCostPerPortion: number;
     notes: string;
     customFields: Record<string, any>;
-  }>({
-    date: '2026-11-12',
+  }>(() => ({
+    date: new Date().toISOString().slice(0, 10),
     dayName: 'Kamis',
     cycleWeek: 2,
-    menuCode: `MBG-TMG2-H${Math.floor(Math.random() * 80) + 25}`,
+    menuCode: buildSuggestedMenuCode(menuItems),
     stapleFood: '',
     animalProtein: '',
     plantProtein: '',
@@ -228,7 +344,7 @@ export const NutritionMenuModule: React.FC = () => {
     estimatedCostPerPortion: 9000,
     notes: '',
     customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
-  });
+  }));
 
   // Calculate actual total small & large portions from SPPG institutions
   const quotaSmall = useMemo(() => {
@@ -248,10 +364,12 @@ export const NutritionMenuModule: React.FC = () => {
     return menuItems.find(m => m.id === selectedMenuId) || menuItems[0];
   }, [menuItems, selectedMenuId]);
 
+  const activeMenuId = currentMenu?.id || selectedMenuId;
+
   // Current Menu Ingredients List
   const currentIngredients = useMemo(() => {
-    return menuIngredientsMap[selectedMenuId] || [];
-  }, [menuIngredientsMap, selectedMenuId]);
+    return menuIngredientsMap[activeMenuId] || [];
+  }, [menuIngredientsMap, activeMenuId]);
 
   // ---------------------------------------------------------------------------
   // SUBMODUL B: GRAMASI ITEM MENU (PORSI KECIL VS PORSI BESAR)
@@ -319,88 +437,21 @@ export const NutritionMenuModule: React.FC = () => {
   // TOTAL = KEBUTUHAN + BUFFER
   // PEMBULATAN = Math.ceil(TOTAL)
   // TOTAL KUANTITI = PEMBULATAN PORSI KECIL + PEMBULATAN PORSI BESAR
-  const resolveIngredientMenuLabel = (ing: RecipeIngredient): string => {
-    if (ing.menuName && ing.menuName.trim() !== '') return ing.menuName.trim();
-    const cat = (ing.category || '').toLowerCase();
-    if (cat.includes('pokok')) return currentMenu?.stapleFood || 'Makanan Pokok';
-    if (cat.includes('hewani')) return currentMenu?.animalProtein || 'Lauk Hewani';
-    if (cat.includes('nabati')) return currentMenu?.plantProtein || 'Lauk Nabati';
-    if (cat.includes('sayur')) return currentMenu?.vegetable || 'Sayuran';
-    if (cat.includes('buah')) return currentMenu?.fruit || 'Buah Segar';
-    if (cat.includes('ekstra') || cat.includes('susu')) return currentMenu?.milkOrExtra || 'Ekstra / Susu';
-    return 'Bumbu & Pelengkap';
-  };
-
   const ingredientsCalculated = useMemo(() => {
     return currentIngredients.map(ing => {
-      const bddPct = Math.max(1, ing.ediblePortionPercent || 100);
-      const bddRatio = bddPct / 100;
-
-      // Berat Kotor per porsi (gram)
-      const bkSmall = ing.netWeightSmall / bddRatio;
-      const bkLarge = ing.netWeightLarge / bddRatio;
-
-      const netGramsSmallTotal = quotaSmall * ing.netWeightSmall;
-      const netGramsLargeTotal = quotaLarge * ing.netWeightLarge;
-      const totalNetGrams = netGramsSmallTotal + netGramsLargeTotal;
-      const totalNetKg = totalNetGrams / 1000;
-
-      const grossGramsSmallTotal = quotaSmall * bkSmall;
-      const grossGramsLargeTotal = quotaLarge * bkLarge;
-      const totalGrossGrams = grossGramsSmallTotal + grossGramsLargeTotal;
-      const totalGrossKg = totalGrossGrams / 1000;
-
-      // Konversi Kebutuhan sesuai Master Satuan
-      const unitMeta = masterUnits.find(
-        u => u.code.trim().toLowerCase() === (ing.purchaseUnit || 'kg').trim().toLowerCase()
+      const formula = resolveRecipeIngredientFormula(
+        ing,
+        masterUnits,
+        quotaSmall,
+        quotaLarge,
+        defaultBufferSmallPct,
+        defaultBufferLargePct
       );
-      const isUnitBased =
-        unitMeta?.baseUnit === 'satuan' ||
-        ing.purchaseUnit === 'pcs' ||
-        ing.purchaseUnit === 'ikat' ||
-        ing.purchaseUnit === 'butir';
 
-      let kebutuhanSmall = grossGramsSmallTotal / 1000;
-      let kebutuhanLarge = grossGramsLargeTotal / 1000;
-      let costPortionSmall = (bkSmall / 1000) * ing.unitPrice;
-      let costPortionLarge = (bkLarge / 1000) * ing.unitPrice;
-
-      if (unitMeta?.baseUnit === 'gram' && unitMeta.conversionToBase > 0) {
-        kebutuhanSmall = grossGramsSmallTotal / unitMeta.conversionToBase;
-        kebutuhanLarge = grossGramsLargeTotal / unitMeta.conversionToBase;
-        costPortionSmall = (bkSmall / unitMeta.conversionToBase) * ing.unitPrice;
-        costPortionLarge = (bkLarge / unitMeta.conversionToBase) * ing.unitPrice;
-      } else if (unitMeta?.baseUnit === 'ml' && unitMeta.conversionToBase > 0) {
-        kebutuhanSmall = grossGramsSmallTotal / unitMeta.conversionToBase;
-        kebutuhanLarge = grossGramsLargeTotal / unitMeta.conversionToBase;
-        costPortionSmall = (bkSmall / unitMeta.conversionToBase) * ing.unitPrice;
-        costPortionLarge = (bkLarge / unitMeta.conversionToBase) * ing.unitPrice;
-      } else if (isUnitBased) {
-        kebutuhanSmall = quotaSmall;
-        kebutuhanLarge = quotaLarge;
-        costPortionSmall = ing.unitPrice;
-        costPortionLarge = ing.unitPrice;
-      }
-
-      const bufferPctSmall =
-        typeof ing.bufferPercentSmall === 'number' ? ing.bufferPercentSmall : defaultBufferSmallPct;
-      const bufferPctLarge =
-        typeof ing.bufferPercentLarge === 'number' ? ing.bufferPercentLarge : defaultBufferLargePct;
-
-      const bufferSmall = kebutuhanSmall * (Math.max(0, bufferPctSmall) / 100);
-      const bufferLarge = kebutuhanLarge * (Math.max(0, bufferPctLarge) / 100);
-
-      const totalSmall = kebutuhanSmall + bufferSmall;
-      const totalLarge = kebutuhanLarge + bufferLarge;
-
-      const pembulatanSmall = totalSmall > 0 ? Math.ceil(totalSmall) : 0;
-      const pembulatanLarge = totalLarge > 0 ? Math.ceil(totalLarge) : 0;
-
-      // Total Kuantiti = Pembulatan Porsi Kecil + Pembulatan Porsi Besar
-      const totalKuantiti = pembulatanSmall + pembulatanLarge;
-
-      const purchaseQty = totalKuantiti;
-      const totalCost = totalKuantiti * ing.unitPrice;
+      const ov = ing.manualOverrides || {};
+      const hasManualOverrides = Object.values(ov).some(
+        v => v !== undefined && v !== null && v !== ''
+      );
 
       // Nutrition contribution of this ingredient for small vs large portion:
       const calSmall = (ing.netWeightSmall / 100) * ing.calories100g;
@@ -417,28 +468,13 @@ export const NutritionMenuModule: React.FC = () => {
 
       return {
         ...ing,
-        menuLabel: resolveIngredientMenuLabel(ing),
-        bkSmall,
-        bkLarge,
-        kebutuhanSmall,
-        kebutuhanLarge,
-        bufferPctSmall,
-        bufferPctLarge,
-        bufferSmall,
-        bufferLarge,
-        totalSmall,
-        totalLarge,
-        pembulatanSmall,
-        pembulatanLarge,
-        totalKuantiti,
-        totalNetGrams,
-        totalNetKg,
-        totalGrossGrams,
-        totalGrossKg,
-        purchaseQty,
-        totalCost,
-        costPortionSmall,
-        costPortionLarge,
+        ...formula,
+        hasManualOverrides,
+        displayTotalUnit:
+          formula.unitSmall.toLowerCase() === formula.unitLarge.toLowerCase()
+            ? formula.unitSmall
+            : ing.purchaseUnit || formula.unitLarge,
+        purchaseQty: formula.totalKuantiti,
         nutritionSmall: {
           calories: calSmall,
           protein: protSmall,
@@ -462,7 +498,6 @@ export const NutritionMenuModule: React.FC = () => {
     masterUnits,
     defaultBufferSmallPct,
     defaultBufferLargePct,
-    currentMenu,
   ]);
 
   // Aggregate Total Net & Gross
@@ -636,7 +671,6 @@ export const NutritionMenuModule: React.FC = () => {
 
     const newIng: RecipeIngredient = {
       id: `ing-${Date.now()}`,
-      menuName: customMenuName.trim() || undefined,
       name: comp.name,
       category: comp.category,
       netWeightSmall: Number(customGramSmall),
@@ -656,11 +690,10 @@ export const NutritionMenuModule: React.FC = () => {
       referenceSource: comp.sourceReference,
     };
 
-    const nextList = [...(menuIngredientsMap[selectedMenuId] || []), newIng];
-    updateMenuIngredients(selectedMenuId, nextList);
+    const nextList = [...(menuIngredientsMap[activeMenuId] || []), newIng];
+    updateMenuIngredients(activeMenuId, nextList);
 
     addToast('success', 'Bahan Ditambahkan & Tersinkron', `${comp.name} ditambahkan. Food Cost & Gizi ${currentMenu?.menuCode || 'Menu'} diperbarui real-time.`);
-    setCustomMenuName('');
     setIsAddIngredientModalOpen(false);
   };
 
@@ -670,15 +703,88 @@ export const NutritionMenuModule: React.FC = () => {
     value: number
   ) => {
     const safeVal = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-    const nextList = (menuIngredientsMap[selectedMenuId] || []).map(item =>
-      item.id === ingId ? { ...item, [field]: safeVal } : item
+    const overrideKey = field === 'bufferPercentSmall' ? 'bufferSmall' : 'bufferLarge';
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item => {
+      if (item.id !== ingId) return item;
+      const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
+      if (nextOverrides) {
+        delete nextOverrides[overrideKey];
+      }
+      return {
+        ...item,
+        [field]: safeVal,
+        manualOverrides:
+          nextOverrides && Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+      };
+    });
+    updateMenuIngredients(activeMenuId, nextList);
+  };
+
+  const handleUpdateIngredientBaseField = (
+    ingId: string,
+    field: 'name' | 'netWeightSmall' | 'netWeightLarge',
+    value: string | number
+  ) => {
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item => {
+      if (item.id !== ingId) return item;
+      if (field === 'name') {
+        const cleaned = String(value).trim();
+        return { ...item, name: cleaned || item.name };
+      }
+      const parsed = Number(value);
+      const safeNum = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+      return { ...item, [field]: safeNum };
+    });
+    updateMenuIngredients(activeMenuId, nextList);
+  };
+
+  const handleUpdateFormulaOverride = (
+    ingId: string,
+    key: keyof RecipeIngredientManualOverrides,
+    value: number | string | undefined
+  ) => {
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item => {
+      if (item.id !== ingId) return item;
+      const nextOverrides: RecipeIngredientManualOverrides = {
+        ...(item.manualOverrides || {}),
+      };
+      if (value === undefined || value === '') {
+        delete nextOverrides[key];
+      } else if (key === 'unitSmall' || key === 'unitLarge') {
+        const cleanedUnit = String(value).trim();
+        if (!cleanedUnit || cleanedUnit === (item.purchaseUnit || 'kg')) {
+          delete nextOverrides[key];
+        } else {
+          nextOverrides[key] = cleanedUnit;
+        }
+      } else {
+        const num = Number(value);
+        if (!Number.isFinite(num) || num < 0) return item;
+        nextOverrides[key] = key === 'bddSmall' || key === 'bddLarge' ? Math.max(1, Math.min(100, num)) : num;
+      }
+      return {
+        ...item,
+        manualOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+      };
+    });
+    updateMenuIngredients(activeMenuId, nextList);
+  };
+
+  const handleResetIngredientOverrides = (ingId: string) => {
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item =>
+      item.id === ingId ? { ...item, manualOverrides: undefined } : item
     );
-    updateMenuIngredients(selectedMenuId, nextList);
+    updateMenuIngredients(activeMenuId, nextList);
+    addToast(
+      'info',
+      'Rumus Dikembalikan Otomatis',
+      'Nilai input manual pada baris bahan ini dikembalikan ke perhitungan rumus otomatis.'
+    );
   };
 
   const handleDeleteIngredient = (ingId: string) => {
-    const nextList = (menuIngredientsMap[selectedMenuId] || []).filter(i => i.id !== ingId);
-    updateMenuIngredients(selectedMenuId, nextList);
+    const nextList = (menuIngredientsMap[activeMenuId] || []).filter(i => i.id !== ingId);
+    updateMenuIngredients(activeMenuId, nextList);
     addToast('info', 'Bahan Dihapus', 'Bahan resep telah dikeluarkan dan Food Cost diperbarui.');
   };
 
@@ -688,7 +794,7 @@ export const NutritionMenuModule: React.FC = () => {
       return;
     }
     await syncMenuNeedsToRAB(
-      selectedMenuId,
+      activeMenuId,
       ingredientsCalculated.map(i => ({
         name: i.name,
         category: i.category,
@@ -701,6 +807,8 @@ export const NutritionMenuModule: React.FC = () => {
 
   const handleCreateNewMenu = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingNewMenu) return;
+
     const err = validateDynamicFormFields(dynamicFormSchemas.menu_form, {
       ...newMenuForm,
       ...(newMenuForm.customFields || {}),
@@ -711,29 +819,36 @@ export const NutritionMenuModule: React.FC = () => {
     }
 
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const parsedDay = new Date(`${newMenuForm.date}T00:00:00`);
+    const safeDate = newMenuForm.date || new Date().toISOString().slice(0, 10);
+    const parsedDay = new Date(`${safeDate}T00:00:00`);
     const computedDayName = Number.isNaN(parsedDay.getTime())
-      ? newMenuForm.dayName
+      ? newMenuForm.dayName || 'Kamis'
       : dayNames[parsedDay.getDay()];
+
+    const safeMenuCode =
+      (newMenuForm.menuCode || '').trim() || buildSuggestedMenuCode(menuItems);
 
     const tempMenuStub: Pick<
       MenuItem,
       'id' | 'stapleFood' | 'animalProtein' | 'plantProtein' | 'vegetable' | 'fruit' | 'milkOrExtra'
     > = {
       id: `menu-tmp-${Date.now()}`,
-      stapleFood: newMenuForm.stapleFood || 'Nasi Putih Pulen',
-      animalProtein: newMenuForm.animalProtein || 'Lauk Hewani Pilihan',
-      plantProtein: newMenuForm.plantProtein || 'Lauk Nabati Pilihan',
-      vegetable: newMenuForm.vegetable || 'Sayuran Segar',
-      fruit: newMenuForm.fruit || 'Buah Pilihan',
-      milkOrExtra: newMenuForm.milkOrExtra,
+      stapleFood: (newMenuForm.stapleFood || '').trim() || 'Nasi Putih Pulen',
+      animalProtein: (newMenuForm.animalProtein || '').trim() || 'Lauk Hewani Pilihan',
+      plantProtein: (newMenuForm.plantProtein || '').trim() || 'Lauk Nabati Pilihan',
+      vegetable: (newMenuForm.vegetable || '').trim() || 'Sayuran Segar',
+      fruit: (newMenuForm.fruit || '').trim() || 'Buah Pilihan',
+      milkOrExtra: (newMenuForm.milkOrExtra || '').trim() || 'Susu UHT Plain 125ml',
     };
 
+    const initialRecipes = sampleIngredientsMenu1.map(ing => ({ ...ing }));
+    const initialGrammages = buildDefaultGrammagesForMenu(tempMenuStub, initialRecipes);
+
     const payload: Omit<MenuItem, 'id'> = {
-      date: newMenuForm.date,
+      date: safeDate,
       dayName: computedDayName,
-      cycleWeek: newMenuForm.cycleWeek,
-      menuCode: newMenuForm.menuCode,
+      cycleWeek: newMenuForm.cycleWeek || 2,
+      menuCode: safeMenuCode,
       stapleFood: tempMenuStub.stapleFood,
       animalProtein: tempMenuStub.animalProtein,
       plantProtein: tempMenuStub.plantProtein,
@@ -749,36 +864,44 @@ export const NutritionMenuModule: React.FC = () => {
       targetPortions: totalBeneficiaries,
       estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 9000),
       status: 'Draft',
-      notes: newMenuForm.notes || 'Standar gizi terintegrasi PLOG.',
-      itemGrammages: buildDefaultGrammagesForMenu(tempMenuStub, sampleIngredientsMenu1),
+      notes: (newMenuForm.notes || '').trim() || 'Standar gizi terintegrasi PLOG.',
+      ingredients: initialRecipes,
+      itemGrammages: initialGrammages,
       customFields: newMenuForm.customFields || {},
     };
 
-    const createdMenu = await addMenuItem(payload);
-    const normalizedGrammages = (payload.itemGrammages || []).map(g => ({
-      ...g,
-      id: `${createdMenu.id}-gram-${g.categoryKey}`,
-    }));
-    await updateMenuItem(createdMenu.id, { itemGrammages: normalizedGrammages });
-    updateMenuIngredients(createdMenu.id, [...sampleIngredientsMenu1]);
-    setSelectedMenuId(createdMenu.id);
-    setNewMenuForm(prev => ({
-      ...prev,
-      menuCode: `MBG-TMG2-H${Math.floor(Math.random() * 80) + 25}`,
-      stapleFood: '',
-      animalProtein: '',
-      plantProtein: '',
-      vegetable: '',
-      fruit: '',
-      notes: '',
-      customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
-    }));
-    setIsCreateMenuModalOpen(false);
-    addToast(
-      'success',
-      'Menu Baru Dibuat & Tersinkron',
-      `Menu ${payload.menuCode} beserta ${normalizedGrammages.length} item menu pada Gramasi Item Menu berhasil dibuat.`
-    );
+    setIsSavingNewMenu(true);
+    try {
+      const createdMenu = await addMenuItem(payload);
+      setSelectedMenuId(createdMenu.id);
+      setNewMenuForm(prev => ({
+        ...prev,
+        menuCode: buildSuggestedMenuCode([...menuItems, createdMenu]),
+        stapleFood: '',
+        animalProtein: '',
+        plantProtein: '',
+        vegetable: '',
+        fruit: '',
+        notes: '',
+        customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+      }));
+      setIsCreateMenuModalOpen(false);
+      addToast(
+        'success',
+        'Menu Baru Dibuat & Tersinkron',
+        `Menu ${createdMenu.menuCode} beserta ${createdMenu.itemGrammages?.length || initialGrammages.length} item menu & kebutuhan RAB berhasil tersimpan.`
+      );
+    } catch (saveError) {
+      addToast(
+        'error',
+        'Gagal Menyimpan Menu',
+        saveError instanceof Error
+          ? saveError.message
+          : 'Terjadi kesalahan saat menyimpan menu baru.'
+      );
+    } finally {
+      setIsSavingNewMenu(false);
+    }
   };
 
   // Handlers Submodul B: Gramasi Item Menu (Manual Edit & Sinkron PLOG)
@@ -1142,7 +1265,6 @@ export const NutritionMenuModule: React.FC = () => {
       title: `LAPORAN PERENCANAAN DAN KEBUTUHAN BAHAN RESEP (PLOG)`,
       subtitle: `Menu: ${currentMenu?.menuCode} - ${currentMenu?.stapleFood} + ${currentMenu?.animalProtein} • SPPG TMG2`,
       headers: [
-        'MENU',
         'BAHAN MAKANAN',
         'PK (BB / BDD% / BK)',
         'PK Kebutuhan + Buffer -> Bulat',
@@ -1151,13 +1273,12 @@ export const NutritionMenuModule: React.FC = () => {
         'TOTAL KUANTITI (K+B)',
       ],
       rows: ingredientsCalculated.map(i => [
-        i.menuLabel,
         i.name,
-        `${i.netWeightSmall}g / ${i.ediblePortionPercent}% / ${i.bkSmall.toFixed(1)}g`,
-        `${i.kebutuhanSmall.toFixed(1)} + ${i.bufferSmall.toFixed(2)} = ${i.pembulatanSmall} ${i.purchaseUnit}`,
-        `${i.netWeightLarge}g / ${i.ediblePortionPercent}% / ${i.bkLarge.toFixed(1)}g`,
-        `${i.kebutuhanLarge.toFixed(1)} + ${i.bufferLarge.toFixed(2)} = ${i.pembulatanLarge} ${i.purchaseUnit}`,
-        `${formatNumber(i.totalKuantiti)} ${i.purchaseUnit}`,
+        `${i.netWeightSmall}g / ${i.bddSmall}% / ${i.bkSmall.toFixed(1)}g`,
+        `${i.kebutuhanSmall.toFixed(1)} + ${i.bufferSmall.toFixed(2)} = ${i.pembulatanSmall} ${i.unitSmall}`,
+        `${i.netWeightLarge}g / ${i.bddLarge}% / ${i.bkLarge.toFixed(1)}g`,
+        `${i.kebutuhanLarge.toFixed(1)} + ${i.bufferLarge.toFixed(2)} = ${i.pembulatanLarge} ${i.unitLarge}`,
+        `${formatNumber(i.totalKuantiti)} ${i.displayTotalUnit}`,
       ]),
       fileName: `PLOG_Rincian_Bahan_Resep_${currentMenu?.menuCode || 'Menu'}`,
       orientation: 'landscape',
@@ -1169,30 +1290,29 @@ export const NutritionMenuModule: React.FC = () => {
 
   const handleExportPLOGExcel = () => {
     const dataToExport = ingredientsCalculated.map(i => ({
-      'MENU': i.menuLabel,
       'BAHAN MAKANAN': i.name,
       'PK BB (g)': i.netWeightSmall,
-      'PK BDD%': i.ediblePortionPercent,
+      'PK BDD%': i.bddSmall,
       'PK BK (g)': Number(i.bkSmall.toFixed(1)),
-      'PK PORSI': quotaSmall,
+      'PK PORSI': i.porsiSmall,
       'PK KEBUTUHAN': Number(i.kebutuhanSmall.toFixed(2)),
       'PK BUFFER (%)': i.bufferPctSmall,
       'PK BUFFER': Number(i.bufferSmall.toFixed(2)),
       'PK TOTAL': Number(i.totalSmall.toFixed(2)),
       'PK PEMBULATAN': i.pembulatanSmall,
-      'PK SATUAN': i.purchaseUnit,
+      'PK SATUAN': i.unitSmall,
       'PB BB (g)': i.netWeightLarge,
-      'PB BDD%': i.ediblePortionPercent,
+      'PB BDD%': i.bddLarge,
       'PB BK (g)': Number(i.bkLarge.toFixed(1)),
-      'PB PORSI': quotaLarge,
+      'PB PORSI': i.porsiLarge,
       'PB KEBUTUHAN': Number(i.kebutuhanLarge.toFixed(2)),
       'PB BUFFER (%)': i.bufferPctLarge,
       'PB BUFFER': Number(i.bufferLarge.toFixed(2)),
       'PB TOTAL': Number(i.totalLarge.toFixed(2)),
       'PB PEMBULATAN': i.pembulatanLarge,
-      'PB SATUAN': i.purchaseUnit,
+      'PB SATUAN': i.unitLarge,
       'TOTAL KUANTITI (PEMBULATAN K+B)': i.totalKuantiti,
-      'SATUAN': i.purchaseUnit,
+      'SATUAN': i.displayTotalUnit,
     }));
     exportToExcel(dataToExport, `PLOG_Rincian_Resep_${currentMenu?.menuCode || 'Menu'}`, 'Rincian Bahan Resep');
   };
@@ -1247,11 +1367,22 @@ export const NutritionMenuModule: React.FC = () => {
             <span>Kalkulator Z-Score WHO</span>
           </button>
 
+          <DynamicFormEditToggleBar
+            formId="menu_form"
+            isEditing={isEditingMenuForm}
+            onToggleEdit={() => setIsEditingMenuForm(v => !v)}
+          />
+
           <button
             type="button"
             onClick={() => {
               setNewMenuForm(prev => ({
                 ...prev,
+                date: prev.date || new Date().toISOString().slice(0, 10),
+                menuCode:
+                  prev.menuCode && !menuItems.some(m => m.menuCode === prev.menuCode)
+                    ? prev.menuCode
+                    : buildSuggestedMenuCode(menuItems),
                 customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
               }));
               setIsModalMenuSchemaEdit(false);
@@ -1264,13 +1395,6 @@ export const NutritionMenuModule: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* Dynamic & Editable Form Toggle Bar (Admin/Superuser Only) */}
-      <DynamicFormEditToggleBar
-        formId="menu_form"
-        isEditing={isEditingMenuForm}
-        onToggleEdit={() => setIsEditingMenuForm(v => !v)}
-      />
 
       {isEditingMenuForm && (
         <DynamicFormBuilderPanel
@@ -1486,11 +1610,14 @@ export const NutritionMenuModule: React.FC = () => {
               <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-bold">
-                  Rumus Rincian Resep Porsi Kecil &amp; Porsi Besar (Format Standar Pengadaan):
+                  Rumus Rincian Resep Porsi Kecil &amp; Porsi Besar (Otomatis + Editable Manual):
                 </div>
                 <p className="leading-relaxed">
                   <strong>BK</strong> = BB / (BDD% / 100) • <strong>KEBUTUHAN</strong> = (BK × PORSI) dalam Satuan Beli • <strong>TOTAL</strong> = KEBUTUHAN + BUFFER • <strong>PEMBULATAN</strong> = Pembulatan ke Atas •{' '}
-                  <strong className="text-blue-900 dark:text-sky-300">TOTAL KUANTITI = Pembulatan Porsi Kecil + Pembulatan Porsi Besar</strong>.
+                  <strong className="text-blue-900 dark:text-sky-300">TOTAL KUANTITI = Pembulatan Porsi Kecil + Pembulatan Porsi Besar</strong>.{' '}
+                  <span className="text-sky-800 dark:text-sky-300">
+                    Setiap kolom dari <strong>Bahan Makanan</strong> sampai <strong>Total Kuantiti</strong> terisi otomatis &amp; dapat diklik untuk diedit manual (kosongkan angka sel hasil rumus untuk kembali ke otomatis).
+                  </span>
                 </p>
               </div>
             </div>
@@ -1532,7 +1659,7 @@ export const NutritionMenuModule: React.FC = () => {
                 Rincian Bahan Resep: {currentMenu?.stapleFood} + {currentMenu?.animalProtein}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Format lengkap Menu, Bahan Makanan, Porsi Kecil ({formatNumber(quotaSmall)} porsi), Porsi Besar ({formatNumber(quotaLarge)} porsi), &amp; Total Kuantiti Pembulatan
+                Format lengkap Bahan Makanan, Porsi Kecil ({formatNumber(quotaSmall)} porsi), Porsi Besar ({formatNumber(quotaLarge)} porsi), &amp; Total Kuantiti Pembulatan
               </p>
             </div>
 
@@ -1581,13 +1708,7 @@ export const NutritionMenuModule: React.FC = () => {
                   <tr className="font-extrabold tracking-wide text-center border-b border-slate-400 dark:border-slate-700">
                     <th
                       rowSpan={2}
-                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[140px] text-left align-middle"
-                    >
-                      MENU
-                    </th>
-                    <th
-                      rowSpan={2}
-                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[160px] text-left align-middle"
+                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[175px] text-left align-middle"
                     >
                       BAHAN MAKANAN
                     </th>
@@ -1605,14 +1726,14 @@ export const NutritionMenuModule: React.FC = () => {
                     </th>
                     <th
                       rowSpan={2}
-                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-sky-200 text-sky-950 dark:bg-sky-900/80 dark:text-sky-100 min-w-[105px] align-middle leading-tight"
+                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-sky-200 text-sky-950 dark:bg-sky-900/80 dark:text-sky-100 min-w-[115px] align-middle leading-tight"
                     >
                       <div>TOTAL KUANTITI</div>
                       <div className="text-[9px] font-semibold opacity-80">(Bulat K + Bulat B)</div>
                     </th>
                     <th
                       rowSpan={2}
-                      className="px-2 py-2 bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100 w-10 text-center align-middle print:hidden"
+                      className="px-2 py-2 bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100 w-14 text-center align-middle print:hidden"
                     >
                       AKSI
                     </th>
@@ -1642,131 +1763,357 @@ export const NutritionMenuModule: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
-                  {ingredientsCalculated.map(item => (
-                    <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="px-2.5 py-2 border-r border-slate-200 dark:border-slate-800 font-semibold text-slate-900 dark:text-white">
-                        {item.menuLabel}
-                      </td>
-                      <td className="px-2.5 py-2 border-r border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-slate-100">
-                        {item.name}
-                        <div className="text-[9px] text-slate-400 font-mono">
-                          {item.category} • {item.referenceSource}
-                        </div>
-                      </td>
+                  {ingredientsCalculated.map(item => {
+                    const ov = item.manualOverrides || {};
+                    const unitOptions = Array.from(
+                      new Set([
+                        ...masterUnits.map(u => u.code),
+                        item.purchaseUnit,
+                        item.unitSmall,
+                        item.unitLarge,
+                      ].filter(Boolean))
+                    );
 
-                      {/* PORSI KECIL CELLS */}
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.netWeightSmall}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.ediblePortionPercent}%
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.bkSmall.toFixed(1)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
-                        {formatNumber(quotaSmall)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
-                        {item.kebutuhanSmall.toFixed(1)}
-                      </td>
-                      <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
-                        <div className="text-slate-800 dark:text-slate-200">{item.bufferSmall.toFixed(2)}</div>
-                        <div className="flex items-center justify-end gap-0.5 print:hidden">
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="px-2 py-1.5 border-r border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-slate-100">
+                          <span className="hidden print:inline font-semibold">{item.name}</span>
                           <input
-                            type="number"
-                            min={0}
-                            max={50}
-                            step={0.5}
-                            aria-label={`Buffer Porsi Kecil ${item.name} (%)`}
-                            value={item.bufferPctSmall}
-                            onChange={e =>
-                              handleUpdateIngredientBuffer(item.id, 'bufferPercentSmall', Number(e.target.value))
-                            }
-                            className="w-10 px-1 py-0 text-[9px] text-right rounded border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200"
+                            type="text"
+                            aria-label={`Nama Bahan Makanan ${item.name}`}
+                            defaultValue={item.name}
+                            key={`${item.id}-${item.name}`}
+                            onBlur={e => {
+                              const nextName = e.target.value.trim();
+                              if (nextName && nextName !== item.name) {
+                                handleUpdateIngredientBaseField(item.id, 'name', nextName);
+                              } else {
+                                e.target.value = item.name;
+                              }
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') e.currentTarget.blur();
+                            }}
+                            className="print:hidden w-full min-w-[140px] px-1.5 py-0.5 rounded border border-transparent hover:border-slate-300 dark:hover:border-slate-600 focus:border-sky-400 focus:bg-white dark:focus:bg-slate-800 bg-transparent font-semibold text-slate-900 dark:text-slate-100 focus:outline-none"
                           />
-                          <span className="text-[9px] text-slate-400">%</span>
-                        </div>
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
-                        {item.totalSmall.toFixed(1)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-rose-800 dark:text-rose-300 bg-rose-50/60 dark:bg-rose-950/30">
-                        {formatNumber(item.pembulatanSmall)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
-                        {item.purchaseUnit}
-                      </td>
+                          <div className="px-1.5 text-[9px] text-slate-400 font-mono">
+                            {item.category} • {item.referenceSource}
+                          </div>
+                        </td>
 
-                      {/* PORSI BESAR CELLS */}
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.netWeightLarge}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.ediblePortionPercent}%
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
-                        {item.bkLarge.toFixed(1)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
-                        {formatNumber(quotaLarge)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
-                        {item.kebutuhanLarge.toFixed(1)}
-                      </td>
-                      <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
-                        <div className="text-slate-800 dark:text-slate-200">{item.bufferLarge.toFixed(2)}</div>
-                        <div className="flex items-center justify-end gap-0.5 print:hidden">
-                          <input
-                            type="number"
-                            min={0}
-                            max={50}
-                            step={0.5}
-                            aria-label={`Buffer Porsi Besar ${item.name} (%)`}
-                            value={item.bufferPctLarge}
-                            onChange={e =>
-                              handleUpdateIngredientBuffer(item.id, 'bufferPercentLarge', Number(e.target.value))
+                        {/* PORSI KECIL CELLS */}
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.netWeightSmall}
+                            decimals={0}
+                            allowResetOnEmpty={false}
+                            ariaLabel={`BB Porsi Kecil ${item.name}`}
+                            onCommit={v =>
+                              handleUpdateIngredientBaseField(item.id, 'netWeightSmall', v ?? 0)
                             }
-                            className="w-10 px-1 py-0 text-[9px] text-right rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200"
+                            inputClassName="w-11 text-slate-800 dark:text-slate-200"
                           />
-                          <span className="text-[9px] text-slate-400">%</span>
-                        </div>
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
-                        {item.totalLarge.toFixed(1)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/30">
-                        {formatNumber(item.pembulatanLarge)}
-                      </td>
-                      <td className="px-1.5 py-2 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
-                        {item.purchaseUnit}
-                      </td>
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.bddSmall}
+                            decimals={0}
+                            min={1}
+                            max={100}
+                            suffix="%"
+                            isOverridden={ov.bddSmall !== undefined}
+                            ariaLabel={`BDD Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'bddSmall', v)}
+                            inputClassName="w-10 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.bkSmall}
+                            decimals={1}
+                            isOverridden={ov.bkSmall !== undefined}
+                            ariaLabel={`BK Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'bkSmall', v)}
+                            inputClassName="w-12 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
+                          <FormulaNumericCell
+                            value={item.porsiSmall}
+                            decimals={0}
+                            isOverridden={ov.porsiSmall !== undefined}
+                            ariaLabel={`Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'porsiSmall', v)}
+                            inputClassName="w-14 text-slate-700 dark:text-slate-300"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.kebutuhanSmall}
+                            decimals={1}
+                            align="right"
+                            isOverridden={ov.kebutuhanSmall !== undefined}
+                            ariaLabel={`Kebutuhan Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'kebutuhanSmall', v)}
+                            inputClassName="w-14 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
+                          <div className="flex justify-end">
+                            <FormulaNumericCell
+                              value={item.bufferSmall}
+                              decimals={2}
+                              align="right"
+                              isOverridden={ov.bufferSmall !== undefined}
+                              ariaLabel={`Nilai Buffer Porsi Kecil ${item.name}`}
+                              onCommit={v => handleUpdateFormulaOverride(item.id, 'bufferSmall', v)}
+                              inputClassName="w-12 text-slate-800 dark:text-slate-200"
+                            />
+                          </div>
+                          <div className="flex items-center justify-end gap-0.5 print:hidden mt-0.5">
+                            <input
+                              type="number"
+                              min={0}
+                              max={50}
+                              step={0.5}
+                              aria-label={`Buffer Porsi Kecil ${item.name} (%)`}
+                              value={item.bufferPctSmall}
+                              onChange={e =>
+                                handleUpdateIngredientBuffer(
+                                  item.id,
+                                  'bufferPercentSmall',
+                                  Number(e.target.value)
+                                )
+                              }
+                              className="w-10 px-1 py-0 text-[9px] text-right rounded border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200"
+                            />
+                            <span className="text-[9px] text-slate-400">%</span>
+                          </div>
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                          <FormulaNumericCell
+                            value={item.totalSmall}
+                            decimals={1}
+                            align="right"
+                            isOverridden={ov.totalSmall !== undefined}
+                            ariaLabel={`Total Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'totalSmall', v)}
+                            inputClassName="w-14 font-semibold text-slate-900 dark:text-white"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-rose-800 dark:text-rose-300 bg-rose-50/60 dark:bg-rose-950/30">
+                          <FormulaNumericCell
+                            value={item.pembulatanSmall}
+                            decimals={0}
+                            isOverridden={ov.pembulatanSmall !== undefined}
+                            ariaLabel={`Pembulatan Porsi Kecil ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'pembulatanSmall', v)}
+                            inputClassName="w-12 font-black text-rose-800 dark:text-rose-300"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
+                          <span className="hidden print:inline">{item.unitSmall}</span>
+                          <select
+                            aria-label={`Satuan Porsi Kecil ${item.name}`}
+                            value={item.unitSmall}
+                            onChange={e =>
+                              handleUpdateFormulaOverride(item.id, 'unitSmall', e.target.value)
+                            }
+                            className={`print:hidden px-1 py-0.5 rounded text-[10px] border cursor-pointer focus:outline-none focus:ring-1 focus:ring-sky-500 ${
+                              ov.unitSmall !== undefined
+                                ? 'border-amber-400 bg-amber-50/90 text-amber-950 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200 font-bold'
+                                : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600 bg-transparent dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {unitOptions.map(u => (
+                              <option key={u} value={u}>
+                                {u}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
 
-                      {/* TOTAL KUANTITI (HASIL PENAMBAHAN PEMBULATAN PORSI KECIL + PORSI BESAR) */}
-                      <td className="px-2 py-2 border-r border-slate-300 dark:border-slate-700 text-center font-mono font-black text-xs text-sky-950 dark:text-sky-200 bg-sky-50/90 dark:bg-sky-950/40">
-                        {formatNumber(item.totalKuantiti)}{' '}
-                        <span className="text-[10px] font-bold">{item.purchaseUnit}</span>
-                        <div className="text-[9px] font-normal text-slate-500 dark:text-slate-400">
-                          ({item.pembulatanSmall} + {item.pembulatanLarge})
-                        </div>
-                      </td>
+                        {/* PORSI BESAR CELLS */}
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.netWeightLarge}
+                            decimals={0}
+                            allowResetOnEmpty={false}
+                            ariaLabel={`BB Porsi Besar ${item.name}`}
+                            onCommit={v =>
+                              handleUpdateIngredientBaseField(item.id, 'netWeightLarge', v ?? 0)
+                            }
+                            inputClassName="w-11 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.bddLarge}
+                            decimals={0}
+                            min={1}
+                            max={100}
+                            suffix="%"
+                            isOverridden={ov.bddLarge !== undefined}
+                            ariaLabel={`BDD Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'bddLarge', v)}
+                            inputClassName="w-10 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.bkLarge}
+                            decimals={1}
+                            isOverridden={ov.bkLarge !== undefined}
+                            ariaLabel={`BK Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'bkLarge', v)}
+                            inputClassName="w-12 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-slate-700 dark:text-slate-300">
+                          <FormulaNumericCell
+                            value={item.porsiLarge}
+                            decimals={0}
+                            isOverridden={ov.porsiLarge !== undefined}
+                            ariaLabel={`Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'porsiLarge', v)}
+                            inputClassName="w-14 text-slate-700 dark:text-slate-300"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono text-slate-800 dark:text-slate-200">
+                          <FormulaNumericCell
+                            value={item.kebutuhanLarge}
+                            decimals={1}
+                            align="right"
+                            isOverridden={ov.kebutuhanLarge !== undefined}
+                            ariaLabel={`Kebutuhan Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'kebutuhanLarge', v)}
+                            inputClassName="w-14 text-slate-800 dark:text-slate-200"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono">
+                          <div className="flex justify-end">
+                            <FormulaNumericCell
+                              value={item.bufferLarge}
+                              decimals={2}
+                              align="right"
+                              isOverridden={ov.bufferLarge !== undefined}
+                              ariaLabel={`Nilai Buffer Porsi Besar ${item.name}`}
+                              onCommit={v => handleUpdateFormulaOverride(item.id, 'bufferLarge', v)}
+                              inputClassName="w-12 text-slate-800 dark:text-slate-200"
+                            />
+                          </div>
+                          <div className="flex items-center justify-end gap-0.5 print:hidden mt-0.5">
+                            <input
+                              type="number"
+                              min={0}
+                              max={50}
+                              step={0.5}
+                              aria-label={`Buffer Porsi Besar ${item.name} (%)`}
+                              value={item.bufferPctLarge}
+                              onChange={e =>
+                                handleUpdateIngredientBuffer(
+                                  item.id,
+                                  'bufferPercentLarge',
+                                  Number(e.target.value)
+                                )
+                              }
+                              className="w-10 px-1 py-0 text-[9px] text-right rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200"
+                            />
+                            <span className="text-[9px] text-slate-400">%</span>
+                          </div>
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                          <FormulaNumericCell
+                            value={item.totalLarge}
+                            decimals={1}
+                            align="right"
+                            isOverridden={ov.totalLarge !== undefined}
+                            ariaLabel={`Total Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'totalLarge', v)}
+                            inputClassName="w-14 font-semibold text-slate-900 dark:text-white"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50/60 dark:bg-emerald-950/30">
+                          <FormulaNumericCell
+                            value={item.pembulatanLarge}
+                            decimals={0}
+                            isOverridden={ov.pembulatanLarge !== undefined}
+                            ariaLabel={`Pembulatan Porsi Besar ${item.name}`}
+                            onCommit={v => handleUpdateFormulaOverride(item.id, 'pembulatanLarge', v)}
+                            inputClassName="w-12 font-black text-emerald-800 dark:text-emerald-300"
+                          />
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-300 dark:border-slate-700 text-center text-slate-700 dark:text-slate-300">
+                          <span className="hidden print:inline">{item.unitLarge}</span>
+                          <select
+                            aria-label={`Satuan Porsi Besar ${item.name}`}
+                            value={item.unitLarge}
+                            onChange={e =>
+                              handleUpdateFormulaOverride(item.id, 'unitLarge', e.target.value)
+                            }
+                            className={`print:hidden px-1 py-0.5 rounded text-[10px] border cursor-pointer focus:outline-none focus:ring-1 focus:ring-sky-500 ${
+                              ov.unitLarge !== undefined
+                                ? 'border-amber-400 bg-amber-50/90 text-amber-950 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200 font-bold'
+                                : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600 bg-transparent dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {unitOptions.map(u => (
+                              <option key={u} value={u}>
+                                {u}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
 
-                      <td className="px-1.5 py-2 text-center print:hidden">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteIngredient(item.id)}
-                          className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition cursor-pointer"
-                          title="Hapus Bahan dari Resep"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* TOTAL KUANTITI (HASIL PENAMBAHAN PEMBULATAN PORSI KECIL + PORSI BESAR) */}
+                        <td className="px-1.5 py-1.5 border-r border-slate-300 dark:border-slate-700 text-center font-mono font-black text-xs text-sky-950 dark:text-sky-200 bg-sky-50/90 dark:bg-sky-950/40">
+                          <div className="inline-flex items-center justify-center gap-1">
+                            <FormulaNumericCell
+                              value={item.totalKuantiti}
+                              decimals={0}
+                              isOverridden={ov.totalKuantiti !== undefined}
+                              ariaLabel={`Total Kuantiti ${item.name}`}
+                              onCommit={v =>
+                                handleUpdateFormulaOverride(item.id, 'totalKuantiti', v)
+                              }
+                              inputClassName="w-14 font-black text-xs text-sky-950 dark:text-sky-200"
+                            />
+                            <span className="text-[10px] font-bold">{item.displayTotalUnit}</span>
+                          </div>
+                          <div className="text-[9px] font-normal text-slate-500 dark:text-slate-400">
+                            ({item.pembulatanSmall} + {item.pembulatanLarge})
+                          </div>
+                        </td>
+
+                        <td className="px-1.5 py-2 text-center print:hidden">
+                          <div className="inline-flex items-center justify-center gap-1">
+                            {item.hasManualOverrides && (
+                              <button
+                                type="button"
+                                onClick={() => handleResetIngredientOverrides(item.id)}
+                                className="p-1 text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 rounded hover:bg-amber-50 dark:hover:bg-amber-950 transition cursor-pointer"
+                                title="Kembalikan baris ini ke perhitungan rumus otomatis"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteIngredient(item.id)}
+                              className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition cursor-pointer"
+                              title="Hapus Bahan dari Resep"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t-2 border-slate-400 dark:border-slate-700 text-[11px]">
-                    <td colSpan={2} className="px-2.5 py-2.5 font-sans text-right uppercase tracking-wider border-r border-slate-300 dark:border-slate-700">
+                    <td colSpan={1} className="px-2.5 py-2.5 font-sans text-right uppercase tracking-wider border-r border-slate-300 dark:border-slate-700">
                       TOTAL ({ingredientsCalculated.length} Bahan):
                     </td>
                     <td colSpan={7} className="px-2 py-2.5 text-right text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700 font-sans">
@@ -3379,35 +3726,21 @@ export const NutritionMenuModule: React.FC = () => {
         maxWidth="lg"
       >
         <form onSubmit={handleSaveIngredientToMenu} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Nama Hidangan (Kolom MENU)
-              </label>
-              <input
-                type="text"
-                value={customMenuName}
-                onChange={e => setCustomMenuName(e.target.value)}
-                placeholder="Kosongkan untuk ikut nama menu aktif"
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pilih Bahan dari Komposisi Pangan (TKPI 2020 / USDA) *
-              </label>
-              <select
-                value={selectedCompositionId}
-                onChange={e => handleCompositionChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              >
-                {foodCompositions.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.code} - {c.name} ({c.category}) — BDD {c.ediblePortion}%
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Pilih Bahan dari Komposisi Pangan (TKPI 2020 / USDA) *
+            </label>
+            <select
+              value={selectedCompositionId}
+              onChange={e => handleCompositionChange(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+            >
+              {foodCompositions.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.code} - {c.name} ({c.category}) — BDD {c.ediblePortion}%
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -3699,16 +4032,18 @@ export const NutritionMenuModule: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
+              disabled={isSavingNewMenu}
               onClick={() => setIsCreateMenuModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
+              disabled={isSavingNewMenu}
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs disabled:opacity-60 cursor-pointer"
             >
-              Simpan & Rancang Bahan
+              {isSavingNewMenu ? 'Menyimpan Menu...' : 'Simpan & Rancang Bahan'}
             </button>
           </div>
         </form>

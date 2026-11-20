@@ -693,8 +693,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         id: 'abs_rep',
         key: 'replacementVolunteerName',
         label: 'Nama Relawan Pengganti',
-        type: 'text',
-        placeholder: 'Nama relawan cadangan pengganti shift',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi relawan pengganti diambil otomatis dari Master Relawan (Master Data).',
         required: true,
         isSystem: true,
         width: 'half',
@@ -743,8 +744,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         id: 'va_name',
         key: 'volunteerName',
         label: 'Nama Relawan',
-        type: 'text',
-        placeholder: 'Nama lengkap relawan',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi relawan diambil otomatis dari Master Relawan (Master Data).',
         required: true,
         isSystem: true,
         width: 'half',
@@ -1157,6 +1159,20 @@ export function mergeDynamicFormSchemas(
             type: 'select' as const,
             options: [],
             helperText: f.helperText || 'Opsi satuan ditarik otomatis dari Master Satuan (Master Data).',
+          };
+        }
+        if (
+          f.isSystem &&
+          ((formId === 'volunteer_attendance_form' && f.key === 'volunteerName') ||
+            (formId === 'volunteer_absence_form' && f.key === 'replacementVolunteerName')) &&
+          f.type === 'text'
+        ) {
+          return {
+            ...f,
+            type: 'select' as const,
+            options: [],
+            helperText:
+              f.helperText || 'Opsi relawan ditarik otomatis dari Master Relawan (Master Data).',
           };
         }
         return f;

@@ -141,7 +141,7 @@ export async function exportTableToPDF(options: {
   signerRole?: string;
   orientation?: 'portrait' | 'landscape';
   metaFields?: Array<{ label: string; value: string }>;
-  signatures?: Array<{ role: string; name: string; idNum?: string; date?: string }>;
+  signatures?: Array<{ role: string; name: string; idNum?: string; date?: string; heading?: string }>;
   imageCells?: TableImageCell[];
 }) {
   const {
@@ -370,15 +370,15 @@ export async function exportTableToPDF(options: {
     const colWidth = availableWidth / colCount;
 
     signatures.forEach((sig, idx) => {
-      const colCenterX = 14 + idx * colWidth + colWidth / 2;
+      const colCenterX =
+        colCount === 1 ? rightX - 42 : 14 + idx * colWidth + colWidth / 2;
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(15, 23, 42);
-      if (idx === colCount - 1) {
-        doc.text(`Krejengan, ${todayStr}`, colCenterX, sigY, { align: 'center' });
-      } else {
-        doc.text(`Mengetahui / Memeriksa,`, colCenterX, sigY, { align: 'center' });
-      }
+      const topHeading =
+        sig.heading ??
+        (idx === colCount - 1 ? `Krejengan, ${todayStr}` : 'Mengetahui / Memeriksa,');
+      doc.text(topHeading, colCenterX, sigY, { align: 'center' });
       doc.text(sig.role, colCenterX, sigY + 5, { align: 'center' });
 
       doc.setFont('helvetica', 'bold');

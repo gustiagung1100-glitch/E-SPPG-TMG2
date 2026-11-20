@@ -123,6 +123,7 @@ export const ProductionModule: React.FC = () => {
   const [isCookingModalOpen, setIsCookingModalOpen] = useState(false);
   const [editingCookingId, setEditingCookingId] = useState<string | null>(null);
   const [selectedCookingId, setSelectedCookingId] = useState<string | null>(null);
+  const [isSavingCooking, setIsSavingCooking] = useState(false);
   const [isPortioningModalOpen, setIsPortioningModalOpen] = useState(false);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -359,23 +360,29 @@ export const ProductionModule: React.FC = () => {
     ];
 
     return fallbackSlots.map(fb => {
+      const prev =
+        existingItems?.find(it => it.id === `fallback-${fb.categoryKey}`) ||
+        existingItems?.find(it => it.categoryKey === fb.categoryKey);
       const slot = mapCategoryToCookedSlot(fb.categoryKey, existingCookedFoods);
       const defaults = getCookedSlotDefaults(fb.categoryKey);
       return {
-        id: `fallback-${fb.categoryKey}`,
+        id: prev?.id || `fallback-${fb.categoryKey}`,
         categoryKey: fb.categoryKey,
-        categoryLabel: fb.categoryLabel,
-        itemName: fb.itemName,
-        smallGrams: fb.smallGrams,
-        largeGrams: fb.largeGrams,
-        temp: slot?.temp ?? defaults.temp,
-        photoUrl: slot?.photoUrl ?? defaults.photoUrl,
-        equipment: slot?.equipment ?? defaults.equipment,
-        session2Temp: slot?.session2Temp,
-        session2PhotoUrl: slot?.session2PhotoUrl,
-        session3Temp: slot?.session3Temp,
-        session3PhotoUrl: slot?.session3PhotoUrl,
-        notes: slot?.notes ?? '',
+        categoryLabel: prev?.categoryLabel || fb.categoryLabel,
+        itemName: prev?.itemName || fb.itemName,
+        smallGrams: prev?.smallGrams ?? fb.smallGrams,
+        largeGrams: prev?.largeGrams ?? fb.largeGrams,
+        grammagePhotoUrl: prev?.grammagePhotoUrl || '',
+        grammageSmallPhotoUrl: prev?.grammageSmallPhotoUrl || '',
+        grammageLargePhotoUrl: prev?.grammageLargePhotoUrl || '',
+        temp: prev?.temp ?? slot?.temp ?? defaults.temp,
+        photoUrl: prev?.photoUrl ?? slot?.photoUrl ?? defaults.photoUrl,
+        equipment: prev?.equipment ?? slot?.equipment ?? defaults.equipment,
+        session2Temp: prev?.session2Temp ?? slot?.session2Temp,
+        session2PhotoUrl: prev?.session2PhotoUrl ?? slot?.session2PhotoUrl,
+        session3Temp: prev?.session3Temp ?? slot?.session3Temp,
+        session3PhotoUrl: prev?.session3PhotoUrl ?? slot?.session3PhotoUrl,
+        notes: prev?.notes ?? slot?.notes ?? '',
       };
     });
   };
@@ -453,59 +460,126 @@ export const ProductionModule: React.FC = () => {
 
   const handleSaveCooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    const matchedMenu =
-      (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
-      menuItems.find(m => m.date === cookingForm.date) ||
-      menuItems[0];
+    if (isSavingCooking) return;
+    setIsSavingCooking(true);
+    try {
+      const matchedMenu =
+        (cookingForm.menuId ? menuItems.find(m => m.id === cookingForm.menuId) : undefined) ||
+        menuItems.find(m => m.date === cookingForm.date) ||
+        menuItems[0];
 
-    // Pastikan nama item selalu tersinkron dengan data terbaru Sub-menu PLOG
-    const syncedEntries = buildCookingItemEntries(matchedMenu, cookingForm.itemEntries);
+      // Pastikan nama item selalu tersinkron dengan data terbaru Sub-menu PLOG dan angka suhu valid
+      const syncedEntries = buildCookingItemEntries(matchedMenu, cookingForm.itemEntries).map(
+        entry => {
+          const defaults = getCookedSlotDefaults(entry.categoryKey);
+          return {
+            ...entry,
+            temp:
+              typeof entry.temp === 'number' && Number.isFinite(entry.temp)
+                ? entry.temp
+                : defaults.temp,
+            session2Temp:
+              typeof entry.session2Temp === 'number' && Number.isFinite(entry.session2Temp)
+                ? entry.session2Temp
+                : undefined,
+            session3Temp:
+              typeof entry.session3Temp === 'number' && Number.isFinite(entry.session3Temp)
+                ? entry.session3Temp
+                : undefined,
+          };
+        }
+      );
 
-    const pickSlotItem = (
-      categoryKey: CookingItemDetail['categoryKey'],
-      fallbackKey: CookingItemDetail['categoryKey']
-    ) => {
-      const found = syncedEntries.find(it => it.categoryKey === categoryKey);
-      const defaults = getCookedSlotDefaults(fallbackKey);
-      return {
-        temp: Number(found?.temp ?? defaults.temp),
-        photoUrl: found?.photoUrl || undefined,
-        equipment: found?.equipment || defaults.equipment,
-        session2Temp: found?.session2Temp !== undefined ? Number(found.session2Temp) : undefined,
-        session2PhotoUrl: found?.session2PhotoUrl || undefined,
-        session3Temp: found?.session3Temp !== undefined ? Number(found.session3Temp) : undefined,
-        session3PhotoUrl: found?.session3PhotoUrl || undefined,
-        notes: found?.notes || undefined,
+      const pickSlotItem = (
+        categoryKey: CookingItemDetail['categoryKey'],
+        fallbackKey: CookingItemDetail['categoryKey']
+      ) => {
+        const found = syncedEntries.find(it => it.categoryKey === categoryKey);
+        const defaults = getCookedSlotDefaults(fallbackKey);
+        const safeTemp =
+          typeof found?.temp === 'number' && Number.isFinite(found.temp)
+            ? found.temp
+            : defaults.temp;
+        return {
+          temp: safeTemp,
+          photoUrl: found?.photoUrl || undefined,
+          equipment: found?.equipment || defaults.equipment,
+          session2Temp: found?.session2Temp,
+          session2PhotoUrl: found?.session2PhotoUrl || undefined,
+          session3Temp: found?.session3Temp,
+          session3PhotoUrl: found?.session3PhotoUrl || undefined,
+          notes: found?.notes || undefined,
+        };
       };
-    };
 
-    const payload: Omit<CookingInspectionRecord, 'id'> = {
-      date: cookingForm.date,
-      time: cookingForm.time,
-      officerName: cookingForm.officerName,
-      menuId: matchedMenu?.id,
-      cookedFoods: {
-        rice: pickSlotItem('stapleFood', 'stapleFood'),
-        animalProtein: pickSlotItem('animalProtein', 'animalProtein'),
-        plantProtein: pickSlotItem('plantProtein', 'plantProtein'),
-        vegetable: pickSlotItem('vegetable', 'vegetable'),
-        fruit: pickSlotItem('fruit', 'fruit'),
-      },
-      itemEntries: syncedEntries,
-      facilityTemps: cookingForm.facilityTemps,
-      notes: cookingForm.notes,
-    };
+      const rawFac = cookingForm.facilityTemps || defaultFacilityTemperatures;
+      const numOr = (val: unknown, fb: number) =>
+        typeof val === 'number' && Number.isFinite(val) ? val : fb;
 
-    if (editingCookingId) {
-      await updateCookingRecord(editingCookingId, payload);
-      setSelectedCookingId(editingCookingId);
-      addToast('success', 'Data Pengolahan Diperbarui', 'Suhu item menu, suhu ruang, freezer, dan chiller berhasil disimpan.');
-    } else {
-      await addCookingRecord(payload);
-      addToast('success', 'Data Pengolahan Tersimpan', 'Log pengolahan, suhu ruangan & pendingin tersimpan.');
+      const safeFacilityTemps: FacilityTemperatures = {
+        ...defaultFacilityTemperatures,
+        ...rawFac,
+        prepRoomTemp: numOr(rawFac.prepRoomTemp, defaultFacilityTemperatures.prepRoomTemp ?? 21.5),
+        portioningRoomTemp: numOr(
+          rawFac.portioningRoomTemp,
+          defaultFacilityTemperatures.portioningRoomTemp ?? 21.5
+        ),
+        cookingRoomTemp: numOr(
+          rawFac.cookingRoomTemp,
+          defaultFacilityTemperatures.cookingRoomTemp ?? 26.0
+        ),
+        wetWarehouseTemp: numOr(
+          rawFac.wetWarehouseTemp,
+          defaultFacilityTemperatures.wetWarehouseTemp ?? 14.5
+        ),
+        dryWarehouseTemp: numOr(
+          rawFac.dryWarehouseTemp,
+          defaultFacilityTemperatures.dryWarehouseTemp ?? 23.0
+        ),
+        freezer1Temp: numOr(rawFac.freezer1Temp, defaultFacilityTemperatures.freezer1Temp ?? -19.5),
+        freezer2Temp: numOr(rawFac.freezer2Temp, defaultFacilityTemperatures.freezer2Temp ?? -20.2),
+        fridge1Temp: numOr(rawFac.fridge1Temp, defaultFacilityTemperatures.fridge1Temp ?? 4.8),
+        fridge2Temp: numOr(rawFac.fridge2Temp, defaultFacilityTemperatures.fridge2Temp ?? 6.2),
+        fridge3Temp: numOr(rawFac.fridge3Temp, defaultFacilityTemperatures.fridge3Temp ?? 5.5),
+        fridge4Temp: numOr(rawFac.fridge4Temp, defaultFacilityTemperatures.fridge4Temp ?? 4.2),
+      };
+
+      const payload: Omit<CookingInspectionRecord, 'id'> = {
+        date: cookingForm.date || new Date().toISOString().slice(0, 10),
+        time: (cookingForm.time || '').trim() || '06:15 WIB',
+        officerName: (cookingForm.officerName || '').trim() || 'Tim Divisi Pengolahan',
+        menuId: matchedMenu?.id,
+        cookedFoods: {
+          rice: pickSlotItem('stapleFood', 'stapleFood'),
+          animalProtein: pickSlotItem('animalProtein', 'animalProtein'),
+          plantProtein: pickSlotItem('plantProtein', 'plantProtein'),
+          vegetable: pickSlotItem('vegetable', 'vegetable'),
+          fruit: pickSlotItem('fruit', 'fruit'),
+        },
+        itemEntries: syncedEntries,
+        facilityTemps: safeFacilityTemps,
+        notes: cookingForm.notes || '',
+      };
+
+      if (editingCookingId) {
+        await updateCookingRecord(editingCookingId, payload);
+        setSelectedCookingId(editingCookingId);
+      } else {
+        const created = await addCookingRecord(payload);
+        setSelectedCookingId(created.id);
+      }
+      setIsCookingModalOpen(false);
+      setEditingCookingId(null);
+    } catch (err) {
+      console.error('Gagal menyimpan data pengolahan:', err);
+      addToast(
+        'error',
+        'Gagal Menyimpan Data Pengolahan',
+        'Terjadi kendala saat menyimpan perubahan. Periksa input suhu atau ukuran foto lalu coba lagi.'
+      );
+    } finally {
+      setIsSavingCooking(false);
     }
-    setIsCookingModalOpen(false);
-    setEditingCookingId(null);
   };
 
   // -------------------------------------------------------------
@@ -1134,6 +1208,13 @@ export const ProductionModule: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {activeTab === 'washing' && (
+            <DynamicFormEditToggleBar
+              formId="production_waste_form"
+              isEditing={isEditingWasteSchema}
+              onToggleEdit={() => setIsEditingWasteSchema(v => !v)}
+            />
+          )}
           <button
             type="button"
             onClick={triggerPrint}
@@ -1144,6 +1225,13 @@ export const ProductionModule: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {activeTab === 'washing' && isEditingWasteSchema && (
+        <DynamicFormBuilderPanel
+          formId="production_waste_form"
+          onClose={() => setIsEditingWasteSchema(false)}
+        />
+      )}
 
       {/* 5-Division Tab Navigation */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
@@ -1521,7 +1609,10 @@ export const ProductionModule: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {liveItemEntries.map((item, idx) => {
                     const isColdOrFresh = item.categoryKey === 'fruit' || item.categoryKey === 'milkOrExtra';
-                    const isSafeTemp = isColdOrFresh ? item.temp <= 25 || item.temp >= 60 : item.temp >= 75;
+                    const safeS1Temp = typeof item.temp === 'number' && Number.isFinite(item.temp) ? item.temp : 0;
+                    const isSafeTemp = isColdOrFresh ? safeS1Temp <= 25 || safeS1Temp >= 60 : safeS1Temp >= 75;
+                    const hasS2 = typeof item.session2Temp === 'number' && Number.isFinite(item.session2Temp);
+                    const hasS3 = typeof item.session3Temp === 'number' && Number.isFinite(item.session3Temp);
 
                     return (
                       <div
@@ -1564,18 +1655,18 @@ export const ProductionModule: React.FC = () => {
                                     : 'text-rose-600'
                                 }`}
                               >
-                                {item.temp}°C
+                                {safeS1Temp}°C
                               </span>
                             </div>
                             <div className="text-right text-[10px] text-slate-500">
                               <span className="block font-semibold text-slate-700 dark:text-slate-300">
                                 {item.equipment || 'Peralatan Standar'}
                               </span>
-                              {(item.session2Temp !== undefined || item.session3Temp !== undefined) && (
+                              {(hasS2 || hasS3) && (
                                 <span className="font-mono">
-                                  {item.session2Temp !== undefined ? `S2: ${item.session2Temp}°C` : ''}
-                                  {item.session2Temp !== undefined && item.session3Temp !== undefined ? ' • ' : ''}
-                                  {item.session3Temp !== undefined ? `S3: ${item.session3Temp}°C` : ''}
+                                  {hasS2 ? `S2: ${item.session2Temp}°C` : ''}
+                                  {hasS2 && hasS3 ? ' • ' : ''}
+                                  {hasS3 ? `S3: ${item.session3Temp}°C` : ''}
                                 </span>
                               )}
                             </div>
@@ -1608,12 +1699,15 @@ export const ProductionModule: React.FC = () => {
                   facilityTemps={activeCooking.facilityTemps}
                   fallbackTime={activeCooking.time}
                   showTimeFields={true}
-                  onUploadUnitPhoto={async (photoKey, dataUrl, unitLabel) => {
-                    const currentTemps = activeCooking.facilityTemps || defaultFacilityTemperatures;
-                    await updateCookingRecord(activeCooking.id, {
-                      facilityTemps: applyFacilityPhotoPatch(currentTemps, photoKey, dataUrl),
-                    });
-                    addToast('success', 'Foto Suhu Tersimpan', `Bukti foto ${unitLabel} berhasil diunggah ke log Divisi Pengolahan.`);
+                  onUploadUnitPhoto={async (photoKey, dataUrl) => {
+                    try {
+                      const currentTemps = activeCooking.facilityTemps || defaultFacilityTemperatures;
+                      await updateCookingRecord(activeCooking.id, {
+                        facilityTemps: applyFacilityPhotoPatch(currentTemps, photoKey, dataUrl),
+                      });
+                    } catch {
+                      addToast('error', 'Upload Foto Gagal', 'Terjadi kendala saat menyimpan foto suhu unit.');
+                    }
                   }}
                   onViewPhoto={url => setViewPhotoUrl(url)}
                   onOpenInputModal={() => openEditCookingModal(activeCooking)}
@@ -2116,18 +2210,6 @@ export const ProductionModule: React.FC = () => {
       {/* ========================================================= */}
       {activeTab === 'washing' && (
         <div className="space-y-6">
-          {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
-          <DynamicFormEditToggleBar
-            formId="production_waste_form"
-            isEditing={isEditingWasteSchema}
-            onToggleEdit={() => setIsEditingWasteSchema(v => !v)}
-          />
-          {isEditingWasteSchema && (
-            <DynamicFormBuilderPanel
-              formId="production_waste_form"
-              onClose={() => setIsEditingWasteSchema(false)}
-            />
-          )}
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
             <div>
@@ -2908,8 +2990,12 @@ export const ProductionModule: React.FC = () => {
                       <input
                         type="number"
                         step="0.1"
-                        value={entry.temp}
-                        onChange={e => updateCookingItemEntry(entry.id, { temp: Number(e.target.value) })}
+                        value={typeof entry.temp === 'number' && Number.isFinite(entry.temp) ? entry.temp : ''}
+                        onChange={e =>
+                          updateCookingItemEntry(entry.id, {
+                            temp: e.target.value === '' ? Number.NaN : Number(e.target.value),
+                          })
+                        }
                         className="w-full px-2 py-1 border rounded font-mono text-xs dark:bg-slate-800 dark:border-slate-700"
                       />
                       <div className="flex items-center gap-2">
@@ -2941,12 +3027,19 @@ export const ProductionModule: React.FC = () => {
                           type="number"
                           step="0.1"
                           placeholder="Opsional"
-                          value={entry.session2Temp ?? ''}
-                          onChange={e =>
-                            updateCookingItemEntry(entry.id, {
-                              session2Temp: e.target.value === '' ? undefined : Number(e.target.value),
-                            })
+                          value={
+                            typeof entry.session2Temp === 'number' && Number.isFinite(entry.session2Temp)
+                              ? entry.session2Temp
+                              : ''
                           }
+                          onChange={e => {
+                            const val = e.target.value;
+                            const parsed = Number(val);
+                            updateCookingItemEntry(entry.id, {
+                              session2Temp:
+                                val === '' || !Number.isFinite(parsed) ? undefined : parsed,
+                            });
+                          }}
                           className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
                         />
                         <input
@@ -2966,12 +3059,19 @@ export const ProductionModule: React.FC = () => {
                           type="number"
                           step="0.1"
                           placeholder="Opsional"
-                          value={entry.session3Temp ?? ''}
-                          onChange={e =>
-                            updateCookingItemEntry(entry.id, {
-                              session3Temp: e.target.value === '' ? undefined : Number(e.target.value),
-                            })
+                          value={
+                            typeof entry.session3Temp === 'number' && Number.isFinite(entry.session3Temp)
+                              ? entry.session3Temp
+                              : ''
                           }
+                          onChange={e => {
+                            const val = e.target.value;
+                            const parsed = Number(val);
+                            updateCookingItemEntry(entry.id, {
+                              session3Temp:
+                                val === '' || !Number.isFinite(parsed) ? undefined : parsed,
+                            });
+                          }}
                           className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
                         />
                         <input
@@ -3013,19 +3113,25 @@ export const ProductionModule: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 type="button"
+                disabled={isSavingCooking}
                 onClick={() => {
                   setIsCookingModalOpen(false);
                   setEditingCookingId(null);
                 }}
-                className="px-4 py-2 border rounded-xl text-slate-700 dark:text-slate-300"
+                className="px-4 py-2 border rounded-xl text-slate-700 dark:text-slate-300 disabled:opacity-50"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold"
+                disabled={isSavingCooking}
+                className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold disabled:opacity-60"
               >
-                {editingCookingId ? 'Simpan Perubahan Data Pengolahan' : 'Simpan Log Divisi Pengolahan'}
+                {isSavingCooking
+                  ? 'Menyimpan...'
+                  : editingCookingId
+                  ? 'Simpan Perubahan Data Pengolahan'
+                  : 'Simpan Log Divisi Pengolahan'}
               </button>
             </div>
           </form>

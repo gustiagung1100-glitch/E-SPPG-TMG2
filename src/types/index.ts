@@ -349,6 +349,26 @@ export interface MenuItem {
 }
 
 // Submodul PLOG: Perencanaan Menu, Bahan, Gizi, Food Cost, & Jobdesk Divisi
+export interface RecipeIngredientManualOverrides {
+  bddSmall?: number;
+  bddLarge?: number;
+  bkSmall?: number;
+  bkLarge?: number;
+  porsiSmall?: number;
+  porsiLarge?: number;
+  kebutuhanSmall?: number;
+  kebutuhanLarge?: number;
+  bufferSmall?: number;
+  bufferLarge?: number;
+  totalSmall?: number;
+  totalLarge?: number;
+  pembulatanSmall?: number;
+  pembulatanLarge?: number;
+  unitSmall?: string;
+  unitLarge?: string;
+  totalKuantiti?: number;
+}
+
 export interface RecipeIngredient {
   id: string;
   menuName?: string; // Nama hidangan pada kolom MENU
@@ -370,6 +390,7 @@ export interface RecipeIngredient {
   carb100g: number;
   fiber100g: number;
   referenceSource: string; // e.g. "TKPI Kemenkes RI 2020", "USDA FoodData Central"
+  manualOverrides?: RecipeIngredientManualOverrides;
 }
 
 export interface FoodCompositionItem {
@@ -1088,7 +1109,7 @@ export interface IncomingLetter {
   recordedBy: string;
 }
 
-// 19 Laporan Resmi Pusat Laporan & Cetak SPPG
+// 30 Laporan Resmi Pusat Laporan & Cetak SPPG
 export type OfficialReportKey =
   | 'bast_distribusi'
   | 'surat_tugas'
@@ -1103,6 +1124,16 @@ export type OfficialReportKey =
   | 'rab'
   | 'purchase_order'
   | 'quality_control'
+  | 'suhu_ruang_pengolahan'
+  | 'suhu_ruang_pemorsian'
+  | 'suhu_gudang_basah'
+  | 'suhu_gudang_kering'
+  | 'suhu_freezer_1'
+  | 'suhu_freezer_2'
+  | 'suhu_chiller_1'
+  | 'suhu_chiller_2'
+  | 'suhu_chiller_3'
+  | 'suhu_chiller_4'
   | 'suhu_makanan_pengolahan'
   | 'suhu_makanan_pemorsian'
   | 'food_waste'

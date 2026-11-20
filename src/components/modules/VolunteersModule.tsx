@@ -40,6 +40,8 @@ import {
   Eye,
   FileCheck,
   Sparkles,
+  RefreshCw,
+  Pencil,
 } from 'lucide-react';
 
 export const VolunteersModule: React.FC = () => {
@@ -47,6 +49,7 @@ export const VolunteersModule: React.FC = () => {
     volunteerAttendance,
     recordAttendance,
     updateAttendance,
+    syncVolunteerAttendanceFromMaster,
     volunteerAbsences,
     addVolunteerAbsence,
     approveVolunteerAbsence,
@@ -60,8 +63,34 @@ export const VolunteersModule: React.FC = () => {
     dynamicFormSchemas,
   } = useApp();
 
+  const activeMasterVolunteers = useMemo(
+    () => masterVolunteers.filter(v => v.isActive),
+    [masterVolunteers]
+  );
+
+  const masterVolunteerLookup = useMemo(() => {
+    const byId = new Map<string, (typeof masterVolunteers)[number]>();
+    const byName = new Map<string, (typeof masterVolunteers)[number]>();
+    masterVolunteers.forEach(v => {
+      byId.set(v.id, v);
+      byName.set(v.name.trim().toLowerCase(), v);
+    });
+    return { byId, byName };
+  }, [masterVolunteers]);
+
+  const findMasterVolunteer = (volunteerId?: string, volunteerName?: string) => {
+    if (volunteerId && masterVolunteerLookup.byId.has(volunteerId)) {
+      return masterVolunteerLookup.byId.get(volunteerId);
+    }
+    if (volunteerName) {
+      return masterVolunteerLookup.byName.get(volunteerName.trim().toLowerCase());
+    }
+    return undefined;
+  };
+
   // Active Tab
   const [activeTab, setActiveTab] = useState<'attendance' | 'absences' | 'directory'>('absences');
+  const [syncDate, setSyncDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
   // Dynamic Form Builder States
   const [isEditingVolSchema, setIsEditingVolSchema] = useState(false);
@@ -81,12 +110,18 @@ export const VolunteersModule: React.FC = () => {
   const [rejectionReasonText, setRejectionReasonText] = useState('');
   const [confirmDeleteAbsence, setConfirmDeleteAbsence] = useState<VolunteerAbsenceRecord | null>(null);
 
+  const defaultPrimaryVol = activeMasterVolunteers[0] || masterVolunteers[0];
+  const defaultReplacementVol =
+    activeMasterVolunteers.find(v => v.id !== defaultPrimaryVol?.id) ||
+    masterVolunteers.find(v => v.id !== defaultPrimaryVol?.id) ||
+    defaultPrimaryVol;
+
   // Attendance Form State
   const [attFormData, setAttFormData] = useState<Omit<VolunteerAttendance, 'id'>>({
     date: new Date().toISOString().slice(0, 10),
-    volunteerId: 'vol-01',
-    volunteerName: '',
-    division: 'Persiapan',
+    volunteerId: defaultPrimaryVol?.id || 'vol-01',
+    volunteerName: defaultPrimaryVol?.name || '',
+    division: (defaultPrimaryVol?.division as VolunteerAttendance['division']) || 'Persiapan',
     shift: 'Pagi (03:30 - 08:30)',
     status: 'Hadir',
     healthCheckPassed: true,
@@ -100,14 +135,14 @@ export const VolunteersModule: React.FC = () => {
   // Absence Form State (Modul Ketidakhadiran Relawan)
   const [absenceFormData, setAbsenceFormData] = useState<Omit<VolunteerAbsenceRecord, 'id' | 'createdAt'>>({
     date: new Date().toISOString().slice(0, 10),
-    volunteerId: 'vol-01',
-    volunteerName: 'Dewi Sartika',
-    division: 'Persiapan',
+    volunteerId: defaultPrimaryVol?.id || 'vol-01',
+    volunteerName: defaultPrimaryVol?.name || '',
+    division: defaultPrimaryVol?.division || 'Persiapan',
     reason: 'Sakit',
     reasonDetails: '',
-    replacementVolunteerId: 'vol-cad-1',
-    replacementVolunteerName: 'Bu Anisa',
-    replacementDivision: 'Persiapan',
+    replacementVolunteerId: defaultReplacementVol?.id || '',
+    replacementVolunteerName: defaultReplacementVol?.name || '',
+    replacementDivision: defaultReplacementVol?.division || 'Persiapan',
     approvalStatus: 'Menunggu Persetujuan',
     notes: 'Mohon izin tidak hadir dan telah konfirmasi pengganti shift.',
     customFields: {},
@@ -121,12 +156,56 @@ export const VolunteersModule: React.FC = () => {
   // Handle Volunteer Selection for Absence
   const handleVolunteerSelect = (volName: string) => {
     const matched = masterVolunteers.find(v => v.name === volName);
+    setAbsenceFormData(prev => {
+      const nextRep =
+        prev.replacementVolunteerName === volName
+          ? activeMasterVolunteers.find(v => v.name !== volName && v.division === (matched?.division || prev.division)) ||
+            activeMasterVolunteers.find(v => v.name !== volName)
+          : undefined;
+      return {
+        ...prev,
+        volunteerName: volName,
+        volunteerId: matched?.id || `vol-${Date.now()}`,
+        division: matched?.division || prev.division,
+        ...(nextRep
+          ? {
+              replacementVolunteerId: nextRep.id,
+              replacementVolunteerName: nextRep.name,
+              replacementDivision: nextRep.division,
+            }
+          : {}),
+      };
+    });
+  };
+
+  // Handle Replacement Volunteer Selection for Absence
+  const handleReplacementSelect = (repName: string) => {
+    const matched = masterVolunteers.find(v => v.name === repName);
     setAbsenceFormData(prev => ({
       ...prev,
-      volunteerName: volName,
-      volunteerId: matched?.id || `vol-${Date.now()}`,
-      division: matched?.division || prev.division,
+      replacementVolunteerName: repName,
+      replacementVolunteerId: matched?.id || `vol-rep-${Date.now()}`,
+      replacementDivision: matched?.division || prev.replacementDivision,
     }));
+  };
+
+  // Handle Volunteer Selection for Attendance
+  const handleAttVolunteerSelect = (volName: string) => {
+    const matched = masterVolunteers.find(v => v.name === volName);
+    setAttFormData(prev => {
+      const nextDivision = (matched?.division as VolunteerAttendance['division']) || prev.division;
+      const defaultShift: VolunteerAttendance['shift'] =
+        nextDivision === 'Cuci Ompreng' || nextDivision === 'Kebersihan'
+          ? 'Siang (08:00 - 13:00)'
+          : 'Pagi (03:30 - 08:30)';
+      return {
+        ...prev,
+        volunteerName: volName,
+        volunteerId: matched?.id || `vol-${Date.now()}`,
+        division: nextDivision,
+        shift: selectedAtt ? prev.shift : defaultShift,
+      };
+    });
   };
 
   // Submit Absence Request
@@ -149,17 +228,22 @@ export const VolunteersModule: React.FC = () => {
     setIsAbsenceModalOpen(false);
     setIsModalAbsenceSchemaEdit(false);
 
-    // Reset form
+    // Reset form using Master Relawan
+    const resetPrimary = activeMasterVolunteers[0] || masterVolunteers[0];
+    const resetRep =
+      activeMasterVolunteers.find(v => v.id !== resetPrimary?.id) ||
+      masterVolunteers.find(v => v.id !== resetPrimary?.id) ||
+      resetPrimary;
     setAbsenceFormData({
       date: new Date().toISOString().slice(0, 10),
-      volunteerId: 'vol-01',
-      volunteerName: 'Dewi Sartika',
-      division: 'Persiapan',
+      volunteerId: resetPrimary?.id || '',
+      volunteerName: resetPrimary?.name || '',
+      division: resetPrimary?.division || 'Persiapan',
       reason: 'Sakit',
       reasonDetails: '',
-      replacementVolunteerId: 'vol-cad-1',
-      replacementVolunteerName: 'Bu Anisa',
-      replacementDivision: 'Persiapan',
+      replacementVolunteerId: resetRep?.id || '',
+      replacementVolunteerName: resetRep?.name || '',
+      replacementDivision: resetRep?.division || 'Persiapan',
       approvalStatus: 'Menunggu Persetujuan',
       notes: 'Mohon izin tidak hadir dan telah konfirmasi pengganti shift.',
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
@@ -346,17 +430,26 @@ export const VolunteersModule: React.FC = () => {
     {
       key: 'volunteerName',
       header: 'Relawan Tidak Hadir',
-      render: (abs: VolunteerAbsenceRecord) => (
-        <div>
-          <div className="font-bold text-xs text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
-            <UserX className="w-3.5 h-3.5 shrink-0" />
-            <span>{abs.volunteerName}</span>
+      render: (abs: VolunteerAbsenceRecord) => {
+        const master = findMasterVolunteer(abs.volunteerId, abs.volunteerName);
+        return (
+          <div>
+            <div className="font-bold text-xs text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+              <UserX className="w-3.5 h-3.5 shrink-0" />
+              <span>{abs.volunteerName}</span>
+              {master?.code && (
+                <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  {master.code}
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              Divisi: <span className="font-semibold text-slate-700 dark:text-slate-300">{abs.division}</span>
+              {master?.position && <span className="text-slate-400"> • {master.position}</span>}
+            </div>
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5">
-            Divisi: <span className="font-semibold text-slate-700 dark:text-slate-300">{abs.division}</span>
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'reason',
@@ -377,17 +470,26 @@ export const VolunteersModule: React.FC = () => {
     {
       key: 'replacement',
       header: 'Relawan Pengganti (Shift)',
-      render: (abs: VolunteerAbsenceRecord) => (
-        <div className="bg-emerald-50 dark:bg-emerald-950/30 p-2 rounded-lg border border-emerald-100 dark:border-emerald-800/40 text-xs">
-          <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-            <UserCheck className="w-3.5 h-3.5" />
-            {abs.replacementVolunteerName}
+      render: (abs: VolunteerAbsenceRecord) => {
+        const repMaster = findMasterVolunteer(abs.replacementVolunteerId, abs.replacementVolunteerName);
+        return (
+          <div className="bg-emerald-50 dark:bg-emerald-950/30 p-2 rounded-lg border border-emerald-100 dark:border-emerald-800/40 text-xs">
+            <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+              <UserCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>{abs.replacementVolunteerName}</span>
+              {repMaster?.code && (
+                <span className="px-1 py-0.5 text-[9px] font-mono rounded bg-white/80 dark:bg-slate-900 text-emerald-700 dark:text-emerald-300">
+                  {repMaster.code}
+                </span>
+              )}
+            </div>
+            <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+              Divisi Pengganti: <span className="font-medium">{abs.replacementDivision}</span>
+              {repMaster?.position && <span> • {repMaster.position}</span>}
+            </div>
           </div>
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-            Divisi Pengganti: <span className="font-medium">{abs.replacementDivision}</span>
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'status',
@@ -472,18 +574,36 @@ export const VolunteersModule: React.FC = () => {
   // Attendance Columns
   const attendanceColumns: Column<VolunteerAttendance>[] = [
     {
-      key: 'volunteerName',
-      header: 'Nama Relawan & ID',
+      key: 'date',
+      header: 'Tanggal',
       render: (row: VolunteerAttendance) => (
-        <div>
-          <div className="font-bold text-slate-900 dark:text-white text-xs">
-            {row.volunteerName}
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono">
-            ID: {row.volunteerId}
-          </div>
+        <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-1">
+          <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
+          <span>{formatIndonesianDate(row.date)}</span>
         </div>
       ),
+    },
+    {
+      key: 'volunteerName',
+      header: 'Nama Relawan (Master)',
+      render: (row: VolunteerAttendance) => {
+        const master = findMasterVolunteer(row.volunteerId, row.volunteerName);
+        return (
+          <div>
+            <div className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+              <span>{row.volunteerName}</span>
+              {master?.code && (
+                <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  {master.code}
+                </span>
+              )}
+            </div>
+            <div className="text-[10px] text-slate-500">
+              {master ? `${master.position} • ${master.isActive ? 'Aktif' : 'Nonaktif'}` : `ID: ${row.volunteerId}`}
+            </div>
+          </div>
+        );
+      },
     },
     {
       key: 'division',
@@ -521,7 +641,7 @@ export const VolunteersModule: React.FC = () => {
       header: 'Cek Higiene & APD',
       render: (row: VolunteerAttendance) => (
         <div className="text-xs space-y-0.5">
-          <div className="flex items-center gap-1 font-semibold text-emerald-600">
+          <div className={`flex items-center gap-1 font-semibold ${row.healthCheckPassed ? 'text-emerald-600' : 'text-rose-600'}`}>
             <HeartPulse className="w-3.5 h-3.5" />
             <span>{row.healthCheckPassed ? 'Sehat (Bebas Flu)' : 'Tidak Sehat'}</span>
           </div>
@@ -552,6 +672,38 @@ export const VolunteersModule: React.FC = () => {
       dynamicFormSchemas.volunteer_attendance_form,
       (url, label) => setPreviewCustomPhoto({ url, label })
     ),
+    {
+      key: 'actions',
+      header: 'Aksi',
+      render: (row: VolunteerAttendance) => (
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedAtt(row);
+            setAttFormData({
+              date: row.date,
+              volunteerId: row.volunteerId,
+              volunteerName: row.volunteerName,
+              division: row.division,
+              shift: row.shift,
+              status: row.status,
+              healthCheckPassed: row.healthCheckPassed,
+              hygieneGearComplete: row.hygieneGearComplete,
+              reason: row.reason || '',
+              replacementVolunteer: row.replacementVolunteer || '',
+              notes: row.notes || '',
+              customFields: row.customFields || {},
+            });
+            setIsModalAttSchemaEdit(false);
+            setIsAttendanceModalOpen(true);
+          }}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-sky-400 text-xs font-semibold transition-colors"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          <span>Edit</span>
+        </button>
+      ),
+    },
   ];
 
   return (
@@ -571,20 +723,40 @@ export const VolunteersModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <DynamicFormEditToggleBar
+            formId={builderVolFormId}
+            isEditing={isEditingVolSchema}
+            onToggleEdit={() => setIsEditingVolSchema(v => !v)}
+            extraSelector={
+              <select
+                value={builderVolFormId}
+                onChange={e => setBuilderVolFormId(e.target.value as DynamicFormId)}
+                className="px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
+              >
+                <option value="volunteer_absence_form">Form Ketidakhadiran Relawan</option>
+                <option value="volunteer_attendance_form">Form Presensi Harian Relawan</option>
+              </select>
+            }
+          />
           <button
             type="button"
             onClick={() => {
+              const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
+              const repVol =
+                activeMasterVolunteers.find(v => v.id !== firstVol?.id) ||
+                masterVolunteers.find(v => v.id !== firstVol?.id) ||
+                firstVol;
               setAbsenceFormData({
                 date: new Date().toISOString().slice(0, 10),
-                volunteerId: masterVolunteers[0]?.id || 'vol-01',
-                volunteerName: masterVolunteers[0]?.name || 'Dewi Sartika',
-                division: masterVolunteers[0]?.division || 'Persiapan',
+                volunteerId: firstVol?.id || '',
+                volunteerName: firstVol?.name || '',
+                division: firstVol?.division || 'Persiapan',
                 reason: 'Sakit',
                 reasonDetails: '',
-                replacementVolunteerId: 'vol-cad-1',
-                replacementVolunteerName: 'Bu Anisa',
-                replacementDivision: masterVolunteers[0]?.division || 'Persiapan',
+                replacementVolunteerId: repVol?.id || '',
+                replacementVolunteerName: repVol?.name || '',
+                replacementDivision: repVol?.division || 'Persiapan',
                 approvalStatus: 'Menunggu Persetujuan',
                 notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
                 customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
@@ -600,13 +772,18 @@ export const VolunteersModule: React.FC = () => {
           <button
             type="button"
             onClick={() => {
+              const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
+              const div = (firstVol?.division as VolunteerAttendance['division']) || 'Persiapan';
               setSelectedAtt(null);
               setAttFormData({
                 date: new Date().toISOString().slice(0, 10),
-                volunteerId: `vol-${Math.floor(Math.random() * 80) + 20}`,
-                volunteerName: '',
-                division: 'Persiapan',
-                shift: 'Pagi (03:30 - 08:30)',
+                volunteerId: firstVol?.id || '',
+                volunteerName: firstVol?.name || '',
+                division: div,
+                shift:
+                  div === 'Cuci Ompreng' || div === 'Kebersihan'
+                    ? 'Siang (08:00 - 13:00)'
+                    : 'Pagi (03:30 - 08:30)',
                 status: 'Hadir',
                 healthCheckPassed: true,
                 hygieneGearComplete: true,
@@ -626,22 +803,6 @@ export const VolunteersModule: React.FC = () => {
         </div>
       </div>
 
-      {/* Dynamic Form Customizer Toggle & Builder Panel (Admin/Superuser only) */}
-      <DynamicFormEditToggleBar
-        formId={builderVolFormId}
-        isEditing={isEditingVolSchema}
-        onToggleEdit={() => setIsEditingVolSchema(v => !v)}
-        extraSelector={
-          <select
-            value={builderVolFormId}
-            onChange={e => setBuilderVolFormId(e.target.value as DynamicFormId)}
-            className="px-2.5 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
-          >
-            <option value="volunteer_absence_form">Form Ketidakhadiran Relawan</option>
-            <option value="volunteer_attendance_form">Form Presensi Harian Relawan</option>
-          </select>
-        }
-      />
       {isEditingVolSchema && (
         <DynamicFormBuilderPanel
           formId={builderVolFormId}
@@ -873,19 +1034,51 @@ export const VolunteersModule: React.FC = () => {
       {/* TAB 2: PRESENSI HARIAN & SANITASI DAPUR */}
       {/* ========================================================================= */}
       {activeTab === 'attendance' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-          <DataTable
-            title="Log Presensi Harian & Sanitasi Higiene Relawan"
-            subtitle="Pemeriksaan kesehatan harian bebas gejala influenza dan verifikasi kelengkapan APD"
-            columns={attendanceColumns as any}
-            data={volunteerAttendance as any}
-            keyExtractor={(item: any) => item.id}
-            searchPlaceholder="Cari nama relawan atau divisi..."
-            searchKeys={['volunteerName', 'division', 'status', 'notes']}
-            onExportPDF={handleExportAttendancePDF}
-            onExportExcel={handleExportAttendanceExcel}
-            onPrint={triggerPrint}
-          />
+        <div className="space-y-4">
+          <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/70 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 text-xs text-blue-900 dark:text-blue-200">
+              <RefreshCw className="w-4 h-4 text-blue-600 dark:text-sky-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold">
+                  Terhubung dengan Master Data Relawan ({activeMasterVolunteers.length} Relawan Aktif)
+                </div>
+                <div className="text-[11px] text-blue-700 dark:text-sky-300 mt-0.5">
+                  Tarik daftar relawan aktif dari Master Relawan ke log presensi harian sekaligus menerapkan data ketidakhadiran yang telah disetujui dan meneruskannya ke modul Insentif Relawan.
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <input
+                type="date"
+                value={syncDate}
+                onChange={e => setSyncDate(e.target.value)}
+                className="px-3 py-2 text-xs rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-semibold"
+              />
+              <button
+                type="button"
+                onClick={() => syncVolunteerAttendanceFromMaster(syncDate)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Sinkron Presensi dari Master Relawan
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <DataTable
+              title="Log Presensi Harian & Sanitasi Higiene Relawan"
+              subtitle="Terhubung langsung dengan Master Data Relawan & otomatis masuk ke perhitungan Insentif Relawan"
+              columns={attendanceColumns as any}
+              data={volunteerAttendance as any}
+              keyExtractor={(item: any) => item.id}
+              searchPlaceholder="Cari nama relawan atau divisi..."
+              searchKeys={['volunteerName', 'division', 'status', 'notes']}
+              onExportPDF={handleExportAttendancePDF}
+              onExportExcel={handleExportAttendanceExcel}
+              onPrint={triggerPrint}
+            />
+          </div>
         </div>
       )}
 
@@ -894,32 +1087,68 @@ export const VolunteersModule: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'directory' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {masterVolunteers.map(vol => (
-            <div
-              key={vol.id}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm flex items-start gap-3"
-            >
-              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 flex items-center justify-center font-bold text-sm shrink-0">
-                {vol.name.charAt(0)}
+          {masterVolunteers.map(vol => {
+            const attCount = volunteerAttendance.filter(
+              a => a.volunteerId === vol.id || a.volunteerName.toLowerCase() === vol.name.toLowerCase()
+            ).length;
+            const presentCount = volunteerAttendance.filter(
+              a =>
+                (a.volunteerId === vol.id || a.volunteerName.toLowerCase() === vol.name.toLowerCase()) &&
+                a.status === 'Hadir'
+            ).length;
+            const absenceCount = volunteerAbsences.filter(
+              ab => ab.volunteerId === vol.id || ab.volunteerName.toLowerCase() === vol.name.toLowerCase()
+            ).length;
+            const replacementCount = volunteerAbsences.filter(
+              ab =>
+                ab.approvalStatus === 'Disetujui' &&
+                (ab.replacementVolunteerId === vol.id ||
+                  ab.replacementVolunteerName.toLowerCase() === vol.name.toLowerCase())
+            ).length;
+
+            return (
+              <div
+                key={vol.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm flex items-start gap-3"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 flex items-center justify-center font-bold text-sm shrink-0">
+                  {vol.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                        {vol.name}
+                      </h4>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {vol.code || vol.id}
+                      </span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${vol.isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-200 text-slate-700'}`}>
+                      {vol.isActive ? 'Aktif' : 'Nonaktif'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-semibold text-blue-700 dark:text-sky-400 mt-0.5">
+                    Divisi {vol.division} • {vol.position}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    Kontak: {vol.phone || '-'}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                    <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 font-semibold">
+                      Hadir: {presentCount}/{attCount}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 font-semibold">
+                      Izin/Sakit: {absenceCount}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 font-semibold">
+                      Pengganti: {replacementCount}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-sm text-slate-900 dark:text-white truncate">
-                    {vol.name}
-                  </h4>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${vol.isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-200 text-slate-700'}`}>
-                    {vol.isActive ? 'Aktif' : 'Nonaktif'}
-                  </span>
-                </div>
-                <div className="text-xs font-semibold text-blue-700 dark:text-sky-400 mt-0.5">
-                  Divisi {vol.division} • {vol.position}
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Kontak: {vol.phone || '-'}
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -964,15 +1193,23 @@ export const VolunteersModule: React.FC = () => {
                 ...(absenceFormData.customFields || {}),
               }}
               dynamicOptions={{
-                volunteerName: masterVolunteers.map(v => ({
+                volunteerName: activeMasterVolunteers.map(v => ({
                   value: v.name,
-                  label: `${v.name} (Divisi ${v.division})`,
+                  label: `${v.name}${v.code ? ` [${v.code}]` : ''} — Divisi ${v.division} (${v.position})`,
                 })),
+                replacementVolunteerName: activeMasterVolunteers
+                  .filter(v => v.name !== absenceFormData.volunteerName)
+                  .map(v => ({
+                    value: v.name,
+                    label: `${v.name}${v.code ? ` [${v.code}]` : ''} — Divisi ${v.division} (${v.position})`,
+                  })),
               }}
               onChange={(key, value, field) => {
                 if (field.isSystem) {
                   if (key === 'volunteerName') {
                     handleVolunteerSelect(String(value));
+                  } else if (key === 'replacementVolunteerName') {
+                    handleReplacementSelect(String(value));
                   } else {
                     setAbsenceFormData(prev => ({ ...prev, [key]: value }));
                   }
@@ -1062,8 +1299,9 @@ export const VolunteersModule: React.FC = () => {
         onClose={() => {
           setIsAttendanceModalOpen(false);
           setIsModalAttSchemaEdit(false);
+          setSelectedAtt(null);
         }}
-        title="Catat Presensi Harian Relawan"
+        title={selectedAtt ? `Edit Presensi Harian: ${selectedAtt.volunteerName}` : 'Catat Presensi Harian Relawan'}
         maxWidth="2xl"
       >
         <div className="space-y-4">
@@ -1087,9 +1325,19 @@ export const VolunteersModule: React.FC = () => {
                 ...attFormData,
                 ...(attFormData.customFields || {}),
               }}
+              dynamicOptions={{
+                volunteerName: activeMasterVolunteers.map(v => ({
+                  value: v.name,
+                  label: `${v.name}${v.code ? ` [${v.code}]` : ''} — Divisi ${v.division} (${v.position})`,
+                })),
+              }}
               onChange={(key, value, field) => {
                 if (field.isSystem) {
-                  setAttFormData(prev => ({ ...prev, [key]: value }));
+                  if (key === 'volunteerName') {
+                    handleAttVolunteerSelect(String(value));
+                  } else {
+                    setAttFormData(prev => ({ ...prev, [key]: value }));
+                  }
                 } else {
                   setAttFormData(prev => ({
                     ...prev,
@@ -1104,7 +1352,10 @@ export const VolunteersModule: React.FC = () => {
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setIsAttendanceModalOpen(false)}
+                onClick={() => {
+                  setIsAttendanceModalOpen(false);
+                  setSelectedAtt(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Batal
@@ -1113,7 +1364,7 @@ export const VolunteersModule: React.FC = () => {
                 type="submit"
                 className="px-5 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-md font-bold"
               >
-                Simpan Presensi
+                {selectedAtt ? 'Simpan Perubahan Presensi' : 'Simpan Presensi'}
               </button>
             </div>
           </form>

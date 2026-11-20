@@ -16,7 +16,9 @@ export type CookingFoodCategoryKey =
   | 'animalProtein'
   | 'plantProtein'
   | 'vegetable'
-  | 'fruit';
+  | 'fruit'
+  | 'milkOrExtra'
+  | 'custom';
 
 export interface CookingSessionReading {
   tempNum?: number;
@@ -63,6 +65,8 @@ const DEFAULT_EQUIPMENTS: Record<CookingFoodCategoryKey, string> = {
   plantProtein: 'Wajan Penggorengan A2',
   vegetable: 'Kettle Sup Uap 200L',
   fruit: 'Meja Steril Buah & Pelengkap',
+  milkOrExtra: 'Meja Steril Pelengkap & Pendamping',
+  custom: 'Peralatan Dapur Standar',
 };
 
 const CATEGORY_DEFINITIONS: Array<{
@@ -112,7 +116,7 @@ const CATEGORY_DEFINITIONS: Array<{
 ];
 
 function formatCommaDecimal(val?: number): string {
-  if (typeof val !== 'number' || Number.isNaN(val)) return '-';
+  if (typeof val !== 'number' || !Number.isFinite(val)) return '-';
   return val.toFixed(1).replace('.', ',');
 }
 
@@ -165,6 +169,10 @@ function getMenuNameByCategory(menu: MenuItem | undefined, key: CookingFoodCateg
       return menu.vegetable || '-';
     case 'fruit':
       return menu.fruit || menu.milkOrExtra || '-';
+    case 'milkOrExtra':
+      return menu.milkOrExtra || '-';
+    default:
+      return '-';
   }
 }
 
@@ -235,10 +243,49 @@ export function resolveCookingFoodTempData(
     if (filtered.length > 0) sortedDates = filtered;
   }
 
+  const resolveSlotFromRecord = (
+    rec: CookingInspectionRecord | undefined,
+    catKey: CookingFoodCategoryKey
+  ): (CookedFoodItem & { itemName?: string }) | undefined => {
+    if (!rec) return undefined;
+    const entryKey = catKey === 'rice' ? 'stapleFood' : catKey;
+    const itemEntry = rec.itemEntries?.find(e => e.categoryKey === entryKey);
+    const legacyFood =
+      catKey === 'rice' ||
+      catKey === 'animalProtein' ||
+      catKey === 'plantProtein' ||
+      catKey === 'vegetable' ||
+      catKey === 'fruit'
+        ? rec.cookedFoods?.[catKey]
+        : undefined;
+    if (!itemEntry && !legacyFood) return undefined;
+    return {
+      itemName: itemEntry?.itemName,
+      temp:
+        typeof itemEntry?.temp === 'number' && Number.isFinite(itemEntry.temp)
+          ? itemEntry.temp
+          : typeof legacyFood?.temp === 'number' && Number.isFinite(legacyFood.temp)
+          ? legacyFood.temp
+          : Number.NaN,
+      photoUrl: itemEntry?.photoUrl || legacyFood?.photoUrl,
+      equipment: itemEntry?.equipment || legacyFood?.equipment,
+      session2Temp:
+        typeof itemEntry?.session2Temp === 'number' && Number.isFinite(itemEntry.session2Temp)
+          ? itemEntry.session2Temp
+          : legacyFood?.session2Temp,
+      session2PhotoUrl: itemEntry?.session2PhotoUrl || legacyFood?.session2PhotoUrl,
+      session3Temp:
+        typeof itemEntry?.session3Temp === 'number' && Number.isFinite(itemEntry.session3Temp)
+          ? itemEntry.session3Temp
+          : legacyFood?.session3Temp,
+      session3PhotoUrl: itemEntry?.session3PhotoUrl || legacyFood?.session3PhotoUrl,
+      notes: itemEntry?.notes || legacyFood?.notes,
+    };
+  };
+
   const groups: CookingFoodDateGroup[] = sortedDates.map(isoDate => {
-    const dayRecords = [...(recordsByDate.get(isoDate) || [])].sort((a, b) =>
-      (a.time || '').localeCompare(b.time || '')
-    );
+    // Pertahankan urutan newest-first dari store agar log terbaru/hasil edit tidak tertimpa data lama di tanggal sama
+    const dayRecords = recordsByDate.get(isoDate) || [];
     const primaryRec = dayRecords[0];
     const secondRec = dayRecords[1];
     const thirdRec = dayRecords[2];
@@ -252,22 +299,23 @@ export function resolveCookingFoodTempData(
       menuItems.find(m => m.dayName.toLowerCase() === dayName.toLowerCase()) ||
       menuItems[0];
 
-    const items: CookingFoodCategoryRow[] = CATEGORY_DEFINITIONS.map((catDef, idx) => {
-      const f1: CookedFoodItem | undefined = primaryRec?.cookedFoods?.[catDef.key];
-      const f2: CookedFoodItem | undefined = secondRec?.cookedFoods?.[catDef.key];
-      const f3: CookedFoodItem | undefined = thirdRec?.cookedFoods?.[catDef.key];
+    const coreItems: CookingFoodCategoryRow[] = CATEGORY_DEFINITIONS.map((catDef, idx) => {
+      const f1 = resolveSlotFromRecord(primaryRec, catDef.key);
+      const f2 = resolveSlotFromRecord(secondRec, catDef.key);
+      const f3 = resolveSlotFromRecord(thirdRec, catDef.key);
 
-      const s1Temp = typeof f1?.temp === 'number' && f1.temp > 0 ? f1.temp : undefined;
+      const s1Temp =
+        typeof f1?.temp === 'number' && Number.isFinite(f1.temp) ? f1.temp : undefined;
       const s2Temp =
-        typeof f1?.session2Temp === 'number' && f1.session2Temp > 0
+        typeof f1?.session2Temp === 'number' && Number.isFinite(f1.session2Temp)
           ? f1.session2Temp
-          : typeof f2?.temp === 'number' && f2.temp > 0
+          : typeof f2?.temp === 'number' && Number.isFinite(f2.temp)
           ? f2.temp
           : undefined;
       const s3Temp =
-        typeof f1?.session3Temp === 'number' && f1.session3Temp > 0
+        typeof f1?.session3Temp === 'number' && Number.isFinite(f1.session3Temp)
           ? f1.session3Temp
-          : typeof f3?.temp === 'number' && f3.temp > 0
+          : typeof f3?.temp === 'number' && Number.isFinite(f3.temp)
           ? f3.temp
           : undefined;
 
@@ -276,7 +324,7 @@ export function resolveCookingFoodTempData(
       const s3Photo = f1?.session3PhotoUrl || f3?.photoUrl;
 
       const tempsToCheck = [s1Temp, s2Temp, s3Temp].filter(
-        (v): v is number => typeof v === 'number'
+        (v): v is number => typeof v === 'number' && Number.isFinite(v)
       );
 
       let statusCCP = '-';
@@ -293,11 +341,14 @@ export function resolveCookingFoodTempData(
       }
 
       const peralatanMasak = f1?.equipment?.trim() || DEFAULT_EQUIPMENTS[catDef.key];
+      const resolvedMenuName = getMenuNameByCategory(matchedMenu, catDef.key);
+      const namaMenu =
+        resolvedMenuName !== '-' ? resolvedMenuName : f1?.itemName || '-';
 
       return {
         categoryKey: catDef.key,
         jenisBahan: catDef.jenisBahan,
-        namaMenu: getMenuNameByCategory(matchedMenu, catDef.key),
+        namaMenu,
         peralatanMasak,
         batasKritis: catDef.batasKritis,
         sesi1: {
@@ -324,6 +375,72 @@ export function resolveCookingFoodTempData(
         ),
       };
     });
+
+    // Sertakan juga item tambahan (mis. milkOrExtra / custom dari itemEntries Divisi Pengolahan)
+    const extraEntries = (primaryRec?.itemEntries || []).filter(
+      e => e.categoryKey === 'milkOrExtra' || e.categoryKey === 'custom'
+    );
+    const extraItems: CookingFoodCategoryRow[] = extraEntries.map((entry, extraIdx) => {
+      const extraCategoryKey: 'milkOrExtra' | 'custom' =
+        entry.categoryKey === 'milkOrExtra' ? 'milkOrExtra' : 'custom';
+      const s1Temp =
+        typeof entry.temp === 'number' && Number.isFinite(entry.temp) ? entry.temp : undefined;
+      const s2Temp =
+        typeof entry.session2Temp === 'number' && Number.isFinite(entry.session2Temp)
+          ? entry.session2Temp
+          : undefined;
+      const s3Temp =
+        typeof entry.session3Temp === 'number' && Number.isFinite(entry.session3Temp)
+          ? entry.session3Temp
+          : undefined;
+      const isColdOrExtra = extraCategoryKey === 'milkOrExtra';
+      const tempsToCheck = [s1Temp, s2Temp, s3Temp].filter(
+        (v): v is number => typeof v === 'number' && Number.isFinite(v)
+      );
+      let statusCCP = '-';
+      let ccpPassed = true;
+      if (tempsToCheck.length > 0) {
+        if (isColdOrExtra) {
+          statusCCP = 'Segar / Aman';
+          ccpPassed = true;
+        } else {
+          const allAboveMin = tempsToCheck.every(t => t >= 75);
+          statusCCP = allAboveMin ? 'Lolos CCP (Aman)' : 'Perlu Tindakan (<75°C)';
+          ccpPassed = allAboveMin;
+        }
+      }
+      return {
+        categoryKey: extraCategoryKey,
+        jenisBahan: (entry.categoryLabel || 'pelengkap').toLowerCase(),
+        namaMenu: entry.itemName || '-',
+        peralatanMasak: entry.equipment?.trim() || DEFAULT_EQUIPMENTS[extraCategoryKey],
+        batasKritis: isColdOrExtra ? '≥ 75°C / Segar' : '≥ 75°C',
+        sesi1: {
+          tempNum: s1Temp,
+          tempDisplay: formatCommaDecimal(s1Temp),
+          photoUrl: entry.photoUrl,
+        },
+        sesi2: {
+          tempNum: s2Temp,
+          tempDisplay: formatCommaDecimal(s2Temp),
+          photoUrl: entry.session2PhotoUrl,
+        },
+        sesi3: {
+          tempNum: s3Temp,
+          tempDisplay: formatCommaDecimal(s3Temp),
+          photoUrl: entry.session3PhotoUrl,
+        },
+        statusCCP,
+        ccpPassed,
+        penanggungJawab: resolvePicForCategory(
+          primaryRec?.officerName || '',
+          activePengolahanVolunteers,
+          coreItems.length + extraIdx
+        ),
+      };
+    });
+
+    const items = [...coreItems, ...extraItems];
 
     return {
       isoDate,
