@@ -184,7 +184,7 @@ const MainContent: React.FC<MainContentProps> = ({ activeModule, navigateToModul
   };
 
   return (
-    <div className="min-h-screen bg-[#F3F7FC] dark:bg-slate-950 flex flex-col antialiased selection:bg-blue-600 selection:text-white transition-colors duration-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col antialiased selection:bg-[#1E3A8A] selection:text-white transition-colors duration-200">
       <div className="flex flex-1 min-h-0">
         {/* Left Sidebar */}
         <Sidebar

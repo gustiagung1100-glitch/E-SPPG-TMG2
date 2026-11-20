@@ -545,91 +545,98 @@ export const SettingsModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Compact Header */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Settings className="w-6 h-6 text-blue-900 dark:text-sky-400" />
-            Pengaturan Sistem, Database & Hak Akses
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <Settings className="w-5 h-5 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
+            Pengaturan Sistem, Database &amp; Hak Akses
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Arsitektur 39 Koleksi Terhubung, Firebase Security Rules, Multi-Tenant SPPG, Audit Log & Otorisasi RBAC
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+            Arsitektur 39 Koleksi Terhubung, Firebase Security Rules, Multi-Tenant SPPG, Audit Log &amp; Otorisasi RBAC
           </p>
         </div>
 
         {/* Status Badge */}
-        <div className="flex items-center gap-2">
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1.5 border border-emerald-200">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-teal-50 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300 flex items-center gap-1.5 border border-teal-200">
+            <span className="w-2 h-2 rounded-full bg-[#0D9488]" />
             <span>Firestore 39 Koleksi Aktif</span>
           </span>
-          <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-sky-300 border border-blue-200">
+          <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-blue-50 text-[#1E3A8A] dark:bg-blue-950 dark:text-sky-300 border border-blue-200">
             SPPG: {CURRENT_SPPG_ID}
           </span>
         </div>
       </div>
 
-      {/* Settings Navigation Tabs */}
-      <div className="flex flex-wrap border-b border-slate-200 dark:border-slate-800 gap-4 sm:gap-6 text-xs font-bold">
-        <button
-          onClick={() => setActiveTab('profil')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
-            activeTab === 'profil'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Building className="w-4 h-4" />
-          <span>Identitas SPPG & Profil</span>
-        </button>
+      {/* Settings Responsive Pill Tabs */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setActiveTab('profil')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'profil'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Building className="w-4 h-4 shrink-0" />
+            <span>Identitas SPPG &amp; Profil</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('access')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
-            activeTab === 'access'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <KeyRound className="w-4 h-4" />
-          <span>Akses Login Web ({webAccessUsers.filter(u => u.isActive).length})</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('access')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'access'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <KeyRound className="w-4 h-4 shrink-0" />
+            <span>Akses Login Web ({webAccessUsers.filter(u => u.isActive).length})</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('rbac')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
-            activeTab === 'rbac'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Shield className="w-4 h-4" />
-          <span>Matriks Hak Akses & Modul (13 Peran)</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('rbac')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'rbac'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Shield className="w-4 h-4 shrink-0" />
+            <span>Matriks Hak Akses &amp; Modul (13 Peran)</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('database')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
-            activeTab === 'database'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Database className="w-4 h-4" />
-          <span>Database & Backup (39 Koleksi)</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('database')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'database'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Database className="w-4 h-4 shrink-0" />
+            <span>Database &amp; Backup (39 Koleksi)</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`pb-3 flex items-center gap-2 transition border-b-2 ${
-            activeTab === 'audit'
-              ? 'border-blue-900 dark:border-sky-500 text-blue-900 dark:text-sky-400'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          <span>Audit Log Sistem ({auditLogs.length})</span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('audit')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'audit'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <History className="w-4 h-4 shrink-0" />
+            <span>Audit Log Sistem ({auditLogs.length})</span>
+          </button>
+        </div>
       </div>
 
       {/* Tab 1: Organization Profile Form */}

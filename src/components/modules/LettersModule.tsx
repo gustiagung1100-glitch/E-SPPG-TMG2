@@ -1032,14 +1032,14 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
         </div>
       </div>
 
-      {/* Main Pill Tab Navigation */}
-      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max">
+      {/* Main Responsive Pill Tab Navigation */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setActiveTab('outgoing')}
-            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+            className={`min-h-[38px] inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ease-in-out cursor-pointer ${
               activeTab === 'outgoing'
-                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
             }`}
           >
@@ -1047,8 +1047,8 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             <span>14. Administrasi Dokumen & Surat Keluar</span>
             <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
               activeTab === 'outgoing'
-                ? 'bg-white/25 text-white'
-                : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+                ? 'bg-white/20 text-white'
+                : 'bg-blue-50 text-[#1E3A8A] border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
             }`}>
               {outgoingDocuments.length}
             </span>
@@ -1056,9 +1056,9 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
           <button
             onClick={() => setActiveTab('incoming')}
-            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+            className={`min-h-[38px] inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ease-in-out cursor-pointer ${
               activeTab === 'incoming'
-                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
             }`}
           >
@@ -1066,7 +1066,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             <span>15. Buku Register Surat Masuk & Disposisi</span>
             <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
               activeTab === 'incoming'
-                ? 'bg-white/25 text-white'
+                ? 'bg-white/20 text-white'
                 : 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 dark:bg-indigo-900/50 dark:text-indigo-300 dark:border-indigo-800'
             }`}>
               {incomingLetters.length}
@@ -1075,9 +1075,9 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
           <button
             onClick={() => setActiveTab('templates')}
-            className={`min-h-[40px] flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
+            className={`min-h-[38px] inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ease-in-out cursor-pointer ${
               activeTab === 'templates'
-                ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
             }`}
           >
@@ -1085,7 +1085,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             <span>Katalog Template Master</span>
             <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
               activeTab === 'templates'
-                ? 'bg-white/25 text-white'
+                ? 'bg-white/20 text-white'
                 : 'bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
             }`}>
               {officialDocumentTemplates.length}
@@ -1181,6 +1181,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
               onExportPDF={handleExportOutgoingPDF}
               onExportExcel={handleExportOutgoingExcel}
               onPrint={triggerPrint}
+              stickyFirstColumn
             />
           </div>
         </div>

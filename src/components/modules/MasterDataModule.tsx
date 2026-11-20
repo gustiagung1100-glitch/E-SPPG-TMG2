@@ -86,8 +86,8 @@ export const MasterDataModule: React.FC = () => {
   // Form State: Master Penerima
   const [formInst, setFormInst] = useState<Omit<Institution, 'id'>>({
     name: '',
-    institutionType: 'Sekolah Dasar (SD)',
-    level: 'SD',
+    institutionType: 'KB/PAUD',
+    level: 'KB/PAUD',
     address: 'Dusun Krajan, Kec. Krejengan',
     npsn: '',
     contactPerson: '',
@@ -189,8 +189,8 @@ export const MasterDataModule: React.FC = () => {
     if (type === 'penerima') {
       setFormInst({
         name: '',
-        institutionType: 'Sekolah Dasar (SD)',
-        level: 'SD',
+        institutionType: 'KB/PAUD',
+        level: 'KB/PAUD',
         address: 'Dusun Krajan, Desa Temenggungan, Kec. Krejengan',
         npsn: `2054${Math.floor(Math.random() * 800) + 100}`,
         contactPerson: '',
@@ -710,16 +710,16 @@ export const MasterDataModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Module Title & Primary CTA Aligned Left & Right */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Compact Module Header */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-200/70 dark:bg-sky-950/60 dark:text-sky-400 dark:border-sky-800/70 shrink-0">
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-blue-50 text-[#1E3A8A] border border-blue-200/70 dark:bg-sky-950/60 dark:text-sky-400 dark:border-sky-800/70 shrink-0">
               <Database className="w-5 h-5" />
             </span>
             <span>Modul Master Data Sistem E-SPPG</span>
           </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
             Data Induk Terpadu: Penerima Manfaat, Bahan Pangan, Supplier, Relawan & Satuan Konversi Dimensi
           </p>
         </div>
@@ -727,19 +727,19 @@ export const MasterDataModule: React.FC = () => {
         <button
           type="button"
           onClick={() => handleOpenAdd(activeTab as any)}
-          className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap shrink-0 cursor-pointer"
+          className="inline-flex items-center justify-center gap-2 min-h-[40px] px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>{activeTab === 'satuan' ? 'Tambah Master Satuan' : 'Tambah Data Master'}</span>
         </button>
       </div>
 
-      {/* Modern Pill Tabs Bar (Horizontal Scroll + Responsive No Clipping) */}
-      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/85 dark:border-slate-800 shadow-sm">
+      {/* Responsive Pill Tabs Bar */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div
           role="tablist"
           aria-label="Kategori Master Data"
-          className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar"
+          className="flex flex-wrap items-center gap-1.5"
         >
           {[
             {
@@ -781,10 +781,10 @@ export const MasterDataModule: React.FC = () => {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab.key)}
-                className={`inline-flex items-center gap-2 min-h-[40px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-2 min-h-[38px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 text-white shadow-xs dark:bg-sky-600'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-blue-50/80 dark:hover:bg-slate-800 dark:hover:text-white'
+                    ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'
                 }`}
               >
                 {tab.icon}
@@ -792,8 +792,8 @@ export const MasterDataModule: React.FC = () => {
                 <span
                   className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
                     isActive
-                      ? 'bg-white/25 text-white'
-                      : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-slate-800 dark:text-sky-300 dark:border-slate-700'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-blue-50 text-[#1E3A8A] border border-blue-200/80 dark:bg-slate-800 dark:text-sky-300 dark:border-slate-700'
                   }`}
                 >
                   {tab.count}
@@ -816,6 +816,7 @@ export const MasterDataModule: React.FC = () => {
           searchKeys={['name', 'institutionType', 'npsn', 'picName', 'accountNumber']}
           onExportExcel={() => exportToExcel(institutions, 'Master_Penerima_Manfaat_SPPG', 'Penerima')}
           onPrint={triggerPrint}
+          stickyFirstColumn
         />
       )}
 
@@ -831,6 +832,7 @@ export const MasterDataModule: React.FC = () => {
           searchKeys={['code', 'name', 'category']}
           onExportExcel={() => exportToExcel(masterBahan, 'Master_Bahan_Pangan_SPPG', 'Bahan Pangan')}
           onPrint={triggerPrint}
+          stickyFirstColumn
         />
       )}
 
@@ -846,6 +848,7 @@ export const MasterDataModule: React.FC = () => {
           searchKeys={['name', 'code', 'contactPerson', 'bankName', 'accountNumber']}
           onExportExcel={() => exportToExcel(masterSuppliers, 'Master_Supplier_SPPG', 'Supplier')}
           onPrint={triggerPrint}
+          stickyFirstColumn
         />
       )}
 
@@ -853,7 +856,7 @@ export const MasterDataModule: React.FC = () => {
       {activeTab === 'relawan' && (
         <DataTable
           title="Master Data Relawan Satuan Pelayanan"
-          subtitle="Daftar 28 relawan aktif per divisi kerja (Persiapan, Pengolahan, Pemorsian, Distribusi, Cuci Ompreng)"
+          subtitle="Daftar relawan aktif per divisi kerja (Persiapan, Pengolahan, Pemorsian, Distribusi, Cuci Ompreng, Kebersihan, Keamanan)"
           data={masterVolunteers}
           columns={volunteerColumns}
           keyExtractor={item => item.id}
@@ -861,6 +864,7 @@ export const MasterDataModule: React.FC = () => {
           searchKeys={['name', 'code', 'division', 'position', 'phone']}
           onExportExcel={() => exportToExcel(masterVolunteers, 'Master_Relawan_SPPG', 'Relawan')}
           onPrint={triggerPrint}
+          stickyFirstColumn
         />
       )}
 
@@ -1147,17 +1151,25 @@ export const MasterDataModule: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Jenis Lembaga *</label>
                   <select
                     value={formInst.institutionType}
-                    onChange={e => setFormInst({ ...formInst, institutionType: e.target.value as any })}
+                    onChange={e =>
+                      setFormInst({
+                        ...formInst,
+                        institutionType: e.target.value,
+                        level: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   >
-                    <option value="Sekolah Dasar (SD)">Sekolah Dasar (SD)</option>
-                    <option value="Madrasah Ibtidaiyah (MI)">Madrasah Ibtidaiyah (MI)</option>
-                    <option value="SMP">SMP</option>
+                    {!['KB/PAUD', 'TK', 'MI', 'MTs', 'MA', 'Posyandu'].includes(formInst.institutionType) &&
+                      formInst.institutionType && (
+                        <option value={formInst.institutionType}>{formInst.institutionType}</option>
+                      )}
+                    <option value="KB/PAUD">KB/PAUD</option>
+                    <option value="TK">TK</option>
+                    <option value="MI">MI</option>
                     <option value="MTs">MTs</option>
-                    <option value="SMA">SMA</option>
-                    <option value="SMK">SMK</option>
-                    <option value="PAUD/TK">PAUD/TK</option>
-                    <option value="Pondok Pesantren">Pondok Pesantren</option>
+                    <option value="MA">MA</option>
+                    <option value="Posyandu">Posyandu</option>
                   </select>
                 </div>
               </div>
@@ -1547,7 +1559,7 @@ export const MasterDataModule: React.FC = () => {
                     onChange={e => setFormVolunteer({ ...formVolunteer, division: e.target.value as any })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   >
-                    {['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan'].map(d => (
+                    {['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan', 'Keamanan'].map(d => (
                       <option key={d} value={d}>Divisi {d}</option>
                     ))}
                   </select>

@@ -131,11 +131,13 @@ export interface SPPGConfig {
 }
 
 // Master A: Master Penerima Manfaat & Lembaga
+export type InstitutionJenjangType = 'KB/PAUD' | 'TK' | 'MI' | 'MTs' | 'MA' | 'Posyandu';
+
 export interface Institution {
   id: string;
   name: string;
-  institutionType: 'Sekolah Dasar (SD)' | 'Madrasah Ibtidaiyah (MI)' | 'SMP' | 'MTs' | 'SMA' | 'SMK' | 'PAUD/TK' | 'Pondok Pesantren';
-  level: 'PAUD' | 'SD' | 'MI' | 'SMP' | 'MTs' | 'SMA' | 'SMK' | 'Pesantren';
+  institutionType: InstitutionJenjangType | string;
+  level: InstitutionJenjangType | string;
   address: string;
   npsn: string;
   contactPerson: string;
@@ -200,8 +202,8 @@ export interface MasterVolunteer {
   id: string;
   code: string;
   name: string;
-  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan';
-  position: 'Koordinator Divisi' | 'Wakil Koordinator' | 'Juru Masak / Cook' | 'Asisten Dapur' | 'Petugas Timbang & Packing' | 'Driver Armada' | 'Petugas Sanitasi';
+  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | 'Keamanan';
+  position: 'Koordinator Divisi' | 'Wakil Koordinator' | 'Juru Masak / Cook' | 'Asisten Dapur' | 'Petugas Timbang & Packing' | 'Driver Armada' | 'Petugas Sanitasi' | 'Petugas Keamanan';
   phone: string;
   address: string;
   idCardNumber?: string;
@@ -294,6 +296,59 @@ export interface BeneficiaryNutritionRecord {
   isOverweight: boolean;
   primaryStatus: 'Normal' | 'Stunting' | 'Underweight' | 'Wasting' | 'Gizi Lebih';
   severityLevel: 'Aman' | 'Sedang' | 'Berat' | 'Risiko Lebih';
+  recommendation: string;
+  notes?: string;
+  recordedBy: string;
+  updatedAt: string;
+}
+
+export type MaternalTrimester = 'Trimester I' | 'Trimester II' | 'Trimester III';
+export type MaternalBmiCategory = 'Kurus (Underweight)' | 'Normal (Ideal)' | 'Gemuk (Overweight)' | 'Obesitas';
+export type MaternalWeightGainStatus = 'Kenaikan Kurang' | 'Sesuai Target' | 'Kenaikan Berlebih';
+export type MaternalAnemiaStatus = 'Normal' | 'Anemia Ringan' | 'Anemia Sedang' | 'Anemia Berat';
+export type MaternalBpStatus = 'Normal' | 'Pra-Hipertensi / Waspada' | 'Hipertensi / Risiko Preeklamsia';
+export type MaternalRiskLevel = 'Normal / Risiko Rendah' | 'Risiko Sedang' | 'Risiko Tinggi';
+
+export interface MaternalHealthRecord {
+  id: string;
+  nik: string;
+  fullName: string;
+  ageYears: number;
+  phone?: string;
+  institutionId: string;
+  institutionName: string;
+  villageOrPosyandu: string;
+  gravida: number;
+  para: number;
+  abortus: number;
+  obstetricCode: string;
+  hphtDate?: string;
+  gestationalWeeks: number;
+  gestationalDaysRemainder: number;
+  dueDateHpl?: string;
+  trimester: MaternalTrimester;
+  prePregnancyWeightKg: number;
+  currentWeightKg: number;
+  heightCm: number;
+  prePregnancyBmi: number;
+  bmiCategory: MaternalBmiCategory;
+  weightGainKg: number;
+  targetWeightGainRange: string;
+  weightGainStatus: MaternalWeightGainStatus;
+  lilaCm: number;
+  isKek: boolean;
+  lilaCategory: string;
+  hemoglobinGdL: number;
+  anemiaStatus: MaternalAnemiaStatus;
+  systolicBp: number;
+  diastolicBp: number;
+  bpStatus: MaternalBpStatus;
+  recommendedKcal: number;
+  recommendedProteinG: number;
+  ttdCompliant: boolean;
+  measurementDate: string;
+  riskFlags: string[];
+  riskLevel: MaternalRiskLevel;
   recommendation: string;
   notes?: string;
   recordedBy: string;
@@ -740,7 +795,7 @@ export interface VolunteerAttendance {
   date: string;
   volunteerId: string;
   volunteerName: string;
-  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan';
+  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | 'Keamanan';
   shift: 'Pagi (03:30 - 08:30)' | 'Siang (08:00 - 13:00)';
   status: 'Hadir' | 'Izin' | 'Sakit' | 'Alpa';
   healthCheckPassed: boolean;
@@ -758,12 +813,12 @@ export interface VolunteerAbsenceRecord {
   date: string;
   volunteerId: string;
   volunteerName: string;
-  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | string;
+  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | 'Keamanan' | string;
   reason: 'Sakit' | 'Izin Keperluan Keluarga' | 'Tugas Belajar / Kuliah' | 'Kendala Transportasi / Cuaca' | 'Kedukaan' | 'Lainnya';
   reasonDetails?: string;
   replacementVolunteerId?: string;
   replacementVolunteerName: string;
-  replacementDivision: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | string;
+  replacementDivision: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | 'Keamanan' | string;
   approvalStatus: AbsenceApprovalStatus;
   approvedBy?: string;
   approvedAt?: string;
@@ -1213,11 +1268,18 @@ export interface DynamicFormSchema {
 export type PICIncentiveRateMode = 'per_porsi' | 'flat_harian';
 export type IncentivePayoutStatus = 'Menunggu Pencairan' | 'Disetujui' | 'Sudah Dibayarkan';
 
+export interface PICInstitutionTariffOverride {
+  rateMode: PICIncentiveRateMode;
+  unitRate: number;
+  minPortionThreshold?: number;
+}
+
 export interface PICIncentiveConfig {
   rateMode: PICIncentiveRateMode;
   ratePerPortion: number;
   flatDailyRate: number;
   minPortionThreshold: number;
+  institutionRates?: Record<string, PICInstitutionTariffOverride>;
   updatedAt: string;
   updatedBy: string;
 }
@@ -1249,6 +1311,8 @@ export interface PICIncentivePayout {
 export interface VolunteerIncentiveConfig {
   defaultDailyRate: number;
   divisionRates: Record<string, number>;
+  positionRates?: Record<string, number>;
+  divisionPositionRates?: Record<string, Record<string, number>>;
   updatedAt: string;
   updatedBy: string;
 }

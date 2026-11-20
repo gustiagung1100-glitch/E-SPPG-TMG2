@@ -1035,23 +1035,23 @@ export const ProcurementModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Header */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Compact Banner Header */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-900 text-white flex items-center justify-center shadow-md shadow-blue-950/20 font-black">
-            <ShoppingCart className="w-6 h-6 text-sky-400" />
+          <div className="w-10 h-10 rounded-xl bg-[#1E3A8A] text-white flex items-center justify-center shadow-sm shrink-0">
+            <ShoppingCart className="w-5 h-5 text-sky-300" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
+              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-50 text-[#1E3A8A] dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
                 MODUL PLOK
               </span>
-              <span className="text-xs text-slate-400 font-semibold">• Operasional MBG BGN</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400 font-semibold">• Operasional MBG BGN</span>
             </div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+            <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">
               Perencanaan dan Pelaporan Operasional (PLOK)
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
               Sistem Terintegrasi: Rencana Anggaran Belanja (RAB), Purchase Order (PO Terikat) & Quality Control (QC Stok)
             </p>
           </div>
@@ -1070,7 +1070,7 @@ export const ProcurementModule: React.FC = () => {
               <button
                 type="button"
                 onClick={() => syncAllMenuNeedsToRAB()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/70 text-[#0D9488] dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
                 title="Ambil & sinkronkan kebutuhan bahan otomatis dari Perencanaan Menu (PLOG) ke RAB Bahan Pangan"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -1079,7 +1079,7 @@ export const ProcurementModule: React.FC = () => {
               <button
                 type="button"
                 onClick={() => syncCriticalInventoryToRAB()}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/70 text-[#D97706] dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
                 title="Buat pengajuan RAB otomatis dari bahan Gudang yang berada di bawah stok minimum"
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
@@ -1088,7 +1088,7 @@ export const ProcurementModule: React.FC = () => {
               <button
                 type="button"
                 onClick={handleOpenCreateRAB}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
               >
                 <Plus className="w-4 h-4" />
                 <span>Buat RAB Baru</span>
@@ -1100,7 +1100,7 @@ export const ProcurementModule: React.FC = () => {
             <button
               type="button"
               onClick={handleOpenCreatePO}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
             >
               <Plus className="w-4 h-4" />
               <span>Terbitkan PO (Dari RAB)</span>
@@ -1111,7 +1111,7 @@ export const ProcurementModule: React.FC = () => {
             <button
               type="button"
               onClick={handleOpenDirectQCModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
             >
               <Plus className="w-4 h-4" />
               <span>Input QC dari Purchase Order</span>
@@ -1121,9 +1121,9 @@ export const ProcurementModule: React.FC = () => {
       </div>
 
       {/* Pipeline Rantai Pasok Terintegrasi */}
-      <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 dark:from-slate-900 dark:via-slate-900 dark:to-emerald-950/30 p-3.5 rounded-xl border border-sky-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-        <div className="flex items-center gap-1.5 font-black text-blue-950 dark:text-sky-300">
-          <Link2 className="w-4 h-4 text-sky-600 shrink-0" />
+      <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-teal-50 dark:from-slate-900 dark:via-slate-900 dark:to-teal-950/30 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div className="flex items-center gap-1.5 font-black text-[#1E3A8A] dark:text-sky-300">
+          <Link2 className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
           <span>Alur Data Terhubung Otomatis:</span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 font-bold">
@@ -1131,19 +1131,19 @@ export const ProcurementModule: React.FC = () => {
             1. Perencanaan Menu ({menuItems.length} Menu)
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-800 text-blue-900 dark:text-sky-300">
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-blue-200 dark:border-sky-800 text-[#1E3A8A] dark:text-sky-300">
             2. RAB ({rabList.length} Item)
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-800 text-indigo-800 dark:text-indigo-300">
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-300">
             3. Purchase Order ({purchaseOrders.length} PO)
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+          <span className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-teal-200 dark:border-teal-800 text-[#0D9488] dark:text-teal-300">
             4. Quality Control ({qcList.length} QC)
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-          <span className="px-2 py-1 rounded-lg bg-emerald-600 text-white">
+          <span className="px-2 py-1 rounded-lg bg-[#0D9488] text-white">
             5. Stok Gudang ({inventory.length} Komoditas)
           </span>
         </div>
@@ -1151,62 +1151,62 @@ export const ProcurementModule: React.FC = () => {
 
       {/* KPI Cards: High-level PLOK Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Total Anggaran RAB</span>
-            <Coins className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+            <Coins className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
           <div className="text-xl font-black text-slate-900 dark:text-white font-mono mt-1">
             {formatRupiah(rabSummary.totalAll)}
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
             Pangan: {formatRupiah(rabSummary.totalPangan)} • Ops: {formatRupiah(rabSummary.totalOperasional)}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>RAB Telah Disetujui</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <ShieldCheck className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="text-xl font-black text-emerald-600 font-mono mt-1">
+          <div className="text-xl font-black text-[#0D9488] font-mono mt-1">
             {formatRupiah(rabSummary.totalApproved)}
           </div>
-          <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#0D9488] font-semibold mt-0.5">
             Otorisasi Sah Kepala SPPG
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>PO Terbit & Teralokasi</span>
-            <ShoppingCart className="w-4 h-4 text-sky-600" />
+            <ShoppingCart className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
-          <div className="text-xl font-black text-sky-600 font-mono mt-1">
+          <div className="text-xl font-black text-[#1E3A8A] dark:text-sky-400 font-mono mt-1">
             {formatRupiah(rabSummary.totalPOAmountCreated)}
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
             Sisa Pagu RAB: {formatRupiah(rabSummary.remainingBudget)}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Inspeksi QC Masuk Gudang</span>
-            <PackageCheck className="w-4 h-4 text-indigo-600" />
+            <PackageCheck className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="text-xl font-black text-indigo-600 font-mono mt-1">
+          <div className="text-xl font-black text-[#1E3A8A] dark:text-sky-400 font-mono mt-1">
             {qcList.length} Batch QC
           </div>
-          <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#0D9488] font-semibold mt-0.5">
             Stok Terverifikasi Higienis
           </div>
         </div>
       </div>
 
-      {/* 3 Main PLOK Pill Tabs */}
-      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max text-xs sm:text-sm font-semibold">
+      {/* 3 Main PLOK Responsive Pill Tabs */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
           {[
             {
               key: 'rab' as SubModuleTab,
@@ -1233,9 +1233,9 @@ export const ProcurementModule: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`min-h-[40px] flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                className={`min-h-[38px] inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                    ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
                 }`}
               >
@@ -1243,8 +1243,8 @@ export const ProcurementModule: React.FC = () => {
                 <span>{tab.label}</span>
                 <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
                   isActive
-                    ? 'bg-white/25 text-white'
-                    : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-blue-50 text-[#1E3A8A] border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
                 }`}>
                   {tab.badge}
                 </span>
@@ -1332,6 +1332,7 @@ export const ProcurementModule: React.FC = () => {
             searchPlaceholder="Cari kode anggaran, barang, atau keterangan..."
             searchKeys={['budgetCode', 'itemName', 'category', 'notes', 'periodMonth']}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'budgetCode',
@@ -1591,6 +1592,7 @@ export const ProcurementModule: React.FC = () => {
             searchPlaceholder="Cari nomor PO, supplier, atau bahan..."
             searchKeys={['poNumber', 'supplierName', 'status', 'qcStatus', 'notes']}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'poNumber',
@@ -1878,6 +1880,7 @@ export const ProcurementModule: React.FC = () => {
             searchPlaceholder="Cari no PO, barang, supplier, pemeriksa, keterangan..."
             searchKeys={['poNumber', 'supplierName', 'itemName', 'inspectorName', 'condition', 'qualityGrade', 'notes']}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'poNumber',

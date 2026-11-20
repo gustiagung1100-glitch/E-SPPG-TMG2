@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
@@ -9,6 +9,10 @@ import {
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
+import {
+  getDefaultDivisionOfficerName,
+  getDivisionOfficerSelectOptions,
+} from '../../lib/volunteerUtils';
 import { DistributionDeliveryRecord, DistributionLog, DynamicFormId, OmprengReturnRecord } from '../../types';
 import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
 import {
@@ -67,6 +71,11 @@ export const DistributionModule: React.FC = () => {
     dynamicFormSchemas,
     addToast,
   } = useApp();
+
+  const distVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Distribusi'),
+    [masterVolunteers]
+  );
 
   const [activeSubTab, setActiveSubTab] = useState<'pengiriman' | 'pengembalian' | 'armada'>('pengiriman');
   const [selectedLog, setSelectedLog] = useState<DistributionLog | null>(null);
@@ -209,7 +218,10 @@ export const DistributionModule: React.FC = () => {
       arrivalTime: '13:05 WIB',
       driverName: 'Agus Santoso',
       vehicleNumber: 'N 8921 RA',
-      receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      receivedByOfficer:
+        (institutions[0]?.picName || '').trim() ||
+        (institutions[0]?.contactPerson || '').trim() ||
+        '',
       conditionStatus: 'Lengkap & Utuh' as OmprengReturnRecord['conditionStatus'],
       returnHandoverPhoto: '',
       locationPhoto: '',
@@ -222,6 +234,15 @@ export const DistributionModule: React.FC = () => {
     processFacilityImageUpload(e, callback, msg => addToast('error', 'Upload Foto Gagal', msg));
   };
 
+  const resolveInstitutionPicName = useCallback(
+    (instId?: string): string => {
+      const inst = institutions.find(i => i.id === instId);
+      if (!inst) return '';
+      return (inst.picName || '').trim() || (inst.contactPerson || '').trim() || '';
+    },
+    [institutions]
+  );
+
   const openNewDeliveryModal = (presetInstitutionId?: string, presetDate?: string) => {
     const targetInstId = presetInstitutionId || institutions[0]?.id || '';
     const defaultInst = institutions.find(i => i.id === targetInstId) || institutions[0];
@@ -232,9 +253,9 @@ export const DistributionModule: React.FC = () => {
       institutionId: defaultInst?.id || '',
       departureTime: '08:15 WIB',
       arrivalTime: '08:35 WIB',
-      driverName: 'Agus Santoso',
+      driverName: getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', 'Agus Santoso'),
       vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
-      picName: defaultInst?.picName || defaultInst?.contactPerson || 'Kepala Sekolah',
+      picName: resolveInstitutionPicName(defaultInst?.id),
       status: 'Selesai Serah Terima',
       picOrganolepticPhoto: '',
       handoverPhoto: '',
@@ -254,7 +275,7 @@ export const DistributionModule: React.FC = () => {
       arrivalTime: rec.arrivalTime,
       driverName: rec.driverName,
       vehicleNumber: rec.vehicleNumber,
-      picName: rec.picName,
+      picName: rec.picName || resolveInstitutionPicName(rec.institutionId),
       status: rec.status,
       picOrganolepticPhoto: rec.picOrganolepticPhoto || '',
       handoverPhoto: rec.handoverPhoto || '',
@@ -264,6 +285,23 @@ export const DistributionModule: React.FC = () => {
     });
     setIsDeliveryFormOpen(true);
   };
+
+  useEffect(() => {
+    if (!isDeliveryFormOpen || editingDeliveryId) return;
+    if (institutions.length === 0) return;
+    const targetInstId = deliveryForm.institutionId || institutions[0].id;
+    const autoPic = resolveInstitutionPicName(targetInstId);
+    setDeliveryForm(f => {
+      if (f.institutionId === targetInstId && f.picName.trim() !== '') {
+        return f;
+      }
+      return {
+        ...f,
+        institutionId: targetInstId,
+        picName: autoPic,
+      };
+    });
+  }, [isDeliveryFormOpen, editingDeliveryId, institutions, deliveryForm.institutionId, resolveInstitutionPicName]);
 
   const handleSaveDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -342,9 +380,9 @@ export const DistributionModule: React.FC = () => {
       largePortions: synced?.largePortions ?? defaultInst?.largePortions ?? 0,
       departureTime: '12:30 WIB',
       arrivalTime: '13:05 WIB',
-      driverName: 'Agus Santoso',
+      driverName: getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', 'Agus Santoso'),
       vehicleNumber: 'N 8921 RA',
-      receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      receivedByOfficer: resolveInstitutionPicName(defaultInst?.id),
       conditionStatus: 'Lengkap & Utuh',
       returnHandoverPhoto: '',
       locationPhoto: '',
@@ -365,7 +403,7 @@ export const DistributionModule: React.FC = () => {
       arrivalTime: ret.arrivalTime,
       driverName: ret.driverName,
       vehicleNumber: ret.vehicleNumber,
-      receivedByOfficer: ret.receivedByOfficer,
+      receivedByOfficer: ret.receivedByOfficer || resolveInstitutionPicName(ret.institutionId),
       conditionStatus: ret.conditionStatus,
       returnHandoverPhoto: ret.returnHandoverPhoto || '',
       locationPhoto: ret.locationPhoto || '',
@@ -375,12 +413,31 @@ export const DistributionModule: React.FC = () => {
     setIsReturnFormOpen(true);
   };
 
+  useEffect(() => {
+    if (!isReturnFormOpen || editingReturnId) return;
+    if (institutions.length === 0) return;
+    const targetInstId = returnForm.institutionId || institutions[0].id;
+    const autoPic = resolveInstitutionPicName(targetInstId);
+    setReturnForm(f => {
+      if (f.institutionId === targetInstId && f.receivedByOfficer.trim() !== '') {
+        return f;
+      }
+      return {
+        ...f,
+        institutionId: targetInstId,
+        receivedByOfficer: autoPic,
+      };
+    });
+  }, [isReturnFormOpen, editingReturnId, institutions, returnForm.institutionId, resolveInstitutionPicName]);
+
   const handleSaveReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === returnForm.institutionId) || institutions[0];
     if (!inst) return;
     const smallQty = Number(returnForm.smallPortions) || 0;
     const largeQty = Number(returnForm.largePortions) || 0;
+    const resolvedPic =
+      returnForm.receivedByOfficer.trim() || resolveInstitutionPicName(inst.id) || 'PIC Lembaga';
     if (editingReturnId) {
       await updateOmprengReturn(editingReturnId, {
         date: returnForm.date,
@@ -393,7 +450,7 @@ export const DistributionModule: React.FC = () => {
         arrivalTime: returnForm.arrivalTime,
         driverName: returnForm.driverName,
         vehicleNumber: returnForm.vehicleNumber,
-        receivedByOfficer: returnForm.receivedByOfficer || 'Fahrur Rozi (Div. Cuci Ompreng)',
+        receivedByOfficer: resolvedPic,
         conditionStatus: returnForm.conditionStatus,
         returnHandoverPhoto: returnForm.returnHandoverPhoto || undefined,
         locationPhoto: returnForm.locationPhoto || undefined,
@@ -412,7 +469,7 @@ export const DistributionModule: React.FC = () => {
         arrivalTime: returnForm.arrivalTime,
         driverName: returnForm.driverName,
         vehicleNumber: returnForm.vehicleNumber,
-        receivedByOfficer: returnForm.receivedByOfficer || 'Fahrur Rozi (Div. Cuci Ompreng)',
+        receivedByOfficer: resolvedPic,
         conditionStatus: returnForm.conditionStatus,
         returnHandoverPhoto: returnForm.returnHandoverPhoto || undefined,
         locationPhoto: returnForm.locationPhoto || undefined,
@@ -734,7 +791,7 @@ export const DistributionModule: React.FC = () => {
       render: row => {
         const badgeColors = {
           'Dijadwalkan': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-          'Dalam Perjalanan': 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 animate-pulse',
+          'Dalam Perjalanan': 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
           'Tiba di Lokasi': 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
           'Selesai Serah Terima': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
         };
@@ -784,14 +841,14 @@ export const DistributionModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Title & Quick Action Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Compact Header & Quick Action Buttons */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Truck className="w-6 h-6 text-blue-900 dark:text-sky-400" />
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <Truck className="w-5 h-5 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
             Distribusi Pangan, Pengembalian Ompreng &amp; Armada MBG
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
             Input data pengiriman (foto uji organoleptik, serah terima &amp; lokasi), pengembalian ompreng (foto pengembalian &amp; lokasi), dan BAST digital armada.
           </p>
         </div>
@@ -834,6 +891,7 @@ export const DistributionModule: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setDispatchDate(selectedSyncDate || todayIso);
+                  setDriverName(getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', driverName));
                   setDispatchCustomFields(
                     getInitialCustomFieldValues(dynamicFormSchemas.distribution_dispatch_form)
                   );
@@ -864,8 +922,8 @@ export const DistributionModule: React.FC = () => {
         <div className="p-4 bg-gradient-to-r from-emerald-50 via-sky-50/60 to-white dark:from-emerald-950/30 dark:via-slate-900 dark:to-slate-900 border-b border-emerald-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-600 text-white">
-                <Radio className="w-3 h-3 animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#0D9488] text-white">
+                <Radio className="w-3 h-3" />
                 <span>REALTIME SYNC AKTIF</span>
               </span>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
@@ -1038,55 +1096,57 @@ export const DistributionModule: React.FC = () => {
         )}
       </div>
 
-      {/* Sub-Navigation Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('pengiriman')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeSubTab === 'pengiriman'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <ClipboardCheck className="w-4 h-4" />
-          <span>Pengiriman &amp; Bukti Foto (Organoleptik, Serah Terima, Lokasi)</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {syncedDistributionDeliveries.length}
-          </span>
-        </button>
+      {/* Sub-Navigation Responsive Pill Tabs */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('pengiriman')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeSubTab === 'pengiriman'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <ClipboardCheck className="w-4 h-4 shrink-0" />
+            <span>Pengiriman &amp; Bukti Foto (Organoleptik, Serah Terima, Lokasi)</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeSubTab === 'pengiriman' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {syncedDistributionDeliveries.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('pengembalian')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeSubTab === 'pengembalian'
-              ? 'border-emerald-600 text-emerald-700 dark:border-emerald-400 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <RotateCcw className="w-4 h-4" />
-          <span>Pengembalian Ompreng &amp; Foto Lokasi</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {omprengReturns.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('pengembalian')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeSubTab === 'pengembalian'
+                ? 'bg-[#0D9488] text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4 shrink-0" />
+            <span>Pengembalian Ompreng &amp; Foto Lokasi</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeSubTab === 'pengembalian' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {omprengReturns.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveSubTab('armada')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeSubTab === 'armada'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <FileCheck className="w-4 h-4" />
-          <span>Log Armada &amp; BAST Digital</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {syncedDistributionLogs.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('armada')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeSubTab === 'armada'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <FileCheck className="w-4 h-4 shrink-0" />
+            <span>Log Armada &amp; BAST Digital</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeSubTab === 'armada' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {syncedDistributionLogs.length}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Fleet Summary Cards */}
@@ -1331,7 +1391,7 @@ export const DistributionModule: React.FC = () => {
                         Jemput: {ret.departureTime} → Tiba SPPG: {ret.arrivalTime}
                       </span>
                       <span>•</span>
-                      <span>Diterima oleh: <strong>{ret.receivedByOfficer}</strong></span>
+                      <span>PIC Lembaga: <strong>{ret.receivedByOfficer}</strong></span>
                     </div>
 
                     <p className="text-xs text-slate-600 dark:text-slate-300 italic pt-1">
@@ -1403,6 +1463,7 @@ export const DistributionModule: React.FC = () => {
             onExportPDF={handleExportPDF}
             onExportExcel={handleExportExcel}
             onPrint={triggerPrint}
+            stickyFirstColumn
           />
         </div>
       )}
@@ -1492,6 +1553,10 @@ export const DistributionModule: React.FC = () => {
                   label: `${inst.name} (${formatNumber(synced.totalPortions)} porsi${synced.isSyncedFromAttendance ? ' • Presensi Realtime' : ' • Kuota'})`,
                 };
               }),
+              driverName: distVolunteerOptions.map(o => ({
+                value: o.value,
+                label: o.label,
+              })),
             }}
             onChange={(key, value, field) => {
               if (!field.isSystem) {
@@ -1718,11 +1783,11 @@ export const DistributionModule: React.FC = () => {
                 required
                 value={deliveryForm.institutionId}
                 onChange={e => {
-                  const inst = institutions.find(i => i.id === e.target.value);
+                  const nextInstId = e.target.value;
                   setDeliveryForm(f => ({
                     ...f,
-                    institutionId: e.target.value,
-                    picName: inst?.picName || inst?.contactPerson || f.picName,
+                    institutionId: nextInstId,
+                    picName: resolveInstitutionPicName(nextInstId),
                   }));
                 }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -1828,14 +1893,26 @@ export const DistributionModule: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="block font-bold mb-1">Petugas Pengirim / Driver</label>
-              <input
-                type="text"
+              <label className="block font-bold mb-1">Petugas Pengirim / Driver (Div. Distribusi)</label>
+              <select
                 required
                 value={deliveryForm.driverName}
                 onChange={e => setDeliveryForm(f => ({ ...f, driverName: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-              />
+                className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+              >
+                {distVolunteerOptions.length === 0 && !deliveryForm.driverName && (
+                  <option value="">-- Belum ada relawan Divisi Distribusi --</option>
+                )}
+                {distVolunteerOptions.map(opt => (
+                  <option key={opt.volunteer.id} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                {deliveryForm.driverName &&
+                  !distVolunteerOptions.some(o => o.value === deliveryForm.driverName) && (
+                    <option value={deliveryForm.driverName}>{deliveryForm.driverName}</option>
+                  )}
+              </select>
             </div>
             <div>
               <label className="block font-bold mb-1">Armada / Plat Nomor</label>
@@ -1848,14 +1925,42 @@ export const DistributionModule: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block font-bold mb-1">PIC Penerima di Lokasi</label>
-              <input
-                type="text"
-                required
-                value={deliveryForm.picName}
-                onChange={e => setDeliveryForm(f => ({ ...f, picName: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-              />
+              {(() => {
+                const selectedInst = institutions.find(i => i.id === deliveryForm.institutionId);
+                const autoPic = resolveInstitutionPicName(deliveryForm.institutionId);
+                const isSynced = Boolean(autoPic && deliveryForm.picName === autoPic);
+                return (
+                  <>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="block font-bold">PIC Penerima di Lokasi</label>
+                      {autoPic && !isSynced && (
+                        <button
+                          type="button"
+                          onClick={() => setDeliveryForm(f => ({ ...f, picName: autoPic }))}
+                          className="text-[10px] font-bold text-blue-800 dark:text-sky-400 hover:underline"
+                        >
+                          Isi Otomatis PIC
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Otomatis terisi sesuai PIC Lembaga..."
+                      value={deliveryForm.picName}
+                      onChange={e => setDeliveryForm(f => ({ ...f, picName: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                    />
+                    {selectedInst && (
+                      <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        {autoPic
+                          ? `PIC Lembaga: ${autoPic}${selectedInst.picPhone ? ` (${selectedInst.picPhone})` : ''}`
+                          : 'PIC belum diisi di Master Lembaga Penerima Manfaat.'}
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -1989,6 +2094,7 @@ export const DistributionModule: React.FC = () => {
                     institutionId: nextInstId,
                     smallPortions: synced.smallPortions,
                     largePortions: synced.largePortions,
+                    receivedByOfficer: resolveInstitutionPicName(nextInstId),
                   }));
                 }}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -2059,14 +2165,26 @@ export const DistributionModule: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block font-bold mb-1">Petugas Penjemput</label>
-              <input
-                type="text"
+              <label className="block font-bold mb-1">Petugas Penjemput (Div. Distribusi)</label>
+              <select
                 required
                 value={returnForm.driverName}
                 onChange={e => setReturnForm(f => ({ ...f, driverName: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-              />
+                className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+              >
+                {distVolunteerOptions.length === 0 && !returnForm.driverName && (
+                  <option value="">-- Belum ada relawan Divisi Distribusi --</option>
+                )}
+                {distVolunteerOptions.map(opt => (
+                  <option key={opt.volunteer.id} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                {returnForm.driverName &&
+                  !distVolunteerOptions.some(o => o.value === returnForm.driverName) && (
+                    <option value={returnForm.driverName}>{returnForm.driverName}</option>
+                  )}
+              </select>
             </div>
             <div>
               <label className="block font-bold mb-1">Kendaraan</label>
@@ -2082,14 +2200,42 @@ export const DistributionModule: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block font-bold mb-1">Petugas Penerima di SPPG</label>
-              <input
-                type="text"
-                required
-                value={returnForm.receivedByOfficer}
-                onChange={e => setReturnForm(f => ({ ...f, receivedByOfficer: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-              />
+              {(() => {
+                const selectedInst = institutions.find(i => i.id === returnForm.institutionId);
+                const autoPic = resolveInstitutionPicName(returnForm.institutionId);
+                const isSynced = Boolean(autoPic && returnForm.receivedByOfficer === autoPic);
+                return (
+                  <>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="block font-bold">PIC Lembaga</label>
+                      {autoPic && !isSynced && (
+                        <button
+                          type="button"
+                          onClick={() => setReturnForm(f => ({ ...f, receivedByOfficer: autoPic }))}
+                          className="text-[10px] font-bold text-blue-800 dark:text-sky-400 hover:underline"
+                        >
+                          Isi Otomatis PIC
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Otomatis terisi sesuai PIC Lembaga..."
+                      value={returnForm.receivedByOfficer}
+                      onChange={e => setReturnForm(f => ({ ...f, receivedByOfficer: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                    />
+                    {selectedInst && (
+                      <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        {autoPic
+                          ? `PIC Lembaga: ${autoPic}${selectedInst.picPhone ? ` (${selectedInst.picPhone})` : ''}`
+                          : 'PIC belum diisi di Master Lembaga Penerima Manfaat.'}
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div>
               <label className="block font-bold mb-1">Status Fisik Ompreng</label>

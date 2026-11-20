@@ -660,3 +660,521 @@ export function resolveMenuGrammages(
   return [...mergedStandard, ...customItems];
 }
 
+export interface ExtendedTkpiEntry {
+  name: string;
+  aliases: string[];
+  category: string;
+  ediblePortion: number;
+  calories100g: number;
+  protein100g: number;
+  fat100g: number;
+  carb100g: number;
+  fiber100g: number;
+  referenceSource: string;
+}
+
+export const EXTENDED_TKPI_FOODS: ExtendedTkpiEntry[] = [
+  {
+    name: 'Beras / Nasi Putih (Mentah)',
+    aliases: ['beras', 'beras putih', 'beras pulen', 'nasi putih'],
+    category: 'Makanan Pokok',
+    ediblePortion: 100,
+    calories100g: 360,
+    protein100g: 6.8,
+    fat100g: 0.7,
+    carb100g: 78.9,
+    fiber100g: 0.8,
+    referenceSource: 'TKPI 2020 (A01)',
+  },
+  {
+    name: 'Nasi Putih Matang',
+    aliases: ['nasi matang', 'nasi uduk', 'nasi kuning'],
+    category: 'Makanan Pokok',
+    ediblePortion: 100,
+    calories100g: 180,
+    protein100g: 3.0,
+    fat100g: 0.3,
+    carb100g: 39.8,
+    fiber100g: 0.2,
+    referenceSource: 'TKPI 2020 (A02)',
+  },
+  {
+    name: 'Kentang Segar',
+    aliases: ['kentang', 'perkedel kentang'],
+    category: 'Makanan Pokok',
+    ediblePortion: 85,
+    calories100g: 62,
+    protein100g: 2.1,
+    fat100g: 0.2,
+    carb100g: 13.5,
+    fiber100g: 0.5,
+    referenceSource: 'TKPI 2020 (A12)',
+  },
+  {
+    name: 'Telur Ayam Ras',
+    aliases: ['telur', 'telur ayam', 'telur ras', 'telur dadar', 'telur ceplok'],
+    category: 'Lauk Hewani',
+    ediblePortion: 90,
+    calories100g: 154,
+    protein100g: 12.4,
+    fat100g: 10.8,
+    carb100g: 0.7,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (B20)',
+  },
+  {
+    name: 'Daging Ayam Fillet',
+    aliases: ['ayam', 'ayam fillet', 'daging ayam', 'dada ayam', 'paha ayam'],
+    category: 'Lauk Hewani',
+    ediblePortion: 100,
+    calories100g: 298,
+    protein100g: 18.2,
+    fat100g: 25.0,
+    carb100g: 0.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (B05)',
+  },
+  {
+    name: 'Ikan Tongkol / Kembung / Lele Segar',
+    aliases: ['ikan', 'tongkol', 'kembung', 'lele', 'patin', 'bandeng', 'tuna', 'nila'],
+    category: 'Lauk Hewani',
+    ediblePortion: 80,
+    calories100g: 111,
+    protein100g: 22.0,
+    fat100g: 1.5,
+    carb100g: 0.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (B12)',
+  },
+  {
+    name: 'Daging Sapi Segar',
+    aliases: ['daging sapi', 'sapi', 'bakso sapi', 'rendang'],
+    category: 'Lauk Hewani',
+    ediblePortion: 100,
+    calories100g: 201,
+    protein100g: 20.0,
+    fat100g: 13.0,
+    carb100g: 0.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (B01)',
+  },
+  {
+    name: 'Tahu Putih Kedelai',
+    aliases: ['tahu', 'tahu putih', 'tahu kuning', 'tahu sutra'],
+    category: 'Lauk Nabati',
+    ediblePortion: 100,
+    calories100g: 80,
+    protein100g: 10.9,
+    fat100g: 4.7,
+    carb100g: 0.8,
+    fiber100g: 0.1,
+    referenceSource: 'TKPI 2020 (C01)',
+  },
+  {
+    name: 'Tempe Kedelai Murni',
+    aliases: ['tempe', 'tempe murni', 'tempe goreng', 'mendoan'],
+    category: 'Lauk Nabati',
+    ediblePortion: 100,
+    calories100g: 201,
+    protein100g: 20.8,
+    fat100g: 8.8,
+    carb100g: 13.5,
+    fiber100g: 1.4,
+    referenceSource: 'TKPI 2020 (C02)',
+  },
+  {
+    name: 'Bumbu Kacang / Kacang Tanah',
+    aliases: ['bumbu kacang', 'kacang tanah', 'saus kacang', 'pecel'],
+    category: 'Bumbu & Minyak',
+    ediblePortion: 100,
+    calories100g: 88,
+    protein100g: 3.0,
+    fat100g: 4.0,
+    carb100g: 9.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (C09)',
+  },
+  {
+    name: 'Minyak Goreng Kelapa Sawit',
+    aliases: ['minyak', 'minyak goreng', 'minyak sayur', 'margarin'],
+    category: 'Bumbu & Minyak',
+    ediblePortion: 100,
+    calories100g: 884,
+    protein100g: 0.0,
+    fat100g: 100.0,
+    carb100g: 0.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (F01)',
+  },
+  {
+    name: 'Kembang Kol / Brokoli Segar',
+    aliases: ['kembang kol', 'brokoli', 'kubis', 'kol', 'sawi'],
+    category: 'Sayuran',
+    ediblePortion: 75,
+    calories100g: 34,
+    protein100g: 2.8,
+    fat100g: 0.4,
+    carb100g: 6.4,
+    fiber100g: 2.4,
+    referenceSource: 'TKPI 2020 (D12)',
+  },
+  {
+    name: 'Jagung Manis Pipil',
+    aliases: ['jagung', 'jagung manis', 'jagung pipil'],
+    category: 'Sayuran',
+    ediblePortion: 90,
+    calories100g: 147,
+    protein100g: 5.1,
+    fat100g: 0.7,
+    carb100g: 31.5,
+    fiber100g: 1.3,
+    referenceSource: 'TKPI 2020 (D09)',
+  },
+  {
+    name: 'Mentimun Segar',
+    aliases: ['timun', 'mentimun', 'ketimun'],
+    category: 'Sayuran',
+    ediblePortion: 70,
+    calories100g: 32,
+    protein100g: 0.8,
+    fat100g: 0.8,
+    carb100g: 5.6,
+    fiber100g: 1.2,
+    referenceSource: 'TKPI 2020 (D18)',
+  },
+  {
+    name: 'Wortel Segar',
+    aliases: ['wortel', 'wortel manis'],
+    category: 'Sayuran',
+    ediblePortion: 88,
+    calories100g: 36,
+    protein100g: 1.0,
+    fat100g: 0.6,
+    carb100g: 7.9,
+    fiber100g: 1.0,
+    referenceSource: 'TKPI 2020 (D24)',
+  },
+  {
+    name: 'Bayam Hijau Segar',
+    aliases: ['bayam', 'kangkung', 'daun singkong'],
+    category: 'Sayuran',
+    ediblePortion: 71,
+    calories100g: 16,
+    protein100g: 0.9,
+    fat100g: 0.4,
+    carb100g: 2.9,
+    fiber100g: 0.7,
+    referenceSource: 'TKPI 2020 (D04)',
+  },
+  {
+    name: 'Buncis Segar',
+    aliases: ['buncis', 'kacang panjang', 'kapri'],
+    category: 'Sayuran',
+    ediblePortion: 90,
+    calories100g: 34,
+    protein100g: 2.4,
+    fat100g: 0.3,
+    carb100g: 7.2,
+    fiber100g: 2.7,
+    referenceSource: 'TKPI 2020 (D06)',
+  },
+  {
+    name: 'Semangka Merah Segar',
+    aliases: ['semangka', 'semangka merah'],
+    category: 'Buah Segar',
+    ediblePortion: 54,
+    calories100g: 30,
+    protein100g: 0.6,
+    fat100g: 0.2,
+    carb100g: 7.6,
+    fiber100g: 0.4,
+    referenceSource: 'TKPI 2020 (E18)',
+  },
+  {
+    name: 'Melon Segar',
+    aliases: ['melon', 'blewah'],
+    category: 'Buah Segar',
+    ediblePortion: 58,
+    calories100g: 34,
+    protein100g: 0.8,
+    fat100g: 0.2,
+    carb100g: 8.2,
+    fiber100g: 0.9,
+    referenceSource: 'TKPI 2020 (E14)',
+  },
+  {
+    name: 'Buah Naga Merah',
+    aliases: ['buah naga', 'naga merah'],
+    category: 'Buah Segar',
+    ediblePortion: 67,
+    calories100g: 51,
+    protein100g: 1.1,
+    fat100g: 0.4,
+    carb100g: 12.0,
+    fiber100g: 3.0,
+    referenceSource: 'TKPI 2020 (E21)',
+  },
+  {
+    name: 'Anggur Merah / Muscat',
+    aliases: ['anggur', 'anggur merah', 'anggur muscat', 'anggur hijau'],
+    category: 'Buah Segar',
+    ediblePortion: 95,
+    calories100g: 89.8,
+    protein100g: 0.5,
+    fat100g: 0.0,
+    carb100g: 24.3,
+    fiber100g: 3.0,
+    referenceSource: 'TKPI 2020 (E02)',
+  },
+  {
+    name: 'Pisang Cavendish / Ambon',
+    aliases: ['pisang', 'pisang ambon', 'pisang cavendish'],
+    category: 'Buah Segar',
+    ediblePortion: 75,
+    calories100g: 89,
+    protein100g: 1.1,
+    fat100g: 0.3,
+    carb100g: 22.8,
+    fiber100g: 2.6,
+    referenceSource: 'TKPI 2020 (E12)',
+  },
+  {
+    name: 'Jeruk Manis Segar',
+    aliases: ['jeruk', 'jeruk manis', 'jeruk keprok'],
+    category: 'Buah Segar',
+    ediblePortion: 72,
+    calories100g: 45,
+    protein100g: 0.9,
+    fat100g: 0.2,
+    carb100g: 11.2,
+    fiber100g: 1.4,
+    referenceSource: 'TKPI 2020 (E06)',
+  },
+  {
+    name: 'Pepaya / Mangga / Apel',
+    aliases: ['pepaya', 'mangga', 'apel', 'pir', 'jambu'],
+    category: 'Buah Segar',
+    ediblePortion: 75,
+    calories100g: 46,
+    protein100g: 0.5,
+    fat100g: 0.1,
+    carb100g: 12.2,
+    fiber100g: 1.6,
+    referenceSource: 'TKPI 2020 (E15)',
+  },
+  {
+    name: 'Susu UHT Plain / Cokelat',
+    aliases: ['susu', 'susu uht', 'susu cair', 'susu kotak'],
+    category: 'Ekstra / Susu',
+    ediblePortion: 100,
+    calories100g: 65,
+    protein100g: 3.2,
+    fat100g: 3.5,
+    carb100g: 5.0,
+    fiber100g: 0.0,
+    referenceSource: 'SNI & TKPI Kemenkes',
+  },
+  {
+    name: 'Kerupuk Udang / Finna / Ikan',
+    aliases: ['kerupuk', 'kerupuk finna', 'kerupuk udang', 'kerupuk ikan', 'emping'],
+    category: 'Ekstra / Susu',
+    ediblePortion: 100,
+    calories100g: 500,
+    protein100g: 0.0,
+    fat100g: 20.0,
+    carb100g: 70.0,
+    fiber100g: 0.0,
+    referenceSource: 'TKPI 2020 (H05)',
+  },
+  {
+    name: 'Dressing Salad / Mayonaise',
+    aliases: ['dressing', 'dresing', 'dresing salad', 'dressing salad', 'mayonaise', 'mayones', 'yogurt'],
+    category: 'Bumbu & Minyak',
+    ediblePortion: 100,
+    calories100g: 500,
+    protein100g: 1.7,
+    fat100g: 36.7,
+    carb100g: 40.0,
+    fiber100g: 0.0,
+    referenceSource: 'USDA & TKPI Estimasi',
+  },
+];
+
+export interface FoodNutritionMatch {
+  matchedName: string;
+  category: string;
+  ediblePortionPercent: number;
+  calories100g: number;
+  protein100g: number;
+  fat100g: number;
+  carb100g: number;
+  fiber100g: number;
+  referenceSource: string;
+}
+
+function normalizeFoodKey(raw: string): string {
+  return (raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function resolveFoodNutritionLookup(
+  foodName: string,
+  foodCompositions: FoodCompositionItem[],
+  masterBahanList: Array<{
+    name: string;
+    category?: string;
+    calories100g: number;
+    protein100g: number;
+    fat100g: number;
+    carb100g: number;
+    fiber100g: number;
+  }> = []
+): FoodNutritionMatch | null {
+  const query = normalizeFoodKey(foodName);
+  if (!query || query.length < 2) return null;
+
+  // 1. Exact or substring match in foodCompositions (TKPI 2020 / USDA)
+  const exactComp = foodCompositions.find(c => normalizeFoodKey(c.name) === query);
+  if (exactComp) {
+    return {
+      matchedName: exactComp.name,
+      category: exactComp.category,
+      ediblePortionPercent: exactComp.ediblePortion,
+      calories100g: exactComp.calories,
+      protein100g: exactComp.protein,
+      fat100g: exactComp.fat,
+      carb100g: exactComp.carbs,
+      fiber100g: exactComp.fiber,
+      referenceSource: exactComp.sourceReference,
+    };
+  }
+
+  // 2. Exact match in Master Bahan
+  const exactMaster = masterBahanList.find(m => normalizeFoodKey(m.name) === query);
+  if (exactMaster) {
+    return {
+      matchedName: exactMaster.name,
+      category: exactMaster.category || 'Bahan Makanan',
+      ediblePortionPercent: 100,
+      calories100g: exactMaster.calories100g,
+      protein100g: exactMaster.protein100g,
+      fat100g: exactMaster.fat100g,
+      carb100g: exactMaster.carb100g,
+      fiber100g: exactMaster.fiber100g,
+      referenceSource: 'Master Bahan Pangan SPPG',
+    };
+  }
+
+  // 3. Alias or longest phrase match in EXTENDED_TKPI_FOODS
+  let bestExtended: { entry: ExtendedTkpiEntry; score: number } | null = null;
+  for (const entry of EXTENDED_TKPI_FOODS) {
+    const candidates = [entry.name, ...entry.aliases].map(normalizeFoodKey);
+    for (const alias of candidates) {
+      if (!alias) continue;
+      if (alias === query) {
+        bestExtended = { entry, score: 1000 + alias.length };
+        break;
+      }
+      if (query.includes(alias) || alias.includes(query)) {
+        const score = Math.min(query.length, alias.length) + (query.includes(alias) ? 10 : 0);
+        if (!bestExtended || score > bestExtended.score) {
+          bestExtended = { entry, score };
+        }
+      }
+    }
+  }
+
+  // 4. Substring / token match in foodCompositions
+  let bestComp: { item: FoodCompositionItem; score: number } | null = null;
+  const queryTokens = query.split(' ').filter(t => t.length >= 3);
+  for (const c of foodCompositions) {
+    const norm = normalizeFoodKey(c.name);
+    if (norm.includes(query) || query.includes(norm)) {
+      const score = Math.min(norm.length, query.length) + 12;
+      if (!bestComp || score > bestComp.score) bestComp = { item: c, score };
+    } else if (queryTokens.length > 0) {
+      const compTokens = norm.split(' ').filter(t => t.length >= 3);
+      const overlap = queryTokens.filter(t => compTokens.includes(t)).length;
+      if (overlap > 0) {
+        const score = overlap * 8;
+        if (!bestComp || score > bestComp.score) bestComp = { item: c, score };
+      }
+    }
+  }
+
+  if (bestComp && (!bestExtended || bestComp.score >= bestExtended.score)) {
+    const c = bestComp.item;
+    return {
+      matchedName: c.name,
+      category: c.category,
+      ediblePortionPercent: c.ediblePortion,
+      calories100g: c.calories,
+      protein100g: c.protein,
+      fat100g: c.fat,
+      carb100g: c.carbs,
+      fiber100g: c.fiber,
+      referenceSource: c.sourceReference,
+    };
+  }
+
+  if (bestExtended) {
+    const e = bestExtended.entry;
+    return {
+      matchedName: e.name,
+      category: e.category,
+      ediblePortionPercent: e.ediblePortion,
+      calories100g: e.calories100g,
+      protein100g: e.protein100g,
+      fat100g: e.fat100g,
+      carb100g: e.carb100g,
+      fiber100g: e.fiber100g,
+      referenceSource: e.referenceSource,
+    };
+  }
+
+  // 5. Fallback substring match in Master Bahan
+  for (const m of masterBahanList) {
+    const norm = normalizeFoodKey(m.name);
+    if (norm.includes(query) || query.includes(norm)) {
+      return {
+        matchedName: m.name,
+        category: m.category || 'Bahan Makanan',
+        ediblePortionPercent: 100,
+        calories100g: m.calories100g,
+        protein100g: m.protein100g,
+        fat100g: m.fat100g,
+        carb100g: m.carb100g,
+        fiber100g: m.fiber100g,
+        referenceSource: 'Master Bahan Pangan SPPG',
+      };
+    }
+  }
+
+  return null;
+}
+
+export function getFoodNutritionSuggestions(
+  foodCompositions: FoodCompositionItem[],
+  masterBahanList: Array<{ name: string }> = []
+): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const pushUnique = (name: string) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(trimmed);
+    }
+  };
+
+  foodCompositions.forEach(c => pushUnique(c.name));
+  masterBahanList.forEach(m => pushUnique(m.name));
+  EXTENDED_TKPI_FOODS.forEach(e => pushUnique(e.name));
+  return result;
+}
+

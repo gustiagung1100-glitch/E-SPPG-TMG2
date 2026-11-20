@@ -398,34 +398,34 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Notice */}
-      <div className="bg-linear-to-r from-[#142B4A] via-[#142B4A] to-[#0F766E] rounded-2xl p-6 text-white shadow-md border border-white/10 relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Compact Welcome Banner */}
+      <div className="bg-linear-to-r from-[#1E3A8A] via-[#1E3A8A] to-[#0D9488] rounded-xl px-5 py-4 text-white shadow-sm border border-white/10 relative overflow-hidden">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-[#F2D58B] mb-1.5">
-              Sistem ERP SPPG Aktif & Terverifikasi
+            <div className="text-[11px] font-bold uppercase tracking-widest text-amber-300 mb-1">
+              Sistem ERP SPPG Aktif &amp; Terverifikasi
             </div>
-            <h2 className="text-xl md:text-2xl font-extrabold tracking-tight text-white">
+            <h2 className="text-lg md:text-xl font-extrabold tracking-tight text-white">
               {sppgConfig.sppgName}
             </h2>
-            <p className="text-xs md:text-sm text-slate-200 mt-1 max-w-2xl leading-relaxed">
+            <p className="text-xs text-blue-100 mt-0.5 max-w-2xl leading-relaxed">
               Pusat komando dan kendali terpadu Program Makan Bergizi Gratis (MBG) Kecamatan Krejengan.
               Pengelolaan gizi, rantai pasok, dapur, armada distribusi, dan akuntabilitas keuangan secara real-time.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => onNavigate('reports')}
-              className="px-4 py-2.5 bg-white text-[#142B4A] hover:bg-[#F4F7FA] rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap"
+              className="px-3.5 py-2 bg-white text-[#1E3A8A] hover:bg-slate-100 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap"
             >
               Laporan Harian BGN
             </button>
             <button
               type="button"
               onClick={() => onNavigate('distribution')}
-              className="px-4 py-2.5 bg-[#0F766E] hover:bg-teal-600 text-white border border-white/15 rounded-xl text-xs font-bold shadow-sm transition whitespace-nowrap"
+              className="px-3.5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white border border-white/15 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap"
             >
               Pantau Distribusi
             </button>

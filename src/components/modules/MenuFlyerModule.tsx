@@ -1,7 +1,14 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useApp } from '../../lib/store';
-import { MenuItem, PortioningInspectionRecord, FlyerTemplateId, FlyerSizeId } from '../../types';
-import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
+import {
+  MenuItem,
+  PortioningInspectionRecord,
+  FlyerTemplateId,
+  FlyerSizeId,
+  RecipeIngredient,
+} from '../../types';
+import { defaultNutritionTarget } from '../../lib/plogData';
+import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import { formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
 import { toPng } from 'html-to-image';
 import {
@@ -11,27 +18,235 @@ import {
   Sparkles,
   Layers,
   Calendar,
-  Utensils,
   Clock,
-  ShieldAlert,
   CheckCircle2,
   Upload,
   RefreshCw,
   Image as ImageIcon,
   Check,
-  Award,
   Eye,
   RotateCcw,
-  Sparkle,
-  Wand2,
+  Users,
+  Utensils,
 } from 'lucide-react';
 import { removeOmprengBackground } from '../../lib/imageCutout';
 
+const formatSingleDayDate = (dateStr?: string, fallbackDayName?: string): string => {
+  const formatted = formatIndonesianDate(dateStr);
+  if (!formatted || formatted === '-') {
+    return fallbackDayName || '-';
+  }
+  const dayTrimmed = (fallbackDayName || '').trim();
+  const indonesianDays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  const alreadyHasWeekday = indonesianDays.some(day =>
+    formatted.toLowerCase().startsWith(day.toLowerCase())
+  );
+  if (alreadyHasWeekday) {
+    return formatted;
+  }
+  return dayTrimmed ? `${dayTrimmed}, ${formatted}` : formatted;
+};
+
+const formatFlyerDecimal = (val: number, maxDecimals = 2): string => {
+  if (!Number.isFinite(val) || Math.abs(val) < 0.0005) return '0';
+  return new Intl.NumberFormat('id-ID', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDecimals,
+  }).format(Number(val.toFixed(maxDecimals)));
+};
+
+const formatFlyerRupiah = (amount: number): string => {
+  const safe = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+  return `Rp. ${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(safe)}`;
+};
+
+const normalizeNameKey = (val: string) =>
+  (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function resolveDishName(ing: RecipeIngredient, menu: MenuItem): { dishName: string; isStaple: boolean } {
+  const cat = (ing.category || '').toLowerCase();
+  const isStaple = cat.includes('pokok');
+  if (ing.menuName && ing.menuName.trim() !== '') {
+    return { dishName: ing.menuName.trim(), isStaple };
+  }
+  if (isStaple) return { dishName: menu.stapleFood || 'Nasi putih', isStaple: true };
+  if (cat.includes('hewani')) return { dishName: menu.animalProtein || 'Lauk Hewani', isStaple: false };
+  if (cat.includes('nabati')) return { dishName: menu.plantProtein || 'Lauk Nabati', isStaple: false };
+  if (cat.includes('sayur')) return { dishName: menu.vegetable || 'Sayuran', isStaple: false };
+  if (cat.includes('buah')) return { dishName: menu.fruit || 'Buah Segar', isStaple: false };
+  if (cat.includes('ekstra') || cat.includes('susu'))
+    return { dishName: menu.milkOrExtra || 'Ekstra / Susu', isStaple: false };
+  return { dishName: 'Pelengkap & Bumbu', isStaple: false };
+}
+
+interface FlyerDishRow {
+  name: string;
+  smallGrams: number;
+  largeGrams: number;
+  costSmall: number;
+  costLarge: number;
+  isStaple: boolean;
+}
+
+interface AkgRangePreset {
+  small: {
+    energi: string;
+    protein: string;
+    lemak: string;
+    karbohidrat: string;
+    serat: string;
+  };
+  large: {
+    energi: string;
+    protein: string;
+    lemak: string;
+    karbohidrat: string;
+    serat: string;
+  };
+}
+
+const FLYER_BGN_AKG_PRESET: AkgRangePreset = {
+  small: {
+    energi: '275 – 413 kkal',
+    protein: '5 – 10 g',
+    lemak: '10 – 14 g',
+    karbohidrat: '44 – 63 g',
+    serat: '4–6 g',
+  },
+  large: {
+    energi: '585 – 898 kkal',
+    protein: '16 – 27 g',
+    lemak: '20 – 22 g',
+    karbohidrat: '87 – 140 g',
+    serat: '8 – 13 g',
+  },
+};
+
+const PLOG_AKG_PRESET: AkgRangePreset = {
+  small: {
+    energi: `${defaultNutritionTarget.smallPortionTarget.caloriesMin} – ${defaultNutritionTarget.smallPortionTarget.caloriesMax} kkal`,
+    protein: `${defaultNutritionTarget.smallPortionTarget.proteinMin} – ${defaultNutritionTarget.smallPortionTarget.proteinMax} g`,
+    lemak: `${defaultNutritionTarget.smallPortionTarget.fatMin} – ${defaultNutritionTarget.smallPortionTarget.fatMax} g`,
+    karbohidrat: `${defaultNutritionTarget.smallPortionTarget.carbMin} – ${defaultNutritionTarget.smallPortionTarget.carbMax} g`,
+    serat: `${defaultNutritionTarget.smallPortionTarget.fiberMin} – ${defaultNutritionTarget.smallPortionTarget.fiberMax} g`,
+  },
+  large: {
+    energi: `${defaultNutritionTarget.largePortionTarget.caloriesMin} – ${defaultNutritionTarget.largePortionTarget.caloriesMax} kkal`,
+    protein: `${defaultNutritionTarget.largePortionTarget.proteinMin} – ${defaultNutritionTarget.largePortionTarget.proteinMax} g`,
+    lemak: `${defaultNutritionTarget.largePortionTarget.fatMin} – ${defaultNutritionTarget.largePortionTarget.fatMax} g`,
+    karbohidrat: `${defaultNutritionTarget.largePortionTarget.carbMin} – ${defaultNutritionTarget.largePortionTarget.carbMax} g`,
+    serat: `${defaultNutritionTarget.largePortionTarget.fiberMin} – ${defaultNutritionTarget.largePortionTarget.fiberMax} g`,
+  },
+};
+
+interface FlyerThemeTokens {
+  canvasBg: string;
+  primaryNavy: string;
+  softCapsuleBg: string;
+  cardFillBg: string;
+  cardBorder: string;
+  headingColor: string;
+  textPrimary: string;
+  dotPatternColor: string;
+}
+
+const FLYER_THEMES: Record<FlyerTemplateId, FlyerThemeTokens> = {
+  modern_bgn: {
+    canvasBg: '#F4F6F7',
+    primaryNavy: '#163653',
+    softCapsuleBg: '#D8EEF3',
+    cardFillBg: '#BDE0EE',
+    cardBorder: '#163653',
+    headingColor: '#163653',
+    textPrimary: '#0F172A',
+    dotPatternColor: 'rgba(22, 54, 83, 0.045)',
+  },
+  nutri_infographic: {
+    canvasBg: '#F3F8F5',
+    primaryNavy: '#0F4C3A',
+    softCapsuleBg: '#D5EFE3',
+    cardFillBg: '#BCE6D4',
+    cardBorder: '#0F4C3A',
+    headingColor: '#0F4C3A',
+    textPrimary: '#0F172A',
+    dotPatternColor: 'rgba(15, 76, 58, 0.045)',
+  },
+  nusantara_warm: {
+    canvasBg: '#FAF7F2',
+    primaryNavy: '#5C2D16',
+    softCapsuleBg: '#F3E3D3',
+    cardFillBg: '#EED6BF',
+    cardBorder: '#5C2D16',
+    headingColor: '#5C2D16',
+    textPrimary: '#1C1917',
+    dotPatternColor: 'rgba(92, 45, 22, 0.04)',
+  },
+  school_friendly: {
+    canvasBg: '#F3F7FC',
+    primaryNavy: '#1E3A8A',
+    softCapsuleBg: '#DBEAFE',
+    cardFillBg: '#BFDBFE',
+    cardBorder: '#1E3A8A',
+    headingColor: '#1E3A8A',
+    textPrimary: '#0F172A',
+    dotPatternColor: 'rgba(30, 58, 138, 0.045)',
+  },
+};
+
+// Official Certification Badges using high-res transparent PNG inside smooth CSS pill capsule
+const CertificationCapsule: React.FC<{ bgColor: string }> = ({ bgColor }) => {
+  const [imgError, setImgError] = useState(false);
+
+  return (
+    <div
+      style={{ backgroundColor: bgColor }}
+      className="rounded-full px-5 py-2 flex items-center justify-center shrink-0"
+    >
+      {!imgError ? (
+        <img
+          src="/assets/cert_logos_clean.png"
+          alt="Logo BNSP, SLHS, dan Halal Indonesia"
+          onError={() => setImgError(true)}
+          className="h-11 w-auto object-contain select-none"
+        />
+      ) : (
+        <div className="flex items-center gap-3.5 py-1">
+          <span className="text-xs font-black text-slate-900">BNSP</span>
+          <span className="text-xs font-black text-emerald-700">SLHS</span>
+          <span className="text-xs font-black text-purple-900">HALAL</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const WarningTriangleIcon: React.FC = () => (
+  <svg viewBox="0 0 36 32" className="w-7 h-6 shrink-0" aria-hidden="true">
+    <path
+      d="M18 3 L33 29 L3 29 Z"
+      fill="#FFFFFF"
+      stroke="#DC2626"
+      strokeWidth="3.2"
+      strokeLinejoin="round"
+    />
+    <rect x="16.5" y="11" width="3" height="9.5" rx="1.5" fill="#0F172A" />
+    <circle cx="18" cy="24.2" r="1.8" fill="#0F172A" />
+  </svg>
+);
+
 export const MenuFlyerModule: React.FC = () => {
-  const { menuItems, portioningRecords, sppgConfig } = useApp();
+  const {
+    menuItems,
+    menuIngredientsMap,
+    institutions,
+    masterUnits,
+    masterBahan,
+    rabItems,
+    portioningRecords,
+    sppgConfig,
+  } = useApp();
   const flyerRef = useRef<HTMLDivElement>(null);
 
-  // Default selection: take first available menu or default
   const [selectedMenuId, setSelectedMenuId] = useState<string>(
     menuItems.length > 0 ? menuItems[0].id : 'menu-1'
   );
@@ -39,55 +254,240 @@ export const MenuFlyerModule: React.FC = () => {
   const [size, setSize] = useState<FlyerSizeId>('a4');
   const [zoomScale, setZoomScale] = useState<number>(0.85);
 
-  // Interactive controls
-  const [smallConsumptionDeadline, setSmallConsumptionDeadline] = useState<string>('Pukul 11:15 WIB');
-  const [largeConsumptionDeadline, setLargeConsumptionDeadline] = useState<string>('Pukul 12:30 WIB');
+  // Controls synced to template layout
+  const [smallConsumptionDeadline, setSmallConsumptionDeadline] = useState<string>('09.00 WIB');
+  const [largeConsumptionDeadline, setLargeConsumptionDeadline] = useState<string>('11.00 WIB');
   const [showNutritionFacts, setShowNutritionFacts] = useState<boolean>(true);
   const [showConsumptionDeadline, setShowConsumptionDeadline] = useState<boolean>(true);
-  const [showOfficials, setShowOfficials] = useState<boolean>(true);
+  const [showCertBadges, setShowCertBadges] = useState<boolean>(true);
+  const [showPortionCounts, setShowPortionCounts] = useState<boolean>(true);
+  const [showItemPrices, setShowItemPrices] = useState<boolean>(true);
+  const [grammageMode, setGrammageMode] = useState<'staple_only' | 'all' | 'none'>('staple_only');
+  const [showOfficials, setShowOfficials] = useState<boolean>(false);
   const [photoLayoutMode, setPhotoLayoutMode] = useState<'dual_both' | 'small_only' | 'large_only'>('dual_both');
-  const [targetAudienceText, setTargetAudienceText] = useState<string>('PAUD/TK, SD/MI, SMP/MTs, SMA/SMK & Santri');
-  const [customNote, setCustomNote] = useState<string>(
-    'Makanan disajikan dalam ompreng stainless steril bersegel. Habiskan sayur dan buah untuk daya tahan tubuh optimal!'
-  );
+  const [akgPresetMode, setAkgPresetMode] = useState<'flyer_bgn' | 'plog_target'>('flyer_bgn');
+  const [akgValues, setAkgValues] = useState<AkgRangePreset>(FLYER_BGN_AKG_PRESET);
+
+  // Portion counts synced from Master Lembaga
+  const institutionTotals = useMemo(() => {
+    const activeInsts = institutions.filter(i => i.isActive !== false);
+    const pool = activeInsts.length > 0 ? activeInsts : institutions;
+    return pool.reduce(
+      (acc, inst) => ({
+        small: acc.small + (Number(inst.smallPortions) || 0),
+        large: acc.large + (Number(inst.largePortions) || 0),
+      }),
+      { small: 0, large: 0 }
+    );
+  }, [institutions]);
+
+  const [customSmallCount, setCustomSmallCount] = useState<string>('');
+  const [customLargeCount, setCustomLargeCount] = useState<string>('');
+
+  const displayedSmallPortions =
+    customSmallCount.trim() !== '' && Number.isFinite(Number(customSmallCount))
+      ? Number(customSmallCount)
+      : institutionTotals.small;
+  const displayedLargePortions =
+    customLargeCount.trim() !== '' && Number.isFinite(Number(customLargeCount))
+      ? Number(customLargeCount)
+      : institutionTotals.large;
 
   const [isDownloading, setIsDownloading] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Find active menu
+  // Active menu
   const activeMenu: MenuItem = useMemo(() => {
     return (
       menuItems.find(m => m.id === selectedMenuId) ||
       menuItems[0] || {
         id: 'menu-1',
-        date: '2026-11-09',
-        dayName: 'Senin',
+        date: '2026-11-18',
+        dayName: 'Rabu',
         cycleWeek: 2,
         menuCode: 'MBG-TMG2-H09',
-        stapleFood: 'Nasi Kuning Gurih Alami Kunyit',
-        animalProtein: 'Semur Daging Sapi Suwir Empuk',
-        plantProtein: 'Perkedel Tempe Rempah Daun Jeruk',
-        vegetable: 'Tumis Buncis Jagung Pipil & Wortel',
-        fruit: 'Irisan Semangka Merah Segar',
-        milkOrExtra: 'Puding Kacang Hijau Santan Encer',
-        caloriesSmall: 640,
-        caloriesLarge: 890,
-        proteinGrams: 30.2,
-        carbGrams: 98.0,
-        fatGrams: 21.0,
-        fiberGrams: 7.2,
+        stapleFood: 'Nasi putih',
+        animalProtein: 'Ayam goreng ketumbar',
+        plantProtein: 'Tahu krispi',
+        vegetable: 'Capcay merah',
+        fruit: 'Pisang cavendish',
+        milkOrExtra: 'Susu Pasteurisasi UHT 125ml',
+        caloriesSmall: 484.6,
+        caloriesLarge: 609.55,
+        proteinGrams: 23.69,
+        carbGrams: 53.42,
+        fatGrams: 21.01,
+        fiberGrams: 1.06,
         calciumMg: 295,
         ironMg: 4.5,
-        targetPortions: 2850,
-        estimatedCostPerPortion: 13800,
+        targetPortions: 2708,
+        estimatedCostPerPortion: 9000,
         status: 'Disetujui Kepala',
       }
     );
   }, [menuItems, selectedMenuId]);
 
+  const activeIngredients = useMemo(() => {
+    const mapped = menuIngredientsMap[activeMenu.id];
+    if (mapped && mapped.length > 0) return mapped;
+    return activeMenu.ingredients || [];
+  }, [menuIngredientsMap, activeMenu]);
+
+  // Compute dish rows (name, gramasi kecil/besar, harga per porsi kecil/besar) from PLOG
+  const dishRows: FlyerDishRow[] = useMemo(() => {
+    const qSmall = Math.max(1, displayedSmallPortions || 100);
+    const qLarge = Math.max(1, displayedLargePortions || 100);
+
+    if (activeIngredients.length > 0) {
+      const order: string[] = [];
+      const map = new Map<string, FlyerDishRow>();
+
+      activeIngredients.forEach(ing => {
+        const cat = (ing.category || '').toLowerCase();
+        // Skip standalone condiments unless nutritionist assigned an explicit dish name
+        if (cat.includes('bumbu') && !(ing.menuName && ing.menuName.trim())) {
+          return;
+        }
+
+        const { dishName, isStaple } = resolveDishName(ing, activeMenu);
+        const rabMatch =
+          rabItems.find(
+            r =>
+              r.category === 'RAB Bahan Pangan' &&
+              r.sourceMenuId === activeMenu.id &&
+              normalizeNameKey(r.itemName) === normalizeNameKey(ing.name)
+          ) ||
+          rabItems.find(
+            r =>
+              r.category === 'RAB Bahan Pangan' &&
+              normalizeNameKey(r.itemName) === normalizeNameKey(ing.name)
+          );
+        const mbMatch = masterBahan.find(
+          mb => normalizeNameKey(mb.name) === normalizeNameKey(ing.name)
+        );
+        const unitPrice =
+          ing.unitPrice > 0
+            ? ing.unitPrice
+            : rabMatch?.unitPrice || mbMatch?.actualPrice || 0;
+
+        const formula = resolveRecipeIngredientFormula(
+          ing,
+          masterUnits,
+          qSmall,
+          qLarge,
+          2,
+          2,
+          unitPrice
+        );
+
+        const existing = map.get(dishName) || {
+          name: dishName,
+          smallGrams: 0,
+          largeGrams: 0,
+          costSmall: 0,
+          costLarge: 0,
+          isStaple,
+        };
+        existing.smallGrams += Number(ing.netWeightSmall) || 0;
+        existing.largeGrams += Number(ing.netWeightLarge) || 0;
+        existing.costSmall += formula.costPortionSmall || 0;
+        existing.costLarge += formula.costPortionLarge || 0;
+        if (isStaple) existing.isStaple = true;
+
+        if (!map.has(dishName)) order.push(dishName);
+        map.set(dishName, existing);
+      });
+
+      const resolved = order.map(k => map.get(k)!).filter(Boolean);
+      if (resolved.length > 0) return resolved;
+    }
+
+    // Fallback from MenuItem fields if no recipe ingredients exist yet
+    const baseCost = activeMenu.estimatedCostPerPortion || 9500;
+    const candidates: Array<{ name?: string; sg: number; lg: number; weight: number; isStaple: boolean }> = [
+      { name: activeMenu.stapleFood, sg: 100, lg: 200, weight: 0.14, isStaple: true },
+      { name: activeMenu.animalProtein, sg: 55, lg: 80, weight: 0.44, isStaple: false },
+      { name: activeMenu.plantProtein, sg: 40, lg: 60, weight: 0.1, isStaple: false },
+      { name: activeMenu.vegetable, sg: 60, lg: 90, weight: 0.12, isStaple: false },
+      { name: activeMenu.fruit, sg: 80, lg: 110, weight: 0.2, isStaple: false },
+    ];
+    if (activeMenu.milkOrExtra && activeMenu.milkOrExtra.trim() !== '-') {
+      candidates.push({ name: activeMenu.milkOrExtra, sg: 125, lg: 125, weight: 0.18, isStaple: false });
+    }
+    return candidates
+      .filter(c => Boolean(c.name && c.name.trim()))
+      .map(c => ({
+        name: c.name!.trim(),
+        smallGrams: c.sg,
+        largeGrams: c.lg,
+        costSmall: Math.round(baseCost * c.weight * (c.isStaple ? 0.65 : 0.92)),
+        costLarge: Math.round(baseCost * c.weight),
+        isStaple: c.isStaple,
+      }));
+  }, [
+    activeIngredients,
+    activeMenu,
+    rabItems,
+    masterBahan,
+    masterUnits,
+    displayedSmallPortions,
+    displayedLargePortions,
+  ]);
+
+  // Compute exact nutrition for Porsi Kecil & Porsi Besar from PLOG ingredients
+  const nutritionTotals = useMemo(() => {
+    if (activeIngredients.length > 0) {
+      return activeIngredients.reduce(
+        (acc, ing) => {
+          const wS = Number(ing.netWeightSmall) || 0;
+          const wL = Number(ing.netWeightLarge) || 0;
+          return {
+            small: {
+              energi: acc.small.energi + (wS / 100) * (Number(ing.calories100g) || 0),
+              protein: acc.small.protein + (wS / 100) * (Number(ing.protein100g) || 0),
+              lemak: acc.small.lemak + (wS / 100) * (Number(ing.fat100g) || 0),
+              karbohidrat: acc.small.karbohidrat + (wS / 100) * (Number(ing.carb100g) || 0),
+              serat: acc.small.serat + (wS / 100) * (Number(ing.fiber100g) || 0),
+            },
+            large: {
+              energi: acc.large.energi + (wL / 100) * (Number(ing.calories100g) || 0),
+              protein: acc.large.protein + (wL / 100) * (Number(ing.protein100g) || 0),
+              lemak: acc.large.lemak + (wL / 100) * (Number(ing.fat100g) || 0),
+              karbohidrat: acc.large.karbohidrat + (wL / 100) * (Number(ing.carb100g) || 0),
+              serat: acc.large.serat + (wL / 100) * (Number(ing.fiber100g) || 0),
+            },
+          };
+        },
+        {
+          small: { energi: 0, protein: 0, lemak: 0, karbohidrat: 0, serat: 0 },
+          large: { energi: 0, protein: 0, lemak: 0, karbohidrat: 0, serat: 0 },
+        }
+      );
+    }
+    const ratio =
+      activeMenu.caloriesSmall > 0 && activeMenu.caloriesLarge > 0
+        ? activeMenu.caloriesLarge / activeMenu.caloriesSmall
+        : 1.25;
+    return {
+      small: {
+        energi: activeMenu.caloriesSmall || 0,
+        protein: activeMenu.proteinGrams || 0,
+        lemak: activeMenu.fatGrams || 0,
+        karbohidrat: activeMenu.carbGrams || 0,
+        serat: activeMenu.fiberGrams || 0,
+      },
+      large: {
+        energi: activeMenu.caloriesLarge || 0,
+        protein: (activeMenu.proteinGrams || 0) * ratio,
+        lemak: (activeMenu.fatGrams || 0) * ratio,
+        karbohidrat: (activeMenu.carbGrams || 0) * ratio,
+        serat: (activeMenu.fiberGrams || 0) * ratio,
+      },
+    };
+  }, [activeIngredients, activeMenu]);
+
   const [selectedPortioningId, setSelectedPortioningId] = useState<string>('AUTO');
 
-  // Helper resolusi foto Porsi Kecil & Besar dari record Divisi Pemorsian
   const getPortioningPhotos = (rec?: PortioningInspectionRecord) => {
     const small =
       rec?.smallPortionPhoto ||
@@ -103,7 +503,6 @@ export const MenuFlyerModule: React.FC = () => {
     return { small, large };
   };
 
-  // Cari log Divisi Pemorsian terbaik untuk menu terpilih (prioritas: menuId cocok -> tanggal menu cocok -> log terbaru dengan foto)
   const autoMatchedPortioning: PortioningInspectionRecord | undefined = useMemo(() => {
     if (portioningRecords.length === 0) return undefined;
     const byMenuWithPhoto = portioningRecords.find(p => {
@@ -139,23 +538,17 @@ export const MenuFlyerModule: React.FC = () => {
 
   const portioningPhotos = useMemo(() => getPortioningPhotos(activePortioning), [activePortioning]);
 
-  // Default fallback high quality ompreng photos
-  const defaultSmallPortionPhoto =
-    portioningPhotos.small ||
-    'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80';
-  const defaultLargePortionPhoto =
-    portioningPhotos.large ||
-    'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=800&q=80';
+  const defaultSmallPortionPhoto = portioningPhotos.small || '';
+  const defaultLargePortionPhoto = portioningPhotos.large || '';
 
-  // State for the two photos: Porsi Kecil and Porsi Besar
   const [smallPhotoUrl, setSmallPhotoUrl] = useState<string>(defaultSmallPortionPhoto);
   const [largePhotoUrl, setLargePhotoUrl] = useState<string>(defaultLargePortionPhoto);
   const [smallPhotoSource, setSmallPhotoSource] = useState<'portioning' | 'custom'>('portioning');
   const [largePhotoSource, setLargePhotoSource] = useState<'portioning' | 'custom'>('portioning');
-  const [smallPhotoCaption, setSmallPhotoCaption] = useState<string>('Ompreng Porsi Kecil (PAUD & SD 1-3)');
-  const [largePhotoCaption, setLargePhotoCaption] = useState<string>('Ompreng Porsi Besar (SD 4-6, SMP, SMA, Santri)');
+  const [smallPhotoError, setSmallPhotoError] = useState<boolean>(false);
+  const [largePhotoError, setLargePhotoError] = useState<boolean>(false);
 
-  // Automatic Background Removal Feature (Hapus Background Otomatis Ompreng & Makanan)
+  // Automatic Background Removal Feature
   const [autoRemoveBg, setAutoRemoveBg] = useState<boolean>(true);
   const [removeBgSmall, setRemoveBgSmall] = useState<boolean>(true);
   const [removeBgLarge, setRemoveBgLarge] = useState<boolean>(true);
@@ -165,9 +558,11 @@ export const MenuFlyerModule: React.FC = () => {
   const [isProcessingCutoutLarge, setIsProcessingCutoutLarge] = useState<boolean>(false);
   const [cutoutTolerance, setCutoutTolerance] = useState<number>(38);
 
-  // Background Removal Processor for Porsi Kecil
   const processSmallPhotoCutout = async (url: string, tolerance = cutoutTolerance) => {
-    if (!url) return;
+    if (!url) {
+      setCutoutSmallUrl(null);
+      return;
+    }
     setIsProcessingCutoutSmall(true);
     try {
       const cutout = await removeOmprengBackground(url, { tolerance, feather: 18 });
@@ -179,9 +574,11 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Background Removal Processor for Porsi Besar
   const processLargePhotoCutout = async (url: string, tolerance = cutoutTolerance) => {
-    if (!url) return;
+    if (!url) {
+      setCutoutLargeUrl(null);
+      return;
+    }
     setIsProcessingCutoutLarge(true);
     try {
       const cutout = await removeOmprengBackground(url, { tolerance, feather: 18 });
@@ -193,19 +590,20 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Saat menu atau sumber record Pemorsian dipilih ulang, kembalikan ke mode sinkron otomatis Divisi Pemorsian
   useEffect(() => {
     setSmallPhotoSource('portioning');
     setLargePhotoSource('portioning');
     setSmallPhotoUrl(defaultSmallPortionPhoto);
     setLargePhotoUrl(defaultLargePortionPhoto);
+    setSmallPhotoError(false);
+    setLargePhotoError(false);
   }, [selectedMenuId, selectedPortioningId]);
 
-  // Sinkronisasi otomatis real-time saat foto Porsi Kecil/Besar di Divisi Pemorsian berubah atau baru diinput
   useEffect(() => {
     if (portioningPhotos.small) {
       setSmallPhotoSource('portioning');
       setSmallPhotoUrl(portioningPhotos.small);
+      setSmallPhotoError(false);
     } else if (smallPhotoSource === 'portioning') {
       setSmallPhotoUrl(defaultSmallPortionPhoto);
     }
@@ -215,12 +613,12 @@ export const MenuFlyerModule: React.FC = () => {
     if (portioningPhotos.large) {
       setLargePhotoSource('portioning');
       setLargePhotoUrl(portioningPhotos.large);
+      setLargePhotoError(false);
     } else if (largePhotoSource === 'portioning') {
       setLargePhotoUrl(defaultLargePortionPhoto);
     }
   }, [portioningPhotos.large, defaultLargePortionPhoto]);
 
-  // Trigger background removal when small photo changes
   useEffect(() => {
     if (autoRemoveBg && smallPhotoUrl) {
       processSmallPhotoCutout(smallPhotoUrl, cutoutTolerance);
@@ -229,7 +627,6 @@ export const MenuFlyerModule: React.FC = () => {
     }
   }, [smallPhotoUrl, autoRemoveBg]);
 
-  // Trigger background removal when large photo changes
   useEffect(() => {
     if (autoRemoveBg && largePhotoUrl) {
       processLargePhotoCutout(largePhotoUrl, cutoutTolerance);
@@ -238,7 +635,6 @@ export const MenuFlyerModule: React.FC = () => {
     }
   }, [largePhotoUrl, autoRemoveBg]);
 
-  // Active displayed photos based on background removal status
   const displayedSmallPhoto =
     autoRemoveBg && removeBgSmall && cutoutSmallUrl ? cutoutSmallUrl : smallPhotoUrl;
   const displayedLargePhoto =
@@ -246,7 +642,6 @@ export const MenuFlyerModule: React.FC = () => {
   const isSmallCutoutActive = autoRemoveBg && removeBgSmall && Boolean(cutoutSmallUrl);
   const isLargeCutoutActive = autoRemoveBg && removeBgLarge && Boolean(cutoutLargeUrl);
 
-  // Handle Photo Upload for Porsi Kecil
   const handleUploadSmallPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -255,6 +650,7 @@ export const MenuFlyerModule: React.FC = () => {
         const resultUrl = reader.result as string;
         setSmallPhotoSource('custom');
         setSmallPhotoUrl(resultUrl);
+        setSmallPhotoError(false);
         if (autoRemoveBg) {
           processSmallPhotoCutout(resultUrl, cutoutTolerance);
         }
@@ -263,7 +659,6 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Handle Photo Upload for Porsi Besar
   const handleUploadLargePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -272,6 +667,7 @@ export const MenuFlyerModule: React.FC = () => {
         const resultUrl = reader.result as string;
         setLargePhotoSource('custom');
         setLargePhotoUrl(resultUrl);
+        setLargePhotoError(false);
         if (autoRemoveBg) {
           processLargePhotoCutout(resultUrl, cutoutTolerance);
         }
@@ -280,26 +676,26 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Reset / Sinkronkan ulang foto dari input Divisi Pemorsian
   const handleResetPhotos = () => {
     setSmallPhotoSource('portioning');
     setLargePhotoSource('portioning');
     setSmallPhotoUrl(defaultSmallPortionPhoto);
     setLargePhotoUrl(defaultLargePortionPhoto);
+    setSmallPhotoError(false);
+    setLargePhotoError(false);
     if (autoRemoveBg) {
       processSmallPhotoCutout(defaultSmallPortionPhoto, cutoutTolerance);
       processLargePhotoCutout(defaultLargePortionPhoto, cutoutTolerance);
     }
   };
 
-  // Handle Download PNG
   const handleDownloadPNG = async () => {
     if (!flyerRef.current) return;
     try {
       setIsDownloading(true);
       const dataUrl = await toPng(flyerRef.current, {
         quality: 0.98,
-        pixelRatio: 2.5, // High resolution output
+        pixelRatio: 2.5,
         cacheBust: true,
         skipFonts: true,
       });
@@ -316,7 +712,6 @@ export const MenuFlyerModule: React.FC = () => {
     }
   };
 
-  // Handle Print (uses resilient print + PDF fallback)
   const handlePrint = () => {
     triggerPrint({
       targetSelector: '.flyer-print-target',
@@ -325,69 +720,101 @@ export const MenuFlyerModule: React.FC = () => {
     });
   };
 
-  // Handle Copy Caption Text for WhatsApp / Social Media
   const handleCopyCaption = () => {
-    const caption = `🍽️ *MENU MAKAN BERGIZI GRATIS (MBG) HARI INI*
-📍 *${sppgConfig.sppgName}* (ID: ${sppgConfig.sppgId})
-Yayasan Hafshawaty • Badan Gizi Nasional (BGN) RI
+    const smallLines = dishRows
+      .map(d => {
+        const gramPart =
+          grammageMode === 'all' || (grammageMode === 'staple_only' && d.isStaple)
+            ? ` (${Math.round(d.smallGrams)}gr)`
+            : '';
+        const pricePart = showItemPrices ? ` ${formatFlyerRupiah(d.costSmall)}` : '';
+        return `• ${d.name}${gramPart}${pricePart}`;
+      })
+      .join('\n');
 
-📅 *Hari/Tanggal:* ${activeMenu.dayName}, ${formatIndonesianDate(activeMenu.date)}
-🔖 *Kode Menu:* ${activeMenu.menuCode}
-🎯 *Sasaran Penerima:* ${targetAudienceText}
+    const largeLines = dishRows
+      .map(d => {
+        const gramPart =
+          grammageMode === 'all' || (grammageMode === 'staple_only' && d.isStaple)
+            ? ` (${Math.round(d.largeGrams)}gr)`
+            : '';
+        const pricePart = showItemPrices ? ` ${formatFlyerRupiah(d.costLarge)}` : '';
+        return `• ${d.name}${gramPart}${pricePart}`;
+      })
+      .join('\n');
 
-🍚 *KOMPOSISI MENU LENGKAP (Isi Piringku MBG):*
-• Makanan Pokok: ${activeMenu.stapleFood}
-• Lauk Hewani: ${activeMenu.animalProtein}
-• Lauk Nabati: ${activeMenu.plantProtein}
-• Sayuran Segar: ${activeMenu.vegetable}
-• Buah Segar: ${activeMenu.fruit}
-• Pelengkap / Susu: ${activeMenu.milkOrExtra}
+    const caption = `🍽️ *${sppgConfig.sppgName}*
+📅 *${formatSingleDayDate(activeMenu.date, activeMenu.dayName)}*
 
-📸 *DOKUMENTASI FOTO DUA PORSI MBG:*
-1. Porsi Kecil (PAUD & SD 1-3): Gramasi ~${activePortioning?.smallPortionWeightGrams || 395}g | ${activeMenu.caloriesSmall || 620} kkal | Protein ${activeMenu.proteinGrams || 28.5}g
-2. Porsi Besar (SD 4-6, SMP, SMA, Santri): Gramasi ~${activePortioning?.largePortionWeightGrams || 585}g | ${activeMenu.caloriesLarge || 875} kkal | Protein ${((activeMenu.proteinGrams || 28.5) * 1.25).toFixed(1)}g
+🥣 *Porsi Kecil (${displayedSmallPortions} porsi):*
+${smallLines}
+📊 Gizi: Energi ${formatFlyerDecimal(nutritionTotals.small.energi)} kkal | Protein ${formatFlyerDecimal(nutritionTotals.small.protein)} g | Lemak ${formatFlyerDecimal(nutritionTotals.small.lemak)} g | Karbohidrat ${formatFlyerDecimal(nutritionTotals.small.karbohidrat)} g | Serat ${formatFlyerDecimal(nutritionTotals.small.serat)} g
 
-⏰ *BATAS KONSUMSI MAKAN (Food Safety):*
-• Batas Santap Porsi Kecil: ${smallConsumptionDeadline}
-• Batas Santap Porsi Besar: ${largeConsumptionDeadline}
-⚠️ _Disajikan segar dalam ompreng stainless steril bersegel. Hindari konsumsi jika telah melewati batas waktu._
+🍱 *Porsi Besar (${displayedLargePortions} porsi):*
+${largeLines}
+📊 Gizi: Energi ${formatFlyerDecimal(nutritionTotals.large.energi)} kkal | Protein ${formatFlyerDecimal(nutritionTotals.large.protein)} g | Lemak ${formatFlyerDecimal(nutritionTotals.large.lemak)} g | Karbohidrat ${formatFlyerDecimal(nutritionTotals.large.karbohidrat)} g | Serat ${formatFlyerDecimal(nutritionTotals.large.serat)} g
 
-Pengawas Gizi: ${sppgConfig.nutritionOfficer}
-Kepala SPPG: ${sppgConfig.headOfSppg}
-#BadanGiziNasional #MakanBergiziGratis #Hafshawaty #SPPGProbolinggo`;
+⚠️ Batas konsumsi maksimal porsi kecil ${smallConsumptionDeadline} & porsi besar ${largeConsumptionDeadline}`;
 
     navigator.clipboard.writeText(caption);
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 3000);
   };
 
-  // Size Dimensions Class Mapping for Preview
-  const containerDimensions = {
-    a4: 'w-[794px] min-h-[1123px]', // Standard A4 Aspect Ratio at 96 DPI
-    social_square: 'w-[750px] min-h-[750px] aspect-square', // 1:1 Feed
-    social_story: 'w-[600px] min-h-[1066px]', // 9:16 Story / Status WA
+  const containerDimensions: Record<FlyerSizeId, string> = {
+    a4: 'w-[794px] min-h-[1000px]',
+    social_square: 'w-[760px] min-h-[760px]',
+    social_story: 'w-[600px] min-h-[1066px]',
   };
+
+  const activeTheme = FLYER_THEMES[template];
+  const [headerLogoError, setHeaderLogoError] = useState(false);
+
+  const formatDishBulletLabel = (row: FlyerDishRow, portion: 'small' | 'large') => {
+    const grams = portion === 'small' ? row.smallGrams : row.largeGrams;
+    const cost = portion === 'small' ? row.costSmall : row.costLarge;
+    const showGrams =
+      grammageMode === 'all' || (grammageMode === 'staple_only' && row.isStaple);
+    const gramText = showGrams && grams > 0 ? ` (${Math.round(grams)}gr)` : '';
+    const priceText = showItemPrices ? ` ${formatFlyerRupiah(cost)}` : '';
+    return `${row.name}${gramText}${priceText}`;
+  };
+
+  const sppgHeadlineLines = useMemo(() => {
+    const raw = (sppgConfig.sppgName || 'SPPG PROBOLINGGO KREJENGAN TEMENGGUNGAN 2').toUpperCase().trim();
+    const parts = raw.split(/\s+/);
+    if (parts.length >= 4 && parts[0] === 'SPPG') {
+      return [
+        `${parts[0]} ${parts[1]}`,
+        parts[2],
+        parts.slice(3).join(' '),
+      ];
+    }
+    return [raw];
+  }, [sppgConfig.sppgName]);
+
+  const renderTrayFallback = (label: string) => (
+    <div className="w-full h-44 rounded-xl border border-dashed border-slate-300 bg-white/80 flex flex-col items-center justify-center text-slate-400 gap-2 p-4">
+      <Utensils className="w-8 h-8 opacity-60" />
+      <span className="text-xs font-semibold text-center text-slate-500">
+        Foto Ompreng {label} belum tersedia
+      </span>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      {/* ========================================================================= */}
-      {/* TOP BAR / ACTION HEADER */}
-      {/* ========================================================================= */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 print:hidden">
+      {/* TOP ACTION BAR */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 print:hidden">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 text-xs font-bold flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Auto-Generator Publikasi MBG
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-xs font-bold">
-              Input 2 Foto Kategori (Besar & Kecil)
-            </span>
+          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            Publikasi Resmi SPPG · Integrasi PLOG &amp; Divisi Pemorsian
           </div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-white mt-1">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-0.5">
             Pembuat Flyer Menu Harian MBG Otomatis
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Terintegrasi otomatis dengan <strong>Perencanaan Gizi (PLOG)</strong> dan <strong>Dokumentasi Pemorsian Ompreng</strong>. Menampilkan foto dan standar gizi untuk kedua porsi.
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Menampilkan foto porsi kecil &amp; besar, daftar menu beserta harga/gramasi, kandungan gizi aktual, standar AKG, jumlah porsi, dan batas konsumsi.
           </p>
         </div>
 
@@ -395,8 +822,7 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
           <button
             type="button"
             onClick={handleCopyCaption}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition"
-            title="Salin caption WhatsApp lengkap dengan detail gizi dan batas santap"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition whitespace-nowrap shrink-0"
           >
             {copySuccess ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
             {copySuccess ? 'Tersalin!' : 'Salin Caption WA'}
@@ -405,8 +831,7 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
           <button
             type="button"
             onClick={handlePrint}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white transition shadow-sm"
-            title="Cetak langsung atau simpan dokumen PDF"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white transition whitespace-nowrap shrink-0"
           >
             <Printer className="w-4 h-4" /> Cetak / PDF
           </button>
@@ -415,8 +840,7 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
             type="button"
             onClick={handleDownloadPNG}
             disabled={isDownloading}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-blue-900 hover:bg-blue-800 text-white transition shadow-md shadow-blue-900/20 disabled:opacity-60"
-            title="Download gambar PNG resolusi tinggi siap diposting dan dicetak"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#163653] hover:bg-[#1e466b] text-white transition disabled:opacity-60 whitespace-nowrap shrink-0"
           >
             {isDownloading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
             {isDownloading ? 'Memproses...' : 'Download PNG'}
@@ -424,311 +848,160 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* MAIN TWO-COLUMN WORKSPACE: CONTROLS (LEFT) & LIVE PREVIEW (RIGHT) */}
-      {/* ========================================================================= */}
+      {/* TWO-COLUMN WORKSPACE: CONTROLS (LEFT) & LIVE PREVIEW (RIGHT) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: CONTROLS & PHOTO INPUTS */}
-        <div className="lg:col-span-4 space-y-5 print:hidden">
-          {/* Card 1: Menu Selection from PLOG */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+        {/* LEFT COLUMN: CONTROLS */}
+        <div className="lg:col-span-4 space-y-4 print:hidden">
+          {/* 1. Menu Selection from PLOG */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
               <Calendar className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 1. Sumber Data Menu PLOG
               </h3>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Pilih Menu & Tanggal:
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Pilih Menu &amp; Tanggal
               </label>
               <select
                 value={selectedMenuId}
                 onChange={e => setSelectedMenuId(e.target.value)}
-                className="w-full text-xs font-medium rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-900"
+                className="w-full text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-white"
               >
                 {menuItems.map(m => (
                   <option key={m.id} value={m.id}>
-                    {m.dayName}, {formatIndonesianDate(m.date)} — {m.animalProtein.slice(0, 32)}...
+                    {formatSingleDayDate(m.date, m.dayName)} — {m.animalProtein.slice(0, 32)}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Quick Menu Summary Loaded */}
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 text-[11px] space-y-1.5">
-              <div className="flex items-center justify-between font-bold text-blue-950 dark:text-sky-300">
-                <span>{activeMenu.menuCode}</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-200 dark:bg-blue-900 text-blue-900 dark:text-sky-200 text-[10px]">
-                  {activeMenu.targetPortions} Porsi Target
-                </span>
-              </div>
-              <div className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                <strong>Lauk:</strong> {activeMenu.animalProtein} & {activeMenu.plantProtein}
-              </div>
-              <div className="text-slate-700 dark:text-slate-300">
-                <strong>Sayur & Buah:</strong> {activeMenu.vegetable}, {activeMenu.fruit}
-              </div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center justify-between pt-1">
+              <span className="font-mono">{activeMenu.menuCode}</span>
+              <span>{dishRows.length} item hidangan terdeteksi</span>
             </div>
           </div>
 
-          {/* Card 2: INPUT DUA FOTO BERDASARKAN KATEGORI PORSI */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+          {/* 2. Foto Porsi Kecil & Besar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                  2. Foto Porsi (Otomatis dari Divisi Pemorsian)
+                <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  2. Foto Ompreng Porsi
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={handleResetPhotos}
-                className="text-[10px] text-blue-800 dark:text-sky-400 hover:underline flex items-center gap-1 font-bold"
-                title="Ambil ulang foto porsi kecil & besar terbaru dari Divisi Pemorsian"
+                className="text-[11px] text-blue-800 dark:text-sky-400 hover:underline flex items-center gap-1 font-semibold whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="w-3 h-3" /> Sinkron Pemorsian
               </button>
             </div>
 
-            {/* Pemilih & Status Sumber Data Divisi Pemorsian */}
-            <div className="p-3 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  Sumber: Input Gramasi &amp; Suhu Divisi Pemorsian
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700">
-                  {activePortioning ? activePortioning.date : 'Fallback'}
-                </span>
-              </div>
-
-              <select
-                value={selectedPortioningId}
-                onChange={e => setSelectedPortioningId(e.target.value)}
-                className="w-full text-[11px] font-medium rounded-lg border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-slate-800 dark:text-slate-200"
-              >
-                <option value="AUTO">
-                  Otomatis (Sesuai Menu / Input Terbaru Divisi Pemorsian)
+            <select
+              value={selectedPortioningId}
+              onChange={e => setSelectedPortioningId(e.target.value)}
+              className="w-full text-[11px] font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-800 dark:text-slate-200"
+            >
+              <option value="AUTO">Otomatis (Sesuai Menu / Log Terbaru Pemorsian)</option>
+              {portioningRecords.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.date} ({p.time}) · Kecil {p.smallPortionWeightGrams}g / Besar {p.largePortionWeightGrams}g
                 </option>
-                {portioningRecords.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.date} ({p.time}) • Kecil {p.smallPortionWeightGrams}g / Besar {p.largePortionWeightGrams}g — {p.officerName}
-                  </option>
-                ))}
-              </select>
+              ))}
+            </select>
 
-              {activePortioning && (
-                <div className="text-[10px] text-emerald-800 dark:text-emerald-300 leading-snug">
-                  Petugas: <strong>{activePortioning.officerName}</strong> ({activePortioning.portioningTime}) • Gramasi:{' '}
-                  <strong>{activePortioning.smallPortionWeightGrams}g</strong> (Kecil) &amp;{' '}
-                  <strong>{activePortioning.largePortionWeightGrams}g</strong> (Besar)
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Small photo upload */}
+              <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                  Foto Porsi Kecil
                 </div>
-              )}
-            </div>
-
-            {/* Photo Input A: PORSI KECIL */}
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    👶 Foto Porsi Kecil (PAUD &amp; SD 1-3)
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Standar: ~{activePortioning?.smallPortionWeightGrams || 395}g •{' '}
-                    <span className={smallPhotoSource === 'portioning' ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : 'text-amber-700 dark:text-amber-400 font-semibold'}>
-                      {smallPhotoSource === 'portioning' ? 'Otomatis dari Div. Pemorsian' : 'Override Manual'}
-                    </span>
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 text-[10px] font-bold shrink-0">
-                  Kategori A
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <img
-                  src={smallPhotoUrl}
-                  alt="Porsi Kecil"
-                  className="w-16 h-16 rounded-lg object-cover border border-slate-300 dark:border-slate-700 shrink-0"
-                />
-                <div className="flex-1 space-y-1.5 min-w-0">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition shadow-2xs">
-                    <Upload className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400" />
-                    <span>Ganti Foto Manual</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUploadSmallPhoto}
-                      className="hidden"
-                    />
-                  </label>
-                  <input
-                    type="text"
-                    value={smallPhotoCaption}
-                    onChange={e => setSmallPhotoCaption(e.target.value)}
-                    placeholder="Label porsi kecil..."
-                    className="w-full text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 text-slate-800 dark:text-slate-200"
+                {smallPhotoUrl ? (
+                  <img
+                    src={smallPhotoUrl}
+                    alt="Preview Porsi Kecil"
+                    className="w-full h-20 rounded object-cover border border-slate-200 dark:border-slate-700"
                   />
-                </div>
-              </div>
-            </div>
-
-            {/* Photo Input B: PORSI BESAR */}
-            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    🧑‍🎓 Foto Porsi Besar (SD 4-6, SMP, SMA, Santri)
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    Standar: ~{activePortioning?.largePortionWeightGrams || 585}g •{' '}
-                    <span className={largePhotoSource === 'portioning' ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : 'text-amber-700 dark:text-amber-400 font-semibold'}>
-                      {largePhotoSource === 'portioning' ? 'Otomatis dari Div. Pemorsian' : 'Override Manual'}
-                    </span>
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold shrink-0">
-                  Kategori B
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <img
-                  src={largePhotoUrl}
-                  alt="Porsi Besar"
-                  className="w-16 h-16 rounded-lg object-cover border border-slate-300 dark:border-slate-700 shrink-0"
-                />
-                <div className="flex-1 space-y-1.5 min-w-0">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer transition shadow-2xs">
-                    <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Ganti Foto Manual</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUploadLargePhoto}
-                      className="hidden"
-                    />
-                  </label>
-                  <input
-                    type="text"
-                    value={largePhotoCaption}
-                    onChange={e => setLargePhotoCaption(e.target.value)}
-                    placeholder="Label porsi besar..."
-                    className="w-full text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 text-slate-800 dark:text-slate-200"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* FITUR HAPUS BACKGROUND OTOMATIS (OMPRENG & ISI MAKANAN SAJA) */}
-            <div className="p-3.5 rounded-xl bg-linear-to-r from-emerald-50 via-teal-50 to-sky-50 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-sky-950/40 border border-emerald-200 dark:border-emerald-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-emerald-600 text-white shadow-xs">
-                    <Sparkles className="w-4 h-4" />
+                ) : (
+                  <div className="w-full h-20 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
+                    Belum ada foto
                   </div>
-                  <div>
-                    <h4 className="text-xs font-black text-emerald-950 dark:text-emerald-200 uppercase tracking-wide">
-                      Hapus Background Foto Otomatis
-                    </h4>
-                    <p className="text-[10px] text-emerald-800 dark:text-emerald-300">
-                      Hanya ompreng stainless & makanan yang ditampilkan (tanpa meja dapur)
-                    </p>
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoRemoveBg}
-                    onChange={e => setAutoRemoveBg(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-hidden rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                )}
+                <label className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                  <Upload className="w-3 h-3" />
+                  <span>Ganti Foto</span>
+                  <input type="file" accept="image/*" onChange={handleUploadSmallPhoto} className="hidden" />
                 </label>
               </div>
 
+              {/* Large photo upload */}
+              <div className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                  Foto Porsi Besar
+                </div>
+                {largePhotoUrl ? (
+                  <img
+                    src={largePhotoUrl}
+                    alt="Preview Porsi Besar"
+                    className="w-full h-20 rounded object-cover border border-slate-200 dark:border-slate-700"
+                  />
+                ) : (
+                  <div className="w-full h-20 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
+                    Belum ada foto
+                  </div>
+                )}
+                <label className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                  <Upload className="w-3 h-3" />
+                  <span>Ganti Foto</span>
+                  <input type="file" accept="image/*" onChange={handleUploadLargePhoto} className="hidden" />
+                </label>
+              </div>
+            </div>
+
+            {/* Auto Cutout Background */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  Hapus Background Foto Otomatis
+                </span>
+                <input
+                  type="checkbox"
+                  checked={autoRemoveBg}
+                  onChange={e => setAutoRemoveBg(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-600"
+                />
+              </div>
+
               {autoRemoveBg && (
-                <div className="space-y-2.5 pt-2 border-t border-emerald-200/60 dark:border-emerald-800/60 text-xs">
-                  {/* Status Banner */}
-                  <div className="p-2 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-emerald-200 dark:border-emerald-800/80 text-[11px] flex items-center justify-between">
-                    <span className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      Status Cutout Aktif
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">
-                      Ompreng Terisolasi
-                    </span>
+                <div className="space-y-2 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={removeBgSmall}
+                        onChange={e => setRemoveBgSmall(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Cutout Kecil {isProcessingCutoutSmall ? '(proses...)' : ''}</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={removeBgLarge}
+                        onChange={e => setRemoveBgLarge(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Cutout Besar {isProcessingCutoutLarge ? '(proses...)' : ''}</span>
+                    </label>
                   </div>
-
-                  {/* Individual Controls */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
-                      <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-slate-800 dark:text-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={removeBgSmall}
-                          onChange={e => setRemoveBgSmall(e.target.checked)}
-                          className="rounded text-emerald-600 focus:ring-emerald-600"
-                        />
-                        <span>Porsi Kecil</span>
-                      </label>
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-slate-500">Ompreng PAUD/SD</span>
-                        {isProcessingCutoutSmall ? (
-                          <span className="text-emerald-600 font-bold flex items-center gap-0.5 animate-pulse">
-                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Proses
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => processSmallPhotoCutout(smallPhotoUrl)}
-                            className="text-emerald-700 dark:text-sky-400 font-bold hover:underline"
-                          >
-                            Proses Ulang
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
-                      <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-slate-800 dark:text-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={removeBgLarge}
-                          onChange={e => setRemoveBgLarge(e.target.checked)}
-                          className="rounded text-emerald-600 focus:ring-emerald-600"
-                        />
-                        <span>Porsi Besar</span>
-                      </label>
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-slate-500">Ompreng Santri</span>
-                        {isProcessingCutoutLarge ? (
-                          <span className="text-emerald-600 font-bold flex items-center gap-0.5 animate-pulse">
-                            <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Proses
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => processLargePhotoCutout(largePhotoUrl)}
-                            className="text-emerald-700 dark:text-sky-400 font-bold hover:underline"
-                          >
-                            Proses Ulang
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Cutout Tolerance Slider */}
-                  <div className="p-2 rounded-lg bg-white/70 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 space-y-1">
-                    <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-400">
-                      <span>Sensitivitas Isolasi Ompreng:</span>
-                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
-                        {cutoutTolerance}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500 shrink-0">Toleransi: {cutoutTolerance}</span>
                     <input
                       type="range"
                       min={20}
@@ -741,262 +1014,298 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
                         processSmallPhotoCutout(smallPhotoUrl, val);
                         processLargePhotoCutout(largePhotoUrl, val);
                       }}
-                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg cursor-pointer accent-emerald-600"
                     />
-                    <div className="flex justify-between text-[9px] text-slate-400">
-                      <span>Presisi</span>
-                      <span>Standar (38)</span>
-                      <span>Bersih Total</span>
-                    </div>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Mode Tata Letak Foto di Flyer */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
-                Tata Letak Foto Pada Flyer:
+            {/* Layout Mode */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+              <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
+                Tata Letak Foto
               </label>
-              <div className="grid grid-cols-3 gap-1.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setPhotoLayoutMode('dual_both')}
-                  className={`p-2 rounded-lg border text-center transition ${
-                    photoLayoutMode === 'dual_both'
-                      ? 'border-blue-900 bg-blue-50 font-bold dark:bg-blue-950/40 text-blue-900 dark:text-sky-300'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  Dua Foto (Berdampingan)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPhotoLayoutMode('small_only')}
-                  className={`p-2 rounded-lg border text-center transition ${
-                    photoLayoutMode === 'small_only'
-                      ? 'border-blue-900 bg-blue-50 font-bold dark:bg-blue-950/40 text-blue-900 dark:text-sky-300'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  Fokus Porsi Kecil
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPhotoLayoutMode('large_only')}
-                  className={`p-2 rounded-lg border text-center transition ${
-                    photoLayoutMode === 'large_only'
-                      ? 'border-blue-900 bg-blue-50 font-bold dark:bg-blue-950/40 text-blue-900 dark:text-sky-300'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  Fokus Porsi Besar
-                </button>
+              <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                {[
+                  { id: 'dual_both', label: 'Dua Foto' },
+                  { id: 'small_only', label: 'Porsi Kecil' },
+                  { id: 'large_only', label: 'Porsi Besar' },
+                ].map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => setPhotoLayoutMode(mode.id as any)}
+                    className={`py-1.5 px-2 rounded-md border text-center transition whitespace-nowrap ${
+                      photoLayoutMode === mode.id
+                        ? 'border-[#163653] bg-slate-100 dark:bg-slate-800 font-bold text-[#163653] dark:text-sky-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Card 3: Template & Canvas Size Selection */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+          {/* 3. Tema Warna & Ukuran */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
-              <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                3. Pilihan Template & Ukuran
+              <Layers className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                3. Tema Warna &amp; Dimensi
               </h3>
             </div>
 
-            {/* Template Selector */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-                Pilihan Desain Template:
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { id: 'modern_bgn', label: 'Modern Official BGN', desc: 'Resmi, Navy & Gold' },
-                  { id: 'nutri_infographic', label: 'Infografis Gizi Sehat', desc: 'Visual Nutrisi, Hijau Fresh' },
-                  { id: 'nusantara_warm', label: 'Dapur Nusantara', desc: 'Terracotta & Hangat' },
-                  { id: 'school_friendly', label: 'Edukasi Ramah Anak', desc: 'Ceria, Edukatif, Ramah Siswa' },
-                ].map(t => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setTemplate(t.id as FlyerTemplateId)}
-                    className={`p-2.5 rounded-xl text-left border transition text-xs ${
-                      template === t.id
-                        ? 'border-blue-900 bg-blue-50/70 dark:bg-blue-950/40 text-blue-900 dark:text-sky-300 font-bold ring-2 ring-blue-900/30'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <div className="text-xs font-bold leading-tight">{t.label}</div>
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t.desc}</div>
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'modern_bgn', label: 'Resmi SPPG', desc: 'Navy & Biru Langit' },
+                { id: 'nutri_infographic', label: 'Hijau Gizi', desc: 'Forest & Mint' },
+                { id: 'nusantara_warm', label: 'Nusantara', desc: 'Cokelat & Krem' },
+                { id: 'school_friendly', label: 'Ceria Sekolah', desc: 'Biru Cerah' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTemplate(t.id as FlyerTemplateId)}
+                  className={`p-2 rounded-lg text-left border transition text-xs ${
+                    template === t.id
+                      ? 'border-[#163653] bg-sky-50/70 dark:bg-blue-950/40 text-blue-950 dark:text-sky-300 font-bold'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="font-bold leading-tight">{t.label}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{t.desc}</div>
+                </button>
+              ))}
             </div>
 
-            {/* Size Selector */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-                Format Dimensi / Media:
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'a4', label: 'A4 Cetak', sub: 'Poster Mading' },
-                  { id: 'social_square', label: 'Feed 1:1', sub: 'Instagram / WA' },
-                  { id: 'social_story', label: 'Story 9:16', sub: 'Status WA / IG' },
-                ].map(s => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setSize(s.id as FlyerSizeId)}
-                    className={`p-2 rounded-xl text-center border transition ${
-                      size === s.id
-                        ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-300 font-bold ring-2 ring-emerald-600/30'
-                        : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <div className="text-xs font-bold">{s.label}</div>
-                    <div className="text-[9px] text-slate-500">{s.sub}</div>
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              {[
+                { id: 'a4', label: 'A4 Cetak' },
+                { id: 'social_square', label: 'Feed 1:1' },
+                { id: 'social_story', label: 'Story 9:16' },
+              ].map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSize(s.id as FlyerSizeId)}
+                  className={`py-1.5 px-2 rounded-lg text-center border transition text-xs ${
+                    size === s.id
+                      ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-300 font-bold'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Card 4: Consumption Deadline & Food Safety Settings */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+          {/* 4. Jumlah Porsi, AKG, Harga & Batas Konsumsi */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
               <Clock className="w-4 h-4 text-rose-500" />
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                4. Batas Konsumsi & Keamanan Pangan
+              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                4. Detail Porsi, AKG &amp; Batas Konsumsi
               </h3>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Batas Porsi Kecil (PAUD/SD 1-3):
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Batas Porsi Kecil
                 </label>
                 <input
                   type="text"
                   value={smallConsumptionDeadline}
                   onChange={e => setSmallConsumptionDeadline(e.target.value)}
-                  placeholder="e.g. Pukul 11:15 WIB"
-                  className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-white"
+                  className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                 />
               </div>
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Batas Porsi Besar (SD 4-6, SMP):
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Batas Porsi Besar
                 </label>
                 <input
                   type="text"
                   value={largeConsumptionDeadline}
                   onChange={e => setLargeConsumptionDeadline(e.target.value)}
-                  placeholder="e.g. Pukul 12:30 WIB"
-                  className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-white"
+                  className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                 />
               </div>
             </div>
 
-            {/* Target Audience Text */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                Sasaran Siswa Penerima Manfaat:
-              </label>
-              <input
-                type="text"
-                value={targetAudienceText}
-                onChange={e => setTargetAudienceText(e.target.value)}
-                className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-white"
-              />
+            {/* Portion Counts */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-blue-900 dark:text-sky-400" /> Jumlah Porsi Harian
+                </span>
+                {(customSmallCount !== '' || customLargeCount !== '') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomSmallCount('');
+                      setCustomLargeCount('');
+                    }}
+                    className="text-[10px] font-semibold text-blue-700 dark:text-sky-400 hover:underline"
+                  >
+                    Sinkron Lembaga
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-0.5">Porsi Kecil</label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder={String(institutionTotals.small)}
+                    value={customSmallCount}
+                    onChange={e => setCustomSmallCount(e.target.value)}
+                    className="w-full text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-500 mb-0.5">Porsi Besar</label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder={String(institutionTotals.large)}
+                    value={customLargeCount}
+                    onChange={e => setCustomLargeCount(e.target.value)}
+                    className="w-full text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Custom Notes */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                Catatan Higiene & Edukasi Santap:
-              </label>
-              <textarea
-                value={customNote}
-                onChange={e => setCustomNote(e.target.value)}
-                rows={2}
-                className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2 text-slate-900 dark:text-white"
-              />
+            {/* Grammage & AKG Preset */}
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Tampilan Gramasi
+                </label>
+                <select
+                  value={grammageMode}
+                  onChange={e => setGrammageMode(e.target.value as any)}
+                  className="w-full text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1.5 text-slate-800 dark:text-slate-200"
+                >
+                  <option value="staple_only">Makanan Pokok Saja</option>
+                  <option value="all">Semua Item Menu</option>
+                  <option value="none">Sembunyikan</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Acuan Standar AKG
+                </label>
+                <select
+                  value={akgPresetMode}
+                  onChange={e => {
+                    const next = e.target.value as 'flyer_bgn' | 'plog_target';
+                    setAkgPresetMode(next);
+                    setAkgValues(next === 'flyer_bgn' ? FLYER_BGN_AKG_PRESET : PLOG_AKG_PRESET);
+                  }}
+                  className="w-full text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1.5 text-slate-800 dark:text-slate-200"
+                >
+                  <option value="flyer_bgn">Standar Flyer BGN</option>
+                  <option value="plog_target">Standar Target PLOG</option>
+                </select>
+              </div>
             </div>
 
-            {/* Visibility Toggles */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+            {/* Visibility checkboxes */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showCertBadges}
+                  onChange={e => setShowCertBadges(e.target.checked)}
+                  className="rounded"
+                />
+                <span>Tampilkan Lencana BNSP, SLHS &amp; Halal</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showItemPrices}
+                  onChange={e => setShowItemPrices(e.target.checked)}
+                  className="rounded"
+                />
+                <span>Tampilkan Harga per Item Menu (Rp.)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={showNutritionFacts}
                   onChange={e => setShowNutritionFacts(e.target.checked)}
-                  className="rounded text-blue-900 focus:ring-blue-900"
+                  className="rounded"
                 />
-                Tampilkan Rincian Standar Gizi (AKG BGN)
+                <span>Tampilkan Kandungan Gizi &amp; Standar AKG</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showPortionCounts}
+                  onChange={e => setShowPortionCounts(e.target.checked)}
+                  className="rounded"
+                />
+                <span>Tampilkan Total Jumlah Porsi</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={showConsumptionDeadline}
                   onChange={e => setShowConsumptionDeadline(e.target.checked)}
-                  className="rounded text-blue-900 focus:ring-blue-900"
+                  className="rounded"
                 />
-                Tampilkan Kotak Batas Waktu Konsumsi
+                <span>Tampilkan Batas Konsumsi Maksimal</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={showOfficials}
                   onChange={e => setShowOfficials(e.target.checked)}
-                  className="rounded text-blue-900 focus:ring-blue-900"
+                  className="rounded"
                 />
-                Tampilkan Pengawas Gizi & Kepala SPPG
+                <span>Tampilkan Pengesahan Kepala SPPG &amp; Ahli Gizi</span>
               </label>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: INTERACTIVE LIVE PREVIEW CANVAS */}
+        {/* RIGHT COLUMN: LIVE FLYER PREVIEW CANVAS */}
         <div className="lg:col-span-8 space-y-4">
-          {/* Zoom & View Controls */}
           <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 print:hidden text-xs">
             <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300">
               <Eye className="w-4 h-4 text-blue-900 dark:text-sky-400" />
               <span>
-                Preview Flyer ({size === 'a4' ? 'A4 210×297mm' : size === 'social_square' ? '1:1 Feed' : '9:16 Story'}) — Mode:{' '}
-                {photoLayoutMode === 'dual_both' ? 'Dua Foto Porsi' : photoLayoutMode === 'small_only' ? 'Foto Porsi Kecil' : 'Foto Porsi Besar'}
+                Preview Flyer ({size === 'a4' ? 'A4 Cetak' : size === 'social_square' ? 'Feed 1:1' : 'Story 9:16'})
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">Skala:</span>
-              <button
-                type="button"
-                onClick={() => setZoomScale(0.65)}
-                className={`px-2 py-0.5 rounded text-xs ${zoomScale === 0.65 ? 'bg-blue-900 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}
-              >
-                65%
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoomScale(0.85)}
-                className={`px-2 py-0.5 rounded text-xs ${zoomScale === 0.85 ? 'bg-blue-900 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}
-              >
-                85%
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoomScale(1.0)}
-                className={`px-2 py-0.5 rounded text-xs ${zoomScale === 1.0 ? 'bg-blue-900 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}
-              >
-                100%
-              </button>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-500 mr-1">Skala:</span>
+              {[0.65, 0.85, 1.0].map(scale => (
+                <button
+                  key={scale}
+                  type="button"
+                  onClick={() => setZoomScale(scale)}
+                  className={`px-2.5 py-1 rounded text-xs transition ${
+                    zoomScale === scale
+                      ? 'bg-[#163653] text-white font-bold'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {Math.round(scale * 100)}%
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Scaled Preview Frame Container */}
-          <div className="overflow-x-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950 rounded-2xl flex justify-center items-start shadow-inner print:p-0 print:bg-white print:shadow-none print:overflow-visible">
+          <div className="overflow-x-auto p-4 sm:p-6 bg-slate-200/80 dark:bg-slate-950 rounded-2xl flex justify-center items-start print:p-0 print:bg-white print:overflow-visible">
             <div
               style={{
                 transform: `scale(${zoomScale})`,
@@ -1005,600 +1314,290 @@ Kepala SPPG: ${sppgConfig.headOfSppg}
               }}
               className="shrink-0 flyer-print-scale-wrapper"
             >
-              {/* THE FLYER CANVAS ITSELF */}
+              {/* =================================================================== */}
+              {/* FLYER CANVAS (EXACT REFERENCE TEMPLATE ARCHITECTURE) */}
+              {/* =================================================================== */}
               <div
                 ref={flyerRef}
-                className={`flyer-print-target bg-white text-slate-900 shadow-2xl overflow-hidden relative ${containerDimensions[size]} ${
-                  template === 'modern_bgn'
-                    ? 'font-sans'
-                    : template === 'nutri_infographic'
-                    ? 'font-sans'
-                    : template === 'nusantara_warm'
-                    ? 'font-serif'
-                    : 'font-sans'
+                style={{
+                  backgroundColor: activeTheme.canvasBg,
+                  backgroundImage: `radial-gradient(${activeTheme.dotPatternColor} 1px, transparent 1px)`,
+                  backgroundSize: '14px 14px',
+                  color: activeTheme.textPrimary,
+                }}
+                className={`flyer-print-target shadow-2xl overflow-hidden relative font-sans flex flex-col justify-between ${containerDimensions[size]} ${
+                  size === 'social_story' ? 'px-6 py-6 gap-4' : 'px-9 py-7 gap-5'
                 }`}
               >
-                {/* =================================================================== */}
-                {/* HEADER SECTION (Official BGN + SPPG Dual Logo & Identification) */}
-                {/* =================================================================== */}
-                <div
-                  className={`p-6 sm:p-7 relative ${
-                    template === 'modern_bgn'
-                      ? 'bg-gradient-to-r from-blue-950 via-blue-900 to-indigo-950 text-white'
-                      : template === 'nutri_infographic'
-                      ? 'bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-900 text-white'
-                      : template === 'nusantara_warm'
-                      ? 'bg-gradient-to-r from-amber-950 via-orange-950 to-amber-900 text-amber-50'
-                      : 'bg-gradient-to-r from-sky-600 via-indigo-600 to-blue-700 text-white'
-                  }`}
-                >
-                  {/* Decorative subtle background pattern */}
-                  <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
-
-                  <div className="relative z-10 flex items-center justify-between gap-4">
-                    {/* Left: SPPG Logo */}
-                    <div className="flex items-center gap-3">
-                      <div className="p-1.5 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20 shrink-0">
-                        <SPPGLogo size="lg" />
+                {/* 1. TOP HEADER ROW: SPPG EMBLEM + TITLE (LEFT) & CERT CAPSULE (RIGHT) */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    {!headerLogoError ? (
+                      <img
+                        src="/logo-sppg.png"
+                        alt="Logo Badan Gizi Nasional SPPG"
+                        onError={() => setHeaderLogoError(true)}
+                        className="w-14 h-14 object-contain shrink-0 rounded-full"
+                      />
+                    ) : (
+                      <div
+                        style={{ borderColor: activeTheme.primaryNavy, color: activeTheme.primaryNavy }}
+                        className="w-14 h-14 rounded-full border-2 bg-white flex items-center justify-center font-black text-xs shrink-0"
+                      >
+                        BGN
                       </div>
-                      <div className="text-left">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                          {sppgConfig.foundationName}
-                        </div>
-                        <h2 className="text-sm sm:text-base font-black tracking-wide leading-tight">
-                          {sppgConfig.sppgName}
-                        </h2>
-                        <div className="text-[10px] text-white/80 font-mono">
-                          ID SPPG: {sppgConfig.sppgId} • Kec. {sppgConfig.district}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right: BGN Logo */}
-                    <div className="flex items-center gap-3 text-right">
-                      <div className="hidden sm:block text-right">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                          Program Resmi Pemerintah
-                        </div>
-                        <h3 className="text-xs sm:text-sm font-black leading-tight">
-                          BADAN GIZI NASIONAL
-                        </h3>
-                        <div className="text-[9px] text-white/80 uppercase tracking-widest font-bold">
-                          Republik Indonesia
-                        </div>
-                      </div>
-                      <div className="p-1.5 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20 shrink-0">
-                        <BGNLogo size="lg" />
-                      </div>
+                    )}
+                    <div
+                      style={{ color: activeTheme.headingColor }}
+                      className="font-extrabold text-[11px] leading-[1.2] tracking-wide uppercase"
+                    >
+                      {sppgHeadlineLines.map((line, i) => (
+                        <div key={i}>{line}</div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Program Banner Strip */}
-                  <div className="mt-4 pt-3 border-t border-white/15 flex items-center justify-between text-[11px] font-bold">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      MAKAN BERGIZI GRATIS (MBG) — MENU HARIAN RESMI
-                    </span>
-                    <span className="font-mono bg-white/15 px-2.5 py-0.5 rounded-full text-white text-[10px]">
-                      {activeMenu.menuCode}
-                    </span>
-                  </div>
+                  {showCertBadges && <CertificationCapsule bgColor={activeTheme.softCapsuleBg} />}
                 </div>
 
-                {/* DATE & DAY BADGE STRIP */}
+                {/* 2. DATE PILL BANNER */}
                 <div
-                  className={`px-6 py-2.5 flex items-center justify-between text-xs font-bold ${
-                    template === 'modern_bgn'
-                      ? 'bg-amber-500 text-blue-950'
-                      : template === 'nutri_infographic'
-                      ? 'bg-emerald-500 text-white'
-                      : template === 'nusantara_warm'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-amber-400 text-slate-900'
-                  }`}
+                  style={{ backgroundColor: activeTheme.primaryNavy }}
+                  className="w-full rounded-2xl py-2.5 px-6 text-center text-white font-bold text-xl tracking-wide"
                 >
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4" />
-                    <span>
-                      {activeMenu.dayName}, {formatIndonesianDate(activeMenu.date)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Siklus Minggu Ke-{activeMenu.cycleWeek}</span>
-                    <span>•</span>
-                    <span>{targetAudienceText}</span>
-                  </div>
+                  {formatSingleDayDate(activeMenu.date, activeMenu.dayName)}
                 </div>
 
-                {/* =================================================================== */}
-                {/* BODY CONTENT: DUA FOTO PORSI (KECIL & BESAR) & INGREDIENTS */}
-                {/* =================================================================== */}
-                <div className="p-6 sm:p-7 space-y-6">
-                  {/* DUA FOTO PORSI SHOWCASE */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                        <Sparkle className="w-3.5 h-3.5 text-amber-500" />
-                        Dokumentasi Dua Kategori Porsi Ompreng MBG:
+                {/* 3. FOOD PHOTO & BULLET LIST SHOWCASE (PORSI KECIL & PORSI BESAR) */}
+                <div
+                  className={
+                    photoLayoutMode === 'dual_both'
+                      ? 'grid grid-cols-2 gap-6 items-start'
+                      : 'grid grid-cols-1 max-w-md mx-auto w-full'
+                  }
+                >
+                  {(photoLayoutMode === 'dual_both' || photoLayoutMode === 'small_only') && (
+                    <div className="flex flex-col items-center">
+                      <div
+                        style={{ backgroundColor: activeTheme.primaryNavy }}
+                        className="rounded-full px-8 py-1.5 text-white font-bold text-base tracking-wide mb-3.5"
+                      >
+                        Porsi Kecil
                       </div>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                        Higienis & Terverifikasi
-                      </span>
-                    </div>
 
-                    {/* PHOTO GRID BASED ON LAYOUT MODE */}
-                    {photoLayoutMode === 'dual_both' ? (
-                      <div className="grid grid-cols-2 gap-3.5">
-                        {/* FOTO 1: PORSI KECIL */}
-                        <div
-                          className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
-                            isSmallCutoutActive
-                              ? 'border-2 border-blue-400 bg-radial from-slate-100 via-sky-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-2.5 min-h-[220px]'
-                              : 'border-2 border-blue-200 bg-slate-900'
-                          }`}
-                        >
+                      <div className="w-full flex items-center justify-center mb-3.5 min-h-[185px]">
+                        {displayedSmallPhoto && !smallPhotoError ? (
                           <img
                             src={displayedSmallPhoto}
-                            alt="Dokumentasi Porsi Kecil"
-                            className={`w-full h-52 sm:h-56 transition duration-500 ${
+                            alt="Ompreng Porsi Kecil"
+                            onError={() => setSmallPhotoError(true)}
+                            className={`w-full max-h-[210px] transition duration-300 ${
                               isSmallCutoutActive
-                                ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.32)] contrast-105'
-                                : 'object-cover object-center group-hover:scale-103'
+                                ? 'object-contain drop-shadow-[0_10px_18px_rgba(15,23,42,0.18)]'
+                                : 'object-cover rounded-2xl shadow-sm border border-slate-200/80 bg-white'
                             }`}
                           />
-                          {!isSmallCutoutActive && (
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
-                          )}
+                        ) : (
+                          renderTrayFallback('Porsi Kecil')
+                        )}
+                      </div>
 
-                          {/* Top Badge */}
-                          <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5">
-                            <span className="px-2.5 py-1 rounded-full bg-blue-900/90 text-white font-bold text-[10px] shadow-sm backdrop-blur-xs flex items-center gap-1">
-                              👶 Porsi Kecil • PAUD & SD 1-3
-                            </span>
-                            {isSmallCutoutActive && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[9px] shadow-xs flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5" /> Ompreng Saja
-                              </span>
-                            )}
-                          </div>
+                      <ul className="w-full space-y-1 pl-5 text-left text-[13.5px] font-bold leading-snug text-slate-900 list-disc marker:text-slate-900 tabular-nums">
+                        {dishRows.map((row, idx) => (
+                          <li key={`small-${idx}`}>{formatDishBulletLabel(row, 'small')}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
-                          {/* Bottom Info */}
-                          <div
-                            className={`absolute bottom-2.5 left-2.5 right-2.5 text-white ${
-                              isSmallCutoutActive
-                                ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2 border border-white/10 shadow-sm'
-                                : ''
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-black text-amber-300">
-                                ~{activePortioning?.smallPortionWeightGrams || 395} Gram
-                              </span>
-                              <span className="text-[10px] text-white/90 font-medium">
-                                {activeMenu.caloriesSmall || 620} kkal
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-200 truncate mt-0.5">
-                              {smallPhotoCaption}
-                            </p>
-                          </div>
-                        </div>
+                  {(photoLayoutMode === 'dual_both' || photoLayoutMode === 'large_only') && (
+                    <div className="flex flex-col items-center">
+                      <div
+                        style={{ backgroundColor: activeTheme.primaryNavy }}
+                        className="rounded-full px-8 py-1.5 text-white font-bold text-base tracking-wide mb-3.5"
+                      >
+                        Porsi Besar
+                      </div>
 
-                        {/* FOTO 2: PORSI BESAR */}
-                        <div
-                          className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
-                            isLargeCutoutActive
-                              ? 'border-2 border-emerald-400 bg-radial from-slate-100 via-emerald-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-2.5 min-h-[220px]'
-                              : 'border-2 border-emerald-300 bg-slate-900'
-                          }`}
-                        >
+                      <div className="w-full flex items-center justify-center mb-3.5 min-h-[185px]">
+                        {displayedLargePhoto && !largePhotoError ? (
                           <img
                             src={displayedLargePhoto}
-                            alt="Dokumentasi Porsi Besar"
-                            className={`w-full h-52 sm:h-56 transition duration-500 ${
+                            alt="Ompreng Porsi Besar"
+                            onError={() => setLargePhotoError(true)}
+                            className={`w-full max-h-[210px] transition duration-300 ${
                               isLargeCutoutActive
-                                ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.32)] contrast-105'
-                                : 'object-cover object-center group-hover:scale-103'
+                                ? 'object-contain drop-shadow-[0_10px_18px_rgba(15,23,42,0.18)]'
+                                : 'object-cover rounded-2xl shadow-sm border border-slate-200/80 bg-white'
                             }`}
                           />
-                          {!isLargeCutoutActive && (
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
-                          )}
+                        ) : (
+                          renderTrayFallback('Porsi Besar')
+                        )}
+                      </div>
 
-                          {/* Top Badge */}
-                          <div className="absolute top-2.5 left-2.5 flex flex-wrap items-center gap-1.5">
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-800/90 text-white font-bold text-[10px] shadow-sm backdrop-blur-xs flex items-center gap-1">
-                              🧑‍🎓 Porsi Besar • SD 4-6, SMP, SMA
-                            </span>
-                            {isLargeCutoutActive && (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[9px] shadow-xs flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5" /> Ompreng Saja
-                              </span>
-                            )}
-                          </div>
+                      <ul className="w-full space-y-1 pl-5 text-left text-[13.5px] font-bold leading-snug text-slate-900 list-disc marker:text-slate-900 tabular-nums">
+                        {dishRows.map((row, idx) => (
+                          <li key={`large-${idx}`}>{formatDishBulletLabel(row, 'large')}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
 
-                          {/* Bottom Info */}
-                          <div
-                            className={`absolute bottom-2.5 left-2.5 right-2.5 text-white ${
-                              isLargeCutoutActive
-                                ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2 border border-white/10 shadow-sm'
-                                : ''
-                            }`}
+                {/* 4. KANDUNGAN GIZI, JUMLAH PORSI & STANDAR GIZI AKG */}
+                {(showNutritionFacts || showPortionCounts) && (
+                  <div
+                    className={`grid gap-5 items-stretch ${
+                      size === 'social_story' ? 'grid-cols-1' : 'grid-cols-12'
+                    }`}
+                  >
+                    {/* LEFT: KANDUNGAN GIZI + TOTAL PORSI */}
+                    <div
+                      className={`${
+                        size === 'social_story' ? '' : showNutritionFacts ? 'col-span-8' : 'col-span-12'
+                      } flex flex-col justify-between gap-4`}
+                    >
+                      {showNutritionFacts && (
+                        <div>
+                          <h3
+                            style={{ color: activeTheme.headingColor }}
+                            className="text-center font-black text-[23px] tracking-wide uppercase mb-5"
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-black text-emerald-300">
-                                ~{activePortioning?.largePortionWeightGrams || 585} Gram
-                              </span>
-                              <span className="text-[10px] text-white/90 font-medium">
-                                {activeMenu.caloriesLarge || 875} kkal
-                              </span>
+                            KANDUNGAN GIZI
+                          </h3>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* Card Porsi Kecil */}
+                            <div
+                              style={{
+                                backgroundColor: activeTheme.cardFillBg,
+                                borderColor: activeTheme.cardBorder,
+                              }}
+                              className="relative rounded-[28px] border-[2.5px] pt-7 pb-5 px-4"
+                            >
+                              <div
+                                style={{ backgroundColor: activeTheme.primaryNavy }}
+                                className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full px-6 py-1 text-white font-bold text-sm whitespace-nowrap"
+                              >
+                                Porsi Kecil
+                              </div>
+                              <div className="space-y-1 text-[13.5px] font-bold text-slate-950 leading-relaxed tabular-nums">
+                                <div>Energi : {formatFlyerDecimal(nutritionTotals.small.energi)} kkal</div>
+                                <div>Protein : {formatFlyerDecimal(nutritionTotals.small.protein)} g</div>
+                                <div>Lemak : {formatFlyerDecimal(nutritionTotals.small.lemak)} g</div>
+                                <div>Karbohidrat : {formatFlyerDecimal(nutritionTotals.small.karbohidrat)} g</div>
+                                <div>Serat : {formatFlyerDecimal(nutritionTotals.small.serat)} g</div>
+                              </div>
                             </div>
-                            <p className="text-[10px] text-slate-200 truncate mt-0.5">
-                              {largePhotoCaption}
-                            </p>
+
+                            {/* Card Porsi Besar */}
+                            <div
+                              style={{
+                                backgroundColor: activeTheme.cardFillBg,
+                                borderColor: activeTheme.cardBorder,
+                              }}
+                              className="relative rounded-[28px] border-[2.5px] pt-7 pb-5 px-4"
+                            >
+                              <div
+                                style={{ backgroundColor: activeTheme.primaryNavy }}
+                                className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full px-6 py-1 text-white font-bold text-sm whitespace-nowrap"
+                              >
+                                Porsi Besar
+                              </div>
+                              <div className="space-y-1 text-[13.5px] font-bold text-slate-950 leading-relaxed tabular-nums">
+                                <div>Energi : {formatFlyerDecimal(nutritionTotals.large.energi)} kkal</div>
+                                <div>Protein : {formatFlyerDecimal(nutritionTotals.large.protein)} g</div>
+                                <div>Lemak : {formatFlyerDecimal(nutritionTotals.large.lemak)} g</div>
+                                <div>Karbohidrat : {formatFlyerDecimal(nutritionTotals.large.karbohidrat)} g</div>
+                                <div>Serat : {formatFlyerDecimal(nutritionTotals.large.serat)} g</div>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : photoLayoutMode === 'small_only' ? (
-                      /* SINGLE PHOTO: SMALL ONLY */
-                      <div
-                        className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
-                          isSmallCutoutActive
-                            ? 'border-2 border-blue-400 bg-radial from-slate-100 via-sky-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-4 min-h-[260px]'
-                            : 'border-2 border-blue-200 bg-slate-900'
-                        }`}
-                      >
-                        <img
-                          src={displayedSmallPhoto}
-                          alt="Porsi Kecil"
-                          className={`w-full h-64 transition duration-500 ${
-                            isSmallCutoutActive
-                              ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_16px_30px_rgba(0,0,0,0.35)]'
-                              : 'object-cover object-center group-hover:scale-102'
-                          }`}
-                        />
-                        {!isSmallCutoutActive && (
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
-                        )}
-                        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
-                          <span className="px-3 py-1 rounded-full bg-blue-900 text-white font-bold text-xs shadow-sm">
-                            👶 Porsi Kecil • PAUD & SD Kelas 1-3 (~{activePortioning?.smallPortionWeightGrams || 395}g)
-                          </span>
-                          {isSmallCutoutActive && (
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[10px] shadow-xs flex items-center gap-1">
-                              <Sparkles className="w-3 h-3" /> Ompreng Saja (Tanpa Meja)
-                            </span>
-                          )}
-                        </div>
+                      )}
+
+                      {showPortionCounts && (
                         <div
-                          className={`absolute bottom-3 left-3 right-3 text-white ${
-                            isSmallCutoutActive
-                              ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2.5 border border-white/10 shadow-sm'
-                              : ''
-                          }`}
+                          style={{ backgroundColor: activeTheme.primaryNavy }}
+                          className="rounded-2xl px-5 py-3 text-white font-bold text-[15px] leading-snug tabular-nums"
                         >
-                          <h2 className="text-lg font-black">{activeMenu.stapleFood} (Porsi Kecil)</h2>
-                          <p className="text-xs text-slate-200">{smallPhotoCaption}</p>
+                          <div>Porsi Kecil : {displayedSmallPortions} porsi</div>
+                          <div>Porsi Besar : {displayedLargePortions} porsi</div>
                         </div>
-                      </div>
-                    ) : (
-                      /* SINGLE PHOTO: LARGE ONLY */
-                      <div
-                        className={`relative rounded-2xl overflow-hidden shadow-md transition duration-300 group ${
-                          isLargeCutoutActive
-                            ? 'border-2 border-emerald-400 bg-radial from-slate-100 via-emerald-50 to-slate-200 dark:from-slate-800 dark:to-slate-900 flex items-center justify-center p-4 min-h-[260px]'
-                            : 'border-2 border-emerald-300 bg-slate-900'
-                        }`}
-                      >
-                        <img
-                          src={displayedLargePhoto}
-                          alt="Porsi Besar"
-                          className={`w-full h-64 transition duration-500 ${
-                            isLargeCutoutActive
-                              ? 'object-contain object-center group-hover:scale-105 filter drop-shadow-[0_16px_30px_rgba(0,0,0,0.35)]'
-                              : 'object-cover object-center group-hover:scale-102'
-                          }`}
-                        />
-                        {!isLargeCutoutActive && (
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
-                        )}
-                        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-2">
-                          <span className="px-3 py-1 rounded-full bg-emerald-800 text-white font-bold text-xs shadow-sm">
-                            🧑‍🎓 Porsi Besar • SD 4-6, SMP, SMA & Santri (~{activePortioning?.largePortionWeightGrams || 585}g)
-                          </span>
-                          {isLargeCutoutActive && (
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-700 text-white font-bold text-[10px] shadow-xs flex items-center gap-1">
-                              <Sparkles className="w-3 h-3" /> Ompreng Saja (Tanpa Meja)
-                            </span>
-                          )}
-                        </div>
+                      )}
+                    </div>
+
+                    {/* RIGHT: STANDAR GIZI AKG */}
+                    {showNutritionFacts && (
+                      <div className={size === 'social_story' ? '' : 'col-span-4'}>
                         <div
-                          className={`absolute bottom-3 left-3 right-3 text-white ${
-                            isLargeCutoutActive
-                              ? 'bg-slate-950/85 backdrop-blur-md rounded-xl p-2.5 border border-white/10 shadow-sm'
-                              : ''
-                          }`}
+                          style={{
+                            backgroundColor: activeTheme.cardFillBg,
+                            borderColor: activeTheme.cardBorder,
+                          }}
+                          className="h-full rounded-[28px] border-[2.5px] overflow-hidden flex flex-col"
                         >
-                          <h2 className="text-lg font-black">{activeMenu.stapleFood} (Porsi Besar)</h2>
-                          <p className="text-xs text-slate-200">{largePhotoCaption}</p>
+                          <div
+                            style={{ backgroundColor: activeTheme.primaryNavy }}
+                            className="py-2.5 px-3 text-center text-white font-bold text-base tracking-wide"
+                          >
+                            Standar Gizi AKG
+                          </div>
+
+                          <div className="p-4 flex-1 flex flex-col justify-center space-y-4 text-[12.5px] font-bold text-slate-950 leading-snug tabular-nums">
+                            <div>
+                              <div className="text-[13.5px] font-extrabold mb-1">Porsi kecil</div>
+                              <div>Energi : {akgValues.small.energi}</div>
+                              <div>Protein : {akgValues.small.protein}</div>
+                              <div>Lemak : {akgValues.small.lemak}</div>
+                              <div>Karbohidrat : {akgValues.small.karbohidrat}</div>
+                              <div>Serat : {akgValues.small.serat}</div>
+                            </div>
+
+                            <div>
+                              <div className="text-[13.5px] font-extrabold mb-1">Porsi besar</div>
+                              <div>Energi : {akgValues.large.energi}</div>
+                              <div>Protein : {akgValues.large.protein}</div>
+                              <div>Lemak : {akgValues.large.lemak}</div>
+                              <div>Karbohidrat : {akgValues.large.karbohidrat}</div>
+                              <div>Serat : {akgValues.large.serat}</div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
+                )}
 
-                  {/* 5 ELEMEN GIZI SEIMBANG ("ISI PIRINGKU" BGN) */}
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-blue-950 flex items-center gap-2">
-                        <Utensils className="w-4 h-4 text-blue-900" />
-                        Komposisi Sajian Lengkap (Isi Piringku MBG)
-                      </h3>
-                      <span className="text-[10px] font-bold text-slate-500">
-                        Bebas MSG Sintetis • Garam & Minyak Terukur
-                      </span>
+                {/* 5. FOOTER WARNING CAPSULE */}
+                {showConsumptionDeadline && (
+                  <div
+                    style={{ backgroundColor: activeTheme.softCapsuleBg }}
+                    className="w-full rounded-full px-5 py-2.5 flex items-center justify-center gap-3"
+                  >
+                    <WarningTriangleIcon />
+                    <span className="text-[13.5px] font-extrabold text-slate-900 leading-tight">
+                      Batas konsumsi maksimal porsi kecil {smallConsumptionDeadline} &amp; porsi besar{' '}
+                      {largeConsumptionDeadline}
+                    </span>
+                  </div>
+                )}
+
+                {/* Optional Official Sign-off Strip */}
+                {showOfficials && (
+                  <div className="pt-2 border-t border-slate-300/70 flex items-center justify-between text-[10.5px] text-slate-700">
+                    <div>
+                      <span className="text-slate-500">Pengawas Gizi: </span>
+                      <strong className="text-slate-900">{sppgConfig.nutritionOfficer}</strong>
                     </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                      {/* 1. Makanan Pokok */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🍚
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Makanan Pokok</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.stapleFood}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 2. Lauk Hewani */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🍗
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Lauk Hewani (Protein)</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.animalProtein}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 3. Lauk Nabati */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🥢
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Lauk Nabati</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.plantProtein}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 4. Sayuran Segar */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🥦
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Sayuran Segar</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.vegetable}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 5. Buah Segar */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-yellow-100 text-yellow-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🍌
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Buah Segar</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.fruit}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 6. Ekstra / Minuman */}
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-xs shrink-0">
-                          🥛
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">Pelengkap / Susu</div>
-                          <div className="text-xs font-bold text-slate-900 leading-tight mt-0.5">
-                            {activeMenu.milkOrExtra}
-                          </div>
-                        </div>
-                      </div>
+                    <div className="font-mono text-slate-500">ID SPPG: {sppgConfig.sppgId}</div>
+                    <div>
+                      <span className="text-slate-500">Kepala SPPG: </span>
+                      <strong className="text-slate-900">{sppgConfig.headOfSppg}</strong>
                     </div>
                   </div>
-
-                  {/* BATAS KONSUMSI MAKAN (FOOD SAFETY ALERT BOX DUAL CATEGORY) */}
-                  {showConsumptionDeadline && (
-                    <div className="rounded-2xl p-4 bg-amber-50 border-2 border-amber-400 text-amber-950 shadow-xs">
-                      <div className="flex items-center gap-2 mb-2 font-black text-xs uppercase tracking-wider text-amber-900">
-                        <ShieldAlert className="w-4 h-4 text-amber-700" />
-                        PENTING: BATAS WAKTU KONSUMSI MAKAN (FOOD SAFETY)
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                        <div className="p-3 rounded-xl bg-white border border-amber-200 space-y-1">
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">
-                            Batas Santap Porsi Kecil (PAUD/SD 1-3)
-                          </div>
-                          <div className="flex items-center gap-2 text-rose-700 font-black text-sm">
-                            <Clock className="w-4 h-4" />
-                            <span>Maksimal {smallConsumptionDeadline}</span>
-                          </div>
-                          <div className="text-[10px] text-slate-600">
-                            Disarankan dikonsumsi saat jam istirahat pertama sekolah.
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-white border border-amber-200 space-y-1">
-                          <div className="text-[10px] font-bold text-slate-500 uppercase">
-                            Batas Santap Porsi Besar (SD 4-6, SMP, SMA, Santri)
-                          </div>
-                          <div className="flex items-center gap-2 text-rose-700 font-black text-sm">
-                            <Clock className="w-4 h-4" />
-                            <span>Maksimal {largeConsumptionDeadline}</span>
-                          </div>
-                          <div className="text-[10px] text-slate-600">
-                            Disarankan dikonsumsi saat jam istirahat siang sekolah.
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-2.5 pt-2 border-t border-amber-200 text-[10px] font-medium text-amber-900 flex items-center justify-between">
-                        <span>🛡️ Disajikan hangat dalam ompreng stainless steril bersegel.</span>
-                        <span className="font-bold">Jangan santap jika telah melewati batas waktu.</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* KANDUNGAN GIZI BERDASARKAN KATEGORI PENERIMA MANFAAT */}
-                  {showNutritionFacts && (
-                    <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Award className="w-4 h-4 text-blue-900" />
-                          <h3 className="text-xs font-black uppercase tracking-wider text-blue-950">
-                            Informasi Nilai Gizi Terverifikasi (AKG BGN)
-                          </h3>
-                        </div>
-                        <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">
-                          Sumber: TKPI Kemenkes RI 2020
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        {/* Kategori 1: Porsi Kecil */}
-                        <div className="p-3 rounded-xl bg-white border border-blue-100 shadow-2xs space-y-2">
-                          <div className="flex items-center justify-between border-b pb-1.5 border-slate-100">
-                            <div>
-                              <div className="font-bold text-slate-900 text-xs">Porsi Kecil</div>
-                              <div className="text-[9px] text-slate-500">PAUD, TK & SD Kelas 1-3</div>
-                            </div>
-                            <span className="text-xs font-black text-blue-900">
-                              ~{activePortioning?.smallPortionWeightGrams || 395}g
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-1.5 text-center">
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Energi</div>
-                              <div className="font-black text-xs text-blue-950">
-                                {activeMenu.caloriesSmall || 620} <span className="text-[8px] font-normal">kkal</span>
-                              </div>
-                            </div>
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Protein</div>
-                              <div className="font-black text-xs text-emerald-700">
-                                {activeMenu.proteinGrams || 28.5}g
-                              </div>
-                            </div>
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Karbohidrat</div>
-                              <div className="font-black text-xs text-slate-800">
-                                {activeMenu.carbGrams || 94}g
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[10px] text-slate-600 pt-1">
-                            <span>Lemak: {activeMenu.fatGrams || 20}g</span>
-                            <span>Serat: {activeMenu.fiberGrams || 6.8}g</span>
-                            <span>Kalsium: {activeMenu.calciumMg || 310}mg</span>
-                          </div>
-                        </div>
-
-                        {/* Kategori 2: Porsi Besar */}
-                        <div className="p-3 rounded-xl bg-white border border-blue-100 shadow-2xs space-y-2">
-                          <div className="flex items-center justify-between border-b pb-1.5 border-slate-100">
-                            <div>
-                              <div className="font-bold text-slate-900 text-xs">Porsi Besar</div>
-                              <div className="text-[9px] text-slate-500">SD 4-6, SMP, SMA & Santri</div>
-                            </div>
-                            <span className="text-xs font-black text-blue-900">
-                              ~{activePortioning?.largePortionWeightGrams || 585}g
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-1.5 text-center">
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Energi</div>
-                              <div className="font-black text-xs text-blue-950">
-                                {activeMenu.caloriesLarge || 875} <span className="text-[8px] font-normal">kkal</span>
-                              </div>
-                            </div>
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Protein</div>
-                              <div className="font-black text-xs text-emerald-700">
-                                {((activeMenu.proteinGrams || 28.5) * 1.25).toFixed(1)}g
-                              </div>
-                            </div>
-                            <div className="p-1 rounded bg-slate-50">
-                              <div className="text-[9px] text-slate-500">Karbohidrat</div>
-                              <div className="font-black text-xs text-slate-800">
-                                {((activeMenu.carbGrams || 94) * 1.2).toFixed(1)}g
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[10px] text-slate-600 pt-1">
-                            <span>Lemak: {((activeMenu.fatGrams || 20) * 1.2).toFixed(1)}g</span>
-                            <span>Serat: {((activeMenu.fiberGrams || 6.8) * 1.2).toFixed(1)}g</span>
-                            <span>Kalsium: {((activeMenu.calciumMg || 310) * 1.25).toFixed(0)}mg</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-[10px] text-blue-900 font-medium italic">
-                        * Porsi telah dihitung mencukupi 33% hingga 36% AKG harian anak sekolah sesuai Peraturan Badan Gizi Nasional Republik Indonesia.
-                      </div>
-                    </div>
-                  )}
-
-                  {/* PESAN EDUKASI & HIGIENE */}
-                  {customNote && (
-                    <div className="p-3 rounded-xl bg-slate-100 text-[11px] text-slate-700 leading-relaxed border-l-4 border-blue-900">
-                      <strong>Pesan Higiene & Santap:</strong> {customNote}
-                    </div>
-                  )}
-
-                  {/* FOOTER & OFFICIAL VERIFICATION */}
-                  {showOfficials && (
-                    <div className="pt-4 border-t border-slate-200 flex items-center justify-between text-xs">
-                      <div className="text-left">
-                        <div className="text-[10px] text-slate-500">Disusun & Dihitung Oleh:</div>
-                        <div className="font-bold text-slate-900">{sppgConfig.nutritionOfficer}</div>
-                        <div className="text-[10px] text-blue-900 font-semibold">Pengawas Gizi SPPG TMG2</div>
-                      </div>
-
-                      <div className="text-center font-mono text-[9px] text-slate-400">
-                        <div>ID IDENTITAS SPPG</div>
-                        <div className="font-bold text-slate-700">{sppgConfig.sppgId}</div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[10px] text-slate-500">Disahkan Oleh:</div>
-                        <div className="font-bold text-slate-900">{sppgConfig.headOfSppg}</div>
-                        <div className="text-[10px] text-blue-900 font-semibold">Kepala SPPG TMG2</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* BOTTOM BRAND STRIP */}
-                  <div className="pt-2 text-center text-[9px] text-slate-400 border-t border-slate-100 flex items-center justify-between">
-                    <span>E-SPPG TMG2 • Yayasan Hafshawaty Pesantren Zainul Hasan</span>
-                    <span>Badan Gizi Nasional (BGN) RI • Generasi Emas 2045</span>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

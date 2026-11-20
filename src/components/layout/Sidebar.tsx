@@ -290,10 +290,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      {/* Sidebar Container - Biru Muda Kaca Transparan */}
+      {/* Sidebar Container - Institutional Navy Collapsible */}
       <aside
         aria-label="Navigasi Utama E-SPPG"
-        className={`fixed lg:sticky lg:top-0 lg:h-screen top-0 bottom-0 left-0 z-50 lg:z-40 bg-gradient-to-b from-sky-100/75 via-blue-100/60 to-sky-50/75 dark:from-sky-950/75 dark:via-slate-900/75 dark:to-sky-950/80 backdrop-blur-xl backdrop-saturate-150 text-slate-800 dark:text-slate-100 border-r border-sky-200/80 dark:border-sky-800/60 shadow-[4px_0_24px_-6px_rgba(14,116,144,0.12)] ring-1 ring-inset ring-white/50 dark:ring-white/5 flex flex-col transition-all duration-300 ease-in-out shrink-0 ${
+        className={`fixed lg:sticky lg:top-0 lg:h-screen top-0 bottom-0 left-0 z-50 lg:z-40 bg-gradient-to-b from-[#1E3A8A] via-[#172554] to-[#0F172A] text-white border-r border-blue-900/60 shadow-xl flex flex-col transition-all duration-200 ease-in-out shrink-0 ${
           isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
         } ${
           isDesktopHidden
@@ -304,23 +304,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Slim Brand Row aligned cleanly with Header */}
-        <div className="h-14 px-4 flex items-center justify-between border-b border-sky-200/70 dark:border-sky-800/60 bg-white/35 dark:bg-slate-900/35 backdrop-blur-md shrink-0">
+        <div className="h-14 px-4 flex items-center justify-between border-b border-white/10 bg-black/15 shrink-0">
           {isExpandedView ? (
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="shrink-0 flex items-center justify-center">
+              <div className="shrink-0 flex items-center justify-center bg-white/95 rounded-lg p-0.5 shadow-xs">
                 <SPPGLogo size="sm" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white leading-tight truncate">
+                <h1 className="text-sm font-bold tracking-tight text-white leading-tight truncate">
                   E-SPPG TMG2
                 </h1>
-                <p className="text-[11px] text-sky-900/75 dark:text-sky-300/80 truncate">
+                <p className="text-[11px] text-blue-200 truncate">
                   Pemenuhan Gizi MBG
                 </p>
               </div>
             </div>
           ) : (
-            <div className="mx-auto shrink-0 flex items-center justify-center">
+            <div className="mx-auto shrink-0 flex items-center justify-center bg-white/95 rounded-lg p-0.5 shadow-xs">
               <SPPGLogo size="sm" />
             </div>
           )}
@@ -330,7 +330,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="hidden lg:flex p-1.5 rounded-lg text-sky-900/75 hover:text-slate-900 hover:bg-white/60 dark:text-sky-300 dark:hover:text-white dark:hover:bg-sky-900/50 transition cursor-pointer"
+              className="hidden lg:flex p-1.5 rounded-lg text-blue-200 hover:text-white hover:bg-white/15 transition-all duration-200 cursor-pointer"
               title={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar ke Mode Ikon'}
               aria-label={isCollapsed ? 'Perluas Sidebar' : 'Ciutkan Sidebar ke Mode Ikon'}
             >
@@ -341,7 +341,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               onClick={onCloseMobile}
-              className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg text-sky-900/80 hover:text-slate-900 hover:bg-white/60 dark:text-sky-200 dark:hover:text-white dark:hover:bg-sky-900/50 active:scale-95 transition cursor-pointer"
+              className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg text-blue-100 hover:text-white hover:bg-white/15 active:scale-95 transition-all duration-200 cursor-pointer"
               title="Tutup Sidebar Navigasi"
               aria-label="Tutup Sidebar Navigasi"
             >
@@ -352,13 +352,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Active RBAC Identity Card */}
         {isExpandedView && (
-          <div className="mx-3 mt-3 px-3 py-2.5 rounded-xl bg-white/55 dark:bg-sky-900/35 backdrop-blur-md border border-white/80 dark:border-sky-700/50 shadow-xs">
+          <div className="mx-3 mt-3 px-3 py-2.5 rounded-xl bg-white/10 border border-white/15 shadow-xs">
             <div className="flex items-center gap-2.5 min-w-0">
-              <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-sky-400 shrink-0" />
+              <ShieldCheck className="w-4 h-4 text-teal-300 shrink-0" />
               <div className="min-w-0">
-                <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{currentUser.name}</div>
-                <div className="text-[11px] font-semibold text-blue-700 dark:text-sky-300 truncate">{currentUser.role}</div>
-                <div className="text-[10px] text-slate-600 dark:text-slate-300 truncate">{getRoleAliasLabel(currentUser.role)}</div>
+                <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                <div className="text-[11px] font-semibold text-blue-200 truncate">{currentUser.role}</div>
+                <div className="text-[10px] text-slate-300 truncate">{getRoleAliasLabel(currentUser.role)}</div>
               </div>
             </div>
           </div>
@@ -369,7 +369,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {sections.map((section, sIdx) => (
             <div key={sIdx}>
               {isExpandedView && (
-                <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-sky-900/65 dark:text-sky-300/65 uppercase select-none">
+                <div className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-blue-200/75 uppercase select-none">
                   {section.title}
                 </div>
               )}
@@ -385,15 +385,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onSelectModule(item.key);
                         onCloseMobile();
                       }}
-                      className={`w-full min-h-[42px] lg:min-h-[38px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all duration-150 relative group cursor-pointer ${
+                      className={`w-full min-h-[42px] lg:min-h-[38px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all duration-200 ease-in-out relative group cursor-pointer ${
                         isActive
-                          ? 'bg-white/85 text-blue-700 dark:bg-sky-800/70 dark:text-white font-bold border border-white/95 dark:border-sky-500/50 shadow-sm backdrop-blur-sm'
-                          : 'text-slate-700 dark:text-slate-200 font-medium hover:bg-white/55 dark:hover:bg-sky-900/45 hover:text-blue-900 dark:hover:text-white border border-transparent hover:border-white/70 dark:hover:border-sky-700/40'
+                          ? 'bg-white text-[#1E3A8A] font-bold shadow-sm'
+                          : 'text-slate-200 font-medium hover:bg-white/10 hover:text-white'
                       } ${!isExpandedView ? 'justify-center' : 'justify-between'}`}
                       title={item.label}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-sky-300' : 'text-sky-800/70 group-hover:text-blue-700 dark:text-sky-300/75 dark:group-hover:text-white'}`}>
+                        <span
+                          className={`shrink-0 transition-colors duration-200 ${
+                            isActive ? 'text-[#1E3A8A]' : 'text-blue-200/90 group-hover:text-white'
+                          }`}
+                        >
                           {item.icon}
                         </span>
                         {isExpandedView && (
@@ -404,7 +408,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {item.badge !== undefined && isExpandedView && (
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-full tabular-nums ${
-                            item.badgeColor || 'bg-blue-600 text-white'
+                            item.badgeColor || 'bg-[#0D9488] text-white'
                           }`}
                         >
                           {item.badge}
@@ -413,7 +417,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                       {/* Compact badge on collapsed */}
                       {item.badge !== undefined && !isExpandedView && (
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-600" />
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#E11D48] ring-2 ring-[#1E3A8A]" />
                       )}
                     </button>
                   );
@@ -423,17 +427,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           ))}
         </div>
 
-        {/* Clean Frosted Sidebar Footer */}
-        <div className="px-4 py-3 border-t border-sky-200/70 dark:border-sky-800/60 bg-white/35 dark:bg-slate-900/35 backdrop-blur-md text-[11px] text-slate-600 dark:text-slate-300 shrink-0">
+        {/* Clean Sidebar Footer */}
+        <div className="px-4 py-3 border-t border-white/10 bg-black/20 text-[11px] text-slate-300 shrink-0">
           {isExpandedView ? (
             <div className="flex items-center justify-between gap-2">
               <div className="truncate">
-                <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">Krejengan Temenggungan</div>
-                <div className="text-[10px] text-sky-900/70 dark:text-sky-300/75">SPPG Temenggungan 2</div>
+                <div className="font-semibold text-white truncate">Krejengan Temenggungan</div>
+                <div className="text-[10px] text-blue-200/80">SPPG Temenggungan 2</div>
               </div>
             </div>
           ) : (
-            <div className="text-center font-bold text-[10px] text-sky-900/70 dark:text-sky-300/80">TMG2</div>
+            <div className="text-center font-bold text-[10px] text-blue-200">TMG2</div>
           )}
         </div>
       </aside>

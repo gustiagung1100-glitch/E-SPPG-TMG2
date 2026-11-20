@@ -24,6 +24,7 @@ import {
   BeneficiaryAttendanceLog,
   BeneficiaryQuotaHistory,
   BeneficiaryNutritionRecord,
+  MaternalHealthRecord,
   PreparationInspectionRecord,
   CookingInspectionRecord,
   PortioningInspectionRecord,
@@ -112,6 +113,11 @@ import {
 } from './plogData';
 import { initialBeneficiaryNutritionRecords } from './beneficiaryNutritionData';
 import { calculateWHOZScore, validateNikFormat, normalizeNik } from './whoZScore';
+import { initialMaternalHealthRecords } from './maternalHealthData';
+import {
+  calculateGestationFromHPHT,
+  calculateMaternalHealthAssessment,
+} from './maternalHealth';
 import {
   isMatchingMaterialNameShared,
   normalizeMaterialSyncName,
@@ -252,6 +258,66 @@ interface AppContextType {
     }>
   ) => Promise<{ ok: boolean; error?: string; record?: BeneficiaryNutritionRecord }>;
   deleteBeneficiaryRecord: (id: string) => Promise<void>;
+
+  // 8. Kesehatan & Gizi Ibu Hamil (3B)
+  maternalHealthRecords: MaternalHealthRecord[];
+  checkDuplicateMaternalNik: (nik: string, excludeId?: string) => MaternalHealthRecord | undefined;
+  addMaternalHealthRecord: (input: {
+    nik: string;
+    fullName: string;
+    ageYears: number;
+    phone?: string;
+    institutionId: string;
+    institutionNameOverride?: string;
+    villageOrPosyandu: string;
+    gravida: number;
+    para: number;
+    abortus: number;
+    hphtDate?: string;
+    gestationalWeeks: number;
+    gestationalDaysRemainder?: number;
+    dueDateHpl?: string;
+    prePregnancyWeightKg: number;
+    currentWeightKg: number;
+    heightCm: number;
+    lilaCm: number;
+    hemoglobinGdL: number;
+    systolicBp: number;
+    diastolicBp: number;
+    ttdCompliant: boolean;
+    measurementDate: string;
+    notes?: string;
+  }) => Promise<{ ok: boolean; error?: string; record?: MaternalHealthRecord }>;
+  updateMaternalHealthRecord: (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      ageYears: number;
+      phone: string;
+      institutionId: string;
+      institutionNameOverride: string;
+      villageOrPosyandu: string;
+      gravida: number;
+      para: number;
+      abortus: number;
+      hphtDate: string;
+      gestationalWeeks: number;
+      gestationalDaysRemainder: number;
+      dueDateHpl: string;
+      prePregnancyWeightKg: number;
+      currentWeightKg: number;
+      heightCm: number;
+      lilaCm: number;
+      hemoglobinGdL: number;
+      systolicBp: number;
+      diastolicBp: number;
+      ttdCompliant: boolean;
+      measurementDate: string;
+      notes: string;
+    }>
+  ) => Promise<{ ok: boolean; error?: string; record?: MaternalHealthRecord }>;
+  deleteMaternalHealthRecord: (id: string) => Promise<void>;
 
   // Operasional Lainnya
   menuItems: MenuItem[];
@@ -1290,6 +1356,7 @@ const defaultPICIncentiveConfig: PICIncentiveConfig = {
   ratePerPortion: 200,
   flatDailyRate: 50000,
   minPortionThreshold: 1,
+  institutionRates: {},
   updatedAt: '2026-11-08 07:00:00',
   updatedBy: 'M. Farhan Al-Hafshi, S.E.',
 };
@@ -1303,7 +1370,10 @@ const defaultVolunteerIncentiveConfig: VolunteerIncentiveConfig = {
     Distribusi: 110000,
     'Cuci Ompreng': 95000,
     Kebersihan: 90000,
+    Keamanan: 95000,
   },
+  positionRates: {},
+  divisionPositionRates: {},
   updatedAt: '2026-11-08 07:00:00',
   updatedBy: 'M. Farhan Al-Hafshi, S.E.',
 };
@@ -1927,6 +1997,16 @@ function recomputeMenuItemsFromRecipes(
   });
 }
 
+function readStoredJson<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key);
+    if (!saved) return fallback;
+    return JSON.parse(saved) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => readStoredWebAccessUsers());
 
@@ -1961,10 +2041,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     webAccessPolicyRef.current = webAccessPolicy;
   }, [webAccessPolicy]);
 
-  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() => {
-    const saved = localStorage.getItem('esppg_role_permissions');
-    return saved ? JSON.parse(saved) : defaultPermissions;
-  });
+  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(() =>
+    readStoredJson<RolePermissions>('esppg_role_permissions', defaultPermissions)
+  );
 
   const [roleModuleAccess, setRoleModuleAccess] = useState<RoleModuleAccessMap>(() => {
     try {
@@ -2007,25 +2086,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Master Data & Beneficiaries States
-  const [institutions, setInstitutions] = useState<Institution[]>(() => {
-    const saved = localStorage.getItem('esppg_institutions_v2');
-    return saved ? JSON.parse(saved) : initialInstitutionsData;
-  });
+  const [institutions, setInstitutions] = useState<Institution[]>(() =>
+    readStoredJson<Institution[]>('esppg_institutions_v2', initialInstitutionsData)
+  );
 
-  const [masterBahan, setMasterBahan] = useState<MasterBahan[]>(() => {
-    const saved = localStorage.getItem('esppg_master_bahan');
-    return saved ? JSON.parse(saved) : initialMasterBahanData;
-  });
+  const [masterBahan, setMasterBahan] = useState<MasterBahan[]>(() =>
+    readStoredJson<MasterBahan[]>('esppg_master_bahan', initialMasterBahanData)
+  );
 
-  const [masterSuppliers, setMasterSuppliers] = useState<MasterSupplier[]>(() => {
-    const saved = localStorage.getItem('esppg_master_suppliers');
-    return saved ? JSON.parse(saved) : initialMasterSuppliersData;
-  });
+  const [masterSuppliers, setMasterSuppliers] = useState<MasterSupplier[]>(() =>
+    readStoredJson<MasterSupplier[]>('esppg_master_suppliers', initialMasterSuppliersData)
+  );
 
-  const [masterVolunteers, setMasterVolunteers] = useState<MasterVolunteer[]>(() => {
-    const saved = localStorage.getItem('esppg_master_volunteers');
-    return saved ? JSON.parse(saved) : initialMasterVolunteersData;
-  });
+  const [masterVolunteers, setMasterVolunteers] = useState<MasterVolunteer[]>(() =>
+    readStoredJson<MasterVolunteer[]>('esppg_master_volunteers', initialMasterVolunteersData)
+  );
 
   const [masterUnits, setMasterUnits] = useState<MasterUnit[]>(() => {
     try {
@@ -2050,21 +2125,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  const [materialConversions, setMaterialConversions] = useState<MaterialDimensionConversion[]>(() => {
-    const saved = localStorage.getItem('esppg_material_conversions');
-    return saved ? JSON.parse(saved) : initialMaterialConversionsData;
-  });
+  const [materialConversions, setMaterialConversions] = useState<MaterialDimensionConversion[]>(() =>
+    readStoredJson<MaterialDimensionConversion[]>('esppg_material_conversions', initialMaterialConversionsData)
+  );
 
   // 7. Beneficiary Attendance & Quota History
-  const [beneficiaryAttendance, setBeneficiaryAttendance] = useState<BeneficiaryAttendanceLog[]>(() => {
-    const saved = localStorage.getItem('esppg_beneficiary_attendance');
-    return saved ? JSON.parse(saved) : initialBeneficiaryAttendanceData;
-  });
+  const [beneficiaryAttendance, setBeneficiaryAttendance] = useState<BeneficiaryAttendanceLog[]>(() =>
+    readStoredJson<BeneficiaryAttendanceLog[]>('esppg_beneficiary_attendance', initialBeneficiaryAttendanceData)
+  );
 
-  const [beneficiaryQuotaHistory, setBeneficiaryQuotaHistory] = useState<BeneficiaryQuotaHistory[]>(() => {
-    const saved = localStorage.getItem('esppg_quota_history');
-    return saved ? JSON.parse(saved) : initialQuotaHistoryData;
-  });
+  const [beneficiaryQuotaHistory, setBeneficiaryQuotaHistory] = useState<BeneficiaryQuotaHistory[]>(() =>
+    readStoredJson<BeneficiaryQuotaHistory[]>('esppg_quota_history', initialQuotaHistoryData)
+  );
 
   const [beneficiaryRecords, setBeneficiaryRecords] = useState<BeneficiaryNutritionRecord[]>(() => {
     try {
@@ -2076,6 +2148,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return initialBeneficiaryNutritionRecords;
     } catch {
       return initialBeneficiaryNutritionRecords;
+    }
+  });
+  const [maternalHealthRecords, setMaternalHealthRecords] = useState<MaternalHealthRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_maternal_health_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return initialMaternalHealthRecords;
+    } catch {
+      return initialMaternalHealthRecords;
     }
   });
   const [isDataHydrating, setIsDataHydrating] = useState<boolean>(true);
@@ -2243,6 +2327,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [qualityControlRecords, setQualityControlRecords] = useState<QualityControlRecord[]>(() => initialSupplyChainState.qualityControlRecords);
 
   // Ref mirrors to prevent stale-closure drift across rapid sequential / batch updates
+  const institutionsRef = React.useRef<Institution[]>(institutions);
   const menuItemsRef = React.useRef<MenuItem[]>(menuItems);
   const menuIngredientsMapRef = React.useRef<Record<string, RecipeIngredient[]>>(menuIngredientsMap);
   const inventoryRef = React.useRef<InventoryItem[]>(inventory);
@@ -2250,6 +2335,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const purchaseOrdersRef = React.useRef<PurchaseOrder[]>(purchaseOrders);
   const rabItemsRef = React.useRef<RABItem[]>(rabItems);
   const qualityControlRecordsRef = React.useRef<QualityControlRecord[]>(qualityControlRecords);
+
+  useEffect(() => {
+    institutionsRef.current = institutions;
+  }, [institutions]);
 
   useEffect(() => {
     menuItemsRef.current = menuItems;
@@ -2279,25 +2368,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     qualityControlRecordsRef.current = qualityControlRecords;
   }, [qualityControlRecords]);
 
-  const [distributionLogs, setDistributionLogs] = useState<DistributionLog[]>(() => {
-    const saved = localStorage.getItem('esppg_distribution_logs');
-    return saved ? JSON.parse(saved) : initialDistributions;
-  });
+  const [distributionLogs, setDistributionLogs] = useState<DistributionLog[]>(() =>
+    readStoredJson<DistributionLog[]>('esppg_distribution_logs', initialDistributions)
+  );
 
-  const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>(() => {
-    const saved = localStorage.getItem('esppg_transactions');
-    return saved ? JSON.parse(saved) : initialTransactions;
-  });
+  const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>(() =>
+    readStoredJson<FinancialTransaction[]>('esppg_transactions', initialTransactions)
+  );
 
-  const [volunteerAttendance, setVolunteerAttendance] = useState<VolunteerAttendance[]>(() => {
-    const saved = localStorage.getItem('esppg_volunteers');
-    return saved ? JSON.parse(saved) : initialVolunteers;
-  });
+  const [volunteerAttendance, setVolunteerAttendance] = useState<VolunteerAttendance[]>(() =>
+    readStoredJson<VolunteerAttendance[]>('esppg_volunteers', initialVolunteers)
+  );
 
-  const [officialLetters, setOfficialLetters] = useState<OfficialLetter[]>(() => {
-    const saved = localStorage.getItem('esppg_letters');
-    return saved ? JSON.parse(saved) : initialLetters;
-  });
+  const [officialLetters, setOfficialLetters] = useState<OfficialLetter[]>(() =>
+    readStoredJson<OfficialLetter[]>('esppg_letters', initialLetters)
+  );
 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     try {
@@ -2410,20 +2495,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // 14. Modul Administrasi Surat & 15. Modul Surat Masuk
-  const [outgoingDocuments, setOutgoingDocuments] = useState<OutgoingDocument[]>(() => {
-    const saved = localStorage.getItem('esppg_outgoing_docs');
-    return saved ? JSON.parse(saved) : defaultOutgoingDocuments;
-  });
+  const [outgoingDocuments, setOutgoingDocuments] = useState<OutgoingDocument[]>(() =>
+    readStoredJson<OutgoingDocument[]>('esppg_outgoing_docs', defaultOutgoingDocuments)
+  );
 
-  const [incomingLetters, setIncomingLetters] = useState<IncomingLetter[]>(() => {
-    const saved = localStorage.getItem('esppg_incoming_letters');
-    return saved ? JSON.parse(saved) : defaultIncomingLetters;
-  });
+  const [incomingLetters, setIncomingLetters] = useState<IncomingLetter[]>(() =>
+    readStoredJson<IncomingLetter[]>('esppg_incoming_letters', defaultIncomingLetters)
+  );
 
-  const [volunteerAbsences, setVolunteerAbsences] = useState<VolunteerAbsenceRecord[]>(() => {
-    const saved = localStorage.getItem('esppg_volunteer_absences');
-    return saved ? JSON.parse(saved) : defaultVolunteerAbsences;
-  });
+  const [volunteerAbsences, setVolunteerAbsences] = useState<VolunteerAbsenceRecord[]>(() =>
+    readStoredJson<VolunteerAbsenceRecord[]>('esppg_volunteer_absences', defaultVolunteerAbsences)
+  );
 
   const [picIncentiveConfig, setPicIncentiveConfig] = useState<PICIncentiveConfig>(() => {
     try {
@@ -2446,7 +2528,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [volunteerIncentiveConfig, setVolunteerIncentiveConfig] = useState<VolunteerIncentiveConfig>(() => {
     try {
       const saved = localStorage.getItem('esppg_volunteer_incentive_config_v1');
-      return saved ? { ...defaultVolunteerIncentiveConfig, ...JSON.parse(saved) } : defaultVolunteerIncentiveConfig;
+      if (!saved) return defaultVolunteerIncentiveConfig;
+      const parsed = JSON.parse(saved);
+      return {
+        ...defaultVolunteerIncentiveConfig,
+        ...parsed,
+        divisionRates: {
+          ...defaultVolunteerIncentiveConfig.divisionRates,
+          ...(parsed?.divisionRates || {}),
+        },
+      };
     } catch {
       return defaultVolunteerIncentiveConfig;
     }
@@ -2494,96 +2585,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [kitchenProgress, setKitchenProgress] = useState<KitchenProgress>(initialKitchenProgress);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('esppg_dark_mode') === 'true';
+    try {
+      return localStorage.getItem('esppg_dark_mode') === 'true';
+    } catch {
+      return false;
+    }
   });
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(true);
-
-  // Sync currentUser only when authenticated; wipe if unauthenticated
-  useEffect(() => {
-    if (isAuthenticated && currentUser.isActive) {
-      localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(currentUser));
-    } else if (!isAuthenticated) {
-      localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
-    }
-  }, [currentUser, isAuthenticated]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_role_permissions', JSON.stringify(rolePermissions));
-  }, [rolePermissions]);
-
-  useEffect(() => {
-    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(roleModuleAccess));
-  }, [roleModuleAccess]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_config', JSON.stringify(sppgConfig));
-  }, [sppgConfig]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_institutions_v2', JSON.stringify(institutions));
-  }, [institutions]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_master_bahan', JSON.stringify(masterBahan));
-  }, [masterBahan]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_master_suppliers', JSON.stringify(masterSuppliers));
-  }, [masterSuppliers]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_master_volunteers', JSON.stringify(masterVolunteers));
-  }, [masterVolunteers]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_master_units', JSON.stringify(masterUnits));
-  }, [masterUnits]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_material_conversions', JSON.stringify(materialConversions));
-  }, [materialConversions]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_beneficiary_attendance', JSON.stringify(beneficiaryAttendance));
-  }, [beneficiaryAttendance]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_quota_history', JSON.stringify(beneficiaryQuotaHistory));
-  }, [beneficiaryQuotaHistory]);
-
-  useEffect(() => {
-    localStorage.setItem('esppg_beneficiary_records_v1', JSON.stringify(beneficiaryRecords));
-  }, [beneficiaryRecords]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setIsDataHydrating(false), 320);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('esppg_menu_items', JSON.stringify(menuItems));
-    } catch {
-      // ignore quota errors
-    }
-  }, [menuItems]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('esppg_menu_ingredients_v1', JSON.stringify(menuIngredientsMap));
-    } catch {
-      // ignore quota errors
-    }
-  }, [menuIngredientsMap]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('esppg_division_jobdesks_v1', JSON.stringify(divisionJobdesks));
-    } catch {
-      // ignore quota errors
-    }
-  }, [divisionJobdesks]);
 
   const safeWriteLocalStorage = React.useCallback((key: string, serialized: string): boolean => {
     try {
@@ -2607,6 +2616,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
   }, []);
+
+  // Sync currentUser only when authenticated; wipe if unauthenticated
+  useEffect(() => {
+    if (isAuthenticated && currentUser.isActive) {
+      safeWriteLocalStorage(CURRENT_USER_STORAGE_KEY, JSON.stringify(currentUser));
+    } else if (!isAuthenticated) {
+      try {
+        localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+      } catch {
+        // ignore storage access errors
+      }
+    }
+  }, [currentUser, isAuthenticated, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_role_permissions', JSON.stringify(rolePermissions));
+  }, [rolePermissions, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(roleModuleAccess));
+  }, [roleModuleAccess, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_config', JSON.stringify(sppgConfig));
+  }, [sppgConfig, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_institutions_v2', JSON.stringify(institutions));
+  }, [institutions, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_master_bahan', JSON.stringify(masterBahan));
+  }, [masterBahan, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_master_suppliers', JSON.stringify(masterSuppliers));
+  }, [masterSuppliers, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_master_volunteers', JSON.stringify(masterVolunteers));
+  }, [masterVolunteers, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_master_units', JSON.stringify(masterUnits));
+  }, [masterUnits, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_material_conversions', JSON.stringify(materialConversions));
+  }, [materialConversions, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_beneficiary_attendance', JSON.stringify(beneficiaryAttendance));
+  }, [beneficiaryAttendance, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_quota_history', JSON.stringify(beneficiaryQuotaHistory));
+  }, [beneficiaryQuotaHistory, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_beneficiary_records_v1', JSON.stringify(beneficiaryRecords));
+  }, [beneficiaryRecords, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_maternal_health_v1', JSON.stringify(maternalHealthRecords));
+  }, [maternalHealthRecords, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsDataHydrating(false), 320);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_menu_items', JSON.stringify(menuItems));
+  }, [menuItems, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_menu_ingredients_v1', JSON.stringify(menuIngredientsMap));
+  }, [menuIngredientsMap, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_division_jobdesks_v1', JSON.stringify(divisionJobdesks));
+  }, [divisionJobdesks, safeWriteLocalStorage]);
 
   useEffect(() => {
     safeWriteLocalStorage('esppg_inventory', JSON.stringify(inventory));
@@ -2981,7 +3072,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else if (e.key === 'esppg_volunteer_incentive_config_v1' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && typeof parsed === 'object') setVolunteerIncentiveConfig(parsed);
+          if (parsed && typeof parsed === 'object') {
+            setVolunteerIncentiveConfig({
+              ...defaultVolunteerIncentiveConfig,
+              ...parsed,
+              divisionRates: {
+                ...defaultVolunteerIncentiveConfig.divisionRates,
+                ...(parsed?.divisionRates || {}),
+              },
+            });
+          }
         } catch {
           // Ignore
         }
@@ -3199,6 +3299,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     );
     return () => unsubNutrition();
+  }, [authReady, isAuthenticated]);
+
+  // Real-time Firestore listener for Maternal Health Records (maternal_health_records)
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !auth.currentUser) return;
+    const maternalQuery = query(
+      collection(db, 'maternal_health_records'),
+      where('sppgId', '==', 'GFBQSYXD')
+    );
+    const unsubMaternal = onSnapshot(
+      maternalQuery,
+      snapshot => {
+        if (snapshot.empty) return;
+        const cloudRecords: MaternalHealthRecord[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as MaternalHealthRecord & { sppgId?: string };
+          if (data && data.nik && data.fullName) {
+            cloudRecords.push({
+              ...data,
+              id: data.id || docSnap.id,
+            });
+          }
+        });
+        if (cloudRecords.length === 0) return;
+        setMaternalHealthRecords(prev => {
+          const byId = new Map<string, MaternalHealthRecord>();
+          prev.forEach(item => byId.set(item.id, item));
+          cloudRecords.forEach(cloud => byId.set(cloud.id, cloud));
+          return Array.from(byId.values());
+        });
+      },
+      err => {
+        console.warn('Firestore maternal health listener running in local fallback:', err?.message || err);
+      }
+    );
+    return () => unsubMaternal();
   }, [authReady, isAuthenticated]);
 
   // Re-validate session periodically or when whitelist/policy updates
@@ -3567,7 +3703,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       [formId]: updatedSchema,
     };
     setDynamicFormSchemas(nextMap);
-    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
+    safeWriteLocalStorage('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
 
     if (auth.currentUser) {
       try {
@@ -3605,7 +3741,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       [formId]: defaultSchema,
     };
     setDynamicFormSchemas(nextMap);
-    localStorage.setItem('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
+    safeWriteLocalStorage('esppg_dynamic_form_schemas_v1', JSON.stringify(nextMap));
 
     if (auth.currentUser) {
       try {
@@ -3687,7 +3823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const sanitized = sanitizeRoleModuleAccess(nextMap);
     setRoleModuleAccess(sanitized);
-    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(sanitized));
+    safeWriteLocalStorage(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(sanitized));
 
     if (auth.currentUser) {
       try {
@@ -3729,7 +3865,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const defaults = buildDefaultRoleModuleAccess();
     setRoleModuleAccess(defaults);
-    localStorage.setItem(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(defaults));
+    safeWriteLocalStorage(ROLE_MODULE_ACCESS_STORAGE_KEY, JSON.stringify(defaults));
 
     if (auth.currentUser) {
       try {
@@ -3756,36 +3892,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Akses Modul Direset', 'Hak akses modul/menu seluruh peran dikembalikan ke konfigurasi default.');
   };
 
-  // Institutions CRUD & Quota History (Real-time cascading to Distribusi, Antropometri & Insentif PIC)
+  // Real-time cascade helper: recompute menus & RAB when beneficiary portions change
+  const syncMenusAndRABForInstitutions = (nextInstitutions: Institution[]) => {
+    institutionsRef.current = nextInstitutions;
+    const nextQuotaSmall = nextInstitutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+    const nextQuotaLarge = nextInstitutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+    const recomputedMenus = recomputeMenuItemsFromRecipes(
+      menuItemsRef.current,
+      menuIngredientsMapRef.current,
+      masterUnits,
+      nextQuotaSmall,
+      nextQuotaLarge
+    );
+    menuItemsRef.current = recomputedMenus;
+    setMenuItems(recomputedMenus);
+    syncLinkedMenuPlansToRABSilently(recomputedMenus, menuIngredientsMapRef.current, nextInstitutions);
+  };
+
+  // Institutions CRUD & Quota History (Real-time cascading to Distribusi, Antropometri, Menu & RAB)
   const addInstitution = async (inst: Omit<Institution, 'id'>) => {
     const total = Number(inst.smallPortions) + Number(inst.largePortions);
     const newInst: Institution = { ...inst, id: 'inst-' + Date.now(), totalPortions: total };
-    setInstitutions(prev => [...prev, newInst]);
-    await logAudit('CREATE', 'institutions', `Menambah data lembaga penerima manfaat: ${inst.name}`);
-    addToast('success', 'Lembaga Ditambahkan', `${inst.name} berhasil didaftarkan ke sistem.`);
+    const nextInstitutions = [...institutionsRef.current, newInst];
+    setInstitutions(nextInstitutions);
+    syncMenusAndRABForInstitutions(nextInstitutions);
+    await logAudit('CREATE', 'institutions', `Menambah data lembaga penerima manfaat: ${inst.name} (${total} porsi, sinkron ke Menu & RAB)`);
+    addToast('success', 'Lembaga Ditambahkan & Tersinkron', `${inst.name} ditambahkan (${total} porsi). Porsi menu, gramasi bahan & RAB diperbarui otomatis.`);
   };
 
   const updateInstitution = async (id: string, inst: Partial<Institution>) => {
-    const prevTarget = institutions.find(i => i.id === id);
+    const prevTarget = institutionsRef.current.find(i => i.id === id);
     let updatedInst: Institution | null = null;
 
-    setInstitutions(prev =>
-      prev.map(item => {
-        if (item.id === id) {
-          const small = inst.smallPortions !== undefined ? Number(inst.smallPortions) : item.smallPortions;
-          const large = inst.largePortions !== undefined ? Number(inst.largePortions) : item.largePortions;
-          updatedInst = {
-            ...item,
-            ...inst,
-            smallPortions: small,
-            largePortions: large,
-            totalPortions: small + large,
-          };
-          return updatedInst;
-        }
-        return item;
-      })
-    );
+    const nextInstitutions = institutionsRef.current.map(item => {
+      if (item.id === id) {
+        const small = inst.smallPortions !== undefined ? Number(inst.smallPortions) : item.smallPortions;
+        const large = inst.largePortions !== undefined ? Number(inst.largePortions) : item.largePortions;
+        updatedInst = {
+          ...item,
+          ...inst,
+          smallPortions: small,
+          largePortions: large,
+          totalPortions: small + large,
+        };
+        return updatedInst;
+      }
+      return item;
+    });
+
+    setInstitutions(nextInstitutions);
+    if (inst.smallPortions !== undefined || inst.largePortions !== undefined) {
+      syncMenusAndRABForInstitutions(nextInstitutions);
+    }
 
     const nextName = inst.name !== undefined ? inst.name : prevTarget?.name;
     const nextPicName = inst.picName !== undefined ? inst.picName : prevTarget?.picName;
@@ -3841,8 +3999,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    await logAudit('UPDATE', 'institutions', `Memperbarui data lembaga ID: ${id} (sinkron ke Distribusi & Insentif PIC)`);
-    addToast('success', 'Data Diperbarui & Tersinkron', 'Data lembaga, PIC, dan modul terkait (Distribusi & Insentif) diperbarui real-time.');
+    await logAudit('UPDATE', 'institutions', `Memperbarui data lembaga ID: ${id} (sinkron ke Menu, RAB, Distribusi & Insentif PIC)`);
+    addToast('success', 'Data Diperbarui & Tersinkron', 'Data lembaga, porsi menu, food cost, RAB, Distribusi & Insentif diperbarui real-time.');
   };
 
   const updateInstitutionQuotaWithHistory = async (
@@ -3851,7 +4009,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     newLarge: number,
     reason: string
   ) => {
-    const target = institutions.find(i => i.id === id);
+    const target = institutionsRef.current.find(i => i.id === id);
     if (!target) return;
 
     const previousSmall = target.smallPortions;
@@ -3860,7 +4018,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newTotal = Number(newSmall) + Number(newLarge);
     const deltaTotal = newTotal - previousTotal;
 
-    const nextInstitutions = institutions.map(item =>
+    const nextInstitutions = institutionsRef.current.map(item =>
       item.id === id
         ? {
             ...item,
@@ -3893,18 +4051,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setBeneficiaryQuotaHistory(prev => [historyEntry, ...prev]);
 
-    // 3. Real-time recalculate MenuItem targetPortions & estimatedCostPerPortion
-    const nextQuotaSmall = nextInstitutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
-    const nextQuotaLarge = nextInstitutions.reduce((s, i) => s + (i.largePortions || 0), 0);
-    const recomputedMenus = recomputeMenuItemsFromRecipes(
-      menuItemsRef.current,
-      menuIngredientsMapRef.current,
-      masterUnits,
-      nextQuotaSmall,
-      nextQuotaLarge
-    );
-    menuItemsRef.current = recomputedMenus;
-    setMenuItems(recomputedMenus);
+    // 3. Real-time recalculate MenuItem targetPortions, estimatedCostPerPortion & linked RAB
+    syncMenusAndRABForInstitutions(nextInstitutions);
 
     await logAudit(
       'UPDATE',
@@ -3914,15 +4062,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast(
       'success',
       'Kuota Diperbarui & Tersinkron',
-      `Kuota ${target.name} diubah menjadi ${newTotal} porsi. Kalkulasi porsi & food cost menu ikut diperbarui.`
+      `Kuota ${target.name} diubah menjadi ${newTotal} porsi. Kalkulasi porsi, kebutuhan bahan, food cost & RAB ikut diperbarui.`
     );
   };
 
   const deleteInstitution = async (id: string) => {
-    const target = institutions.find(i => i.id === id);
-    setInstitutions(prev => prev.filter(i => i.id !== id));
-    await logAudit('DELETE', 'institutions', `Menghapus data lembaga: ${target?.name || id}`);
-    addToast('warning', 'Lembaga Dihapus', 'Data lembaga telah dihapus dari sistem.');
+    const target = institutionsRef.current.find(i => i.id === id);
+    const nextInstitutions = institutionsRef.current.filter(i => i.id !== id);
+    setInstitutions(nextInstitutions);
+    syncMenusAndRABForInstitutions(nextInstitutions);
+    await logAudit('DELETE', 'institutions', `Menghapus data lembaga: ${target?.name || id} (sinkron ke Menu & RAB)`);
+    addToast('warning', 'Lembaga Dihapus', 'Data lembaga dihapus dan kalkulasi porsi menu & RAB diperbarui.');
   };
 
   // Shared helper: Cascade price / unit / minimumStock / name changes from Inventory or Master Bahan
@@ -4761,16 +4911,360 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Data Dihapus', `Data penerima gizi ${target?.fullName || ''} telah dihapus.`);
   };
 
+  // 8. Kesehatan & Gizi Ibu Hamil (3B) — Anti-Duplikasi NIK
+  const checkDuplicateMaternalNik = (nik: string, excludeId?: string): MaternalHealthRecord | undefined => {
+    const clean = normalizeNik(nik);
+    if (!clean) return undefined;
+    return maternalHealthRecords.find(r => r.nik === clean && r.id !== excludeId);
+  };
+
+  const resolveMaternalInstitutionName = (institutionId: string, override?: string): string => {
+    if (override && override.trim()) return override.trim();
+    const matched = institutions.find(i => i.id === institutionId);
+    if (matched) return matched.name;
+    if (institutionId === 'posyandu-temenggungan') return 'Posyandu Melati — Desa Temenggungan';
+    if (institutionId === 'posyandu-krejengan') return 'Posyandu Anggrek — Desa Krejengan';
+    if (institutionId === 'posyandu-gebangan') return 'Posyandu Kenanga — Desa Gebangan';
+    return 'Posyandu / Sasaran 3B Wilayah Krejengan';
+  };
+
+  const addMaternalHealthRecord = async (input: {
+    nik: string;
+    fullName: string;
+    ageYears: number;
+    phone?: string;
+    institutionId: string;
+    institutionNameOverride?: string;
+    villageOrPosyandu: string;
+    gravida: number;
+    para: number;
+    abortus: number;
+    hphtDate?: string;
+    gestationalWeeks: number;
+    gestationalDaysRemainder?: number;
+    dueDateHpl?: string;
+    prePregnancyWeightKg: number;
+    currentWeightKg: number;
+    heightCm: number;
+    lilaCm: number;
+    hemoglobinGdL: number;
+    systolicBp: number;
+    diastolicBp: number;
+    ttdCompliant: boolean;
+    measurementDate: string;
+    notes?: string;
+  }): Promise<{ ok: boolean; error?: string; record?: MaternalHealthRecord }> => {
+    const nikCheck = validateNikFormat(input.nik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateMaternalNik(nikCheck.cleanNik);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah terdaftar atas nama Ibu ${duplicate.fullName} (${duplicate.institutionName}). Duplikasi NIK diblokir.`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const cleanName = input.fullName.trim();
+    if (!cleanName) {
+      const msg = 'Nama lengkap ibu hamil wajib diisi.';
+      addToast('error', 'Validasi Gagal', msg);
+      return { ok: false, error: msg };
+    }
+
+    const gest = input.hphtDate
+      ? calculateGestationFromHPHT(input.hphtDate, input.measurementDate)
+      : null;
+    const finalWeeks = gest ? gest.gestationalWeeks : Math.max(1, Math.min(42, Number(input.gestationalWeeks) || 12));
+    const finalDays = gest ? gest.gestationalDaysRemainder : Number(input.gestationalDaysRemainder || 0);
+    const finalHpl = gest?.dueDateHpl || input.dueDateHpl || '';
+
+    const assessment = calculateMaternalHealthAssessment({
+      ageYears: input.ageYears,
+      gestationalWeeks: finalWeeks,
+      prePregnancyWeightKg: input.prePregnancyWeightKg,
+      currentWeightKg: input.currentWeightKg,
+      heightCm: input.heightCm,
+      lilaCm: input.lilaCm,
+      hemoglobinGdL: input.hemoglobinGdL,
+      systolicBp: input.systolicBp,
+      diastolicBp: input.diastolicBp,
+      ttdCompliant: input.ttdCompliant,
+    });
+
+    const g = Math.max(1, Number(input.gravida) || 1);
+    const p = Math.max(0, Number(input.para) || 0);
+    const a = Math.max(0, Number(input.abortus) || 0);
+
+    const newRecord: MaternalHealthRecord = {
+      id: `mh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      nik: nikCheck.cleanNik,
+      fullName: cleanName,
+      ageYears: Number(input.ageYears) || 25,
+      phone: input.phone?.trim() || '',
+      institutionId: input.institutionId || 'posyandu-temenggungan',
+      institutionName: resolveMaternalInstitutionName(input.institutionId, input.institutionNameOverride),
+      villageOrPosyandu: input.villageOrPosyandu.trim() || 'Wilayah Binaan Krejengan',
+      gravida: g,
+      para: p,
+      abortus: a,
+      obstetricCode: `G${g}P${p}A${a}`,
+      hphtDate: input.hphtDate || '',
+      gestationalWeeks: assessment.gestationalWeeks,
+      gestationalDaysRemainder: finalDays,
+      dueDateHpl: finalHpl,
+      trimester: assessment.trimester,
+      prePregnancyWeightKg: Number(input.prePregnancyWeightKg),
+      currentWeightKg: Number(input.currentWeightKg),
+      heightCm: Number(input.heightCm),
+      prePregnancyBmi: assessment.prePregnancyBmi,
+      bmiCategory: assessment.bmiCategory,
+      weightGainKg: assessment.weightGainKg,
+      targetWeightGainRange: assessment.targetWeightGainRange,
+      weightGainStatus: assessment.weightGainStatus,
+      lilaCm: assessment.lilaCm,
+      isKek: assessment.isKek,
+      lilaCategory: assessment.lilaCategory,
+      hemoglobinGdL: assessment.hemoglobinGdL,
+      anemiaStatus: assessment.anemiaStatus,
+      systolicBp: assessment.systolicBp,
+      diastolicBp: assessment.diastolicBp,
+      bpStatus: assessment.bpStatus,
+      recommendedKcal: assessment.recommendedKcal,
+      recommendedProteinG: assessment.recommendedProteinG,
+      ttdCompliant: Boolean(input.ttdCompliant),
+      measurementDate: input.measurementDate,
+      riskFlags: assessment.riskFlags,
+      riskLevel: assessment.riskLevel,
+      recommendation: assessment.recommendation,
+      notes: input.notes?.trim() || '',
+      recordedBy: currentUser.name,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setMaternalHealthRecords(prev => [newRecord, ...prev]);
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'maternal_health_records', newRecord.id), {
+          ...newRecord,
+          sppgId: 'GFBQSYXD',
+        });
+      } catch (err) {
+        console.warn('Firestore write fallback for maternal_health_records:', err);
+      }
+    }
+
+    await logAudit(
+      'CREATE',
+      'institutions',
+      `Pemeriksaan kesehatan Ibu Hamil ${newRecord.fullName} (NIK: ${newRecord.nik}) • ${newRecord.trimester} • Status: ${newRecord.riskLevel}`
+    );
+    addToast(
+      'success',
+      'Data Cek Kesehatan Ibu Hamil Disimpan',
+      `${newRecord.fullName} (${newRecord.trimester}) tercatat dengan status ${newRecord.riskLevel}.`
+    );
+    return { ok: true, record: newRecord };
+  };
+
+  const updateMaternalHealthRecord = async (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      ageYears: number;
+      phone: string;
+      institutionId: string;
+      institutionNameOverride: string;
+      villageOrPosyandu: string;
+      gravida: number;
+      para: number;
+      abortus: number;
+      hphtDate: string;
+      gestationalWeeks: number;
+      gestationalDaysRemainder: number;
+      dueDateHpl: string;
+      prePregnancyWeightKg: number;
+      currentWeightKg: number;
+      heightCm: number;
+      lilaCm: number;
+      hemoglobinGdL: number;
+      systolicBp: number;
+      diastolicBp: number;
+      ttdCompliant: boolean;
+      measurementDate: string;
+      notes: string;
+    }>
+  ): Promise<{ ok: boolean; error?: string; record?: MaternalHealthRecord }> => {
+    const existing = maternalHealthRecords.find(r => r.id === id);
+    if (!existing) {
+      return { ok: false, error: 'Data kesehatan ibu hamil tidak ditemukan.' };
+    }
+
+    const candidateNik = updates.nik !== undefined ? updates.nik : existing.nik;
+    const nikCheck = validateNikFormat(candidateNik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateMaternalNik(nikCheck.cleanNik, id);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah terdaftar atas nama ${duplicate.fullName}.`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const nextMeasurementDate = updates.measurementDate ?? existing.measurementDate;
+    const nextHpht = updates.hphtDate !== undefined ? updates.hphtDate : existing.hphtDate;
+    const gest = nextHpht ? calculateGestationFromHPHT(nextHpht, nextMeasurementDate) : null;
+    const nextWeeks =
+      updates.gestationalWeeks !== undefined
+        ? Number(updates.gestationalWeeks)
+        : gest
+        ? gest.gestationalWeeks
+        : existing.gestationalWeeks;
+    const nextDays =
+      updates.gestationalDaysRemainder !== undefined
+        ? Number(updates.gestationalDaysRemainder)
+        : gest
+        ? gest.gestationalDaysRemainder
+        : existing.gestationalDaysRemainder;
+    const nextHpl = updates.dueDateHpl !== undefined ? updates.dueDateHpl : gest?.dueDateHpl || existing.dueDateHpl;
+
+    const nextAge = updates.ageYears !== undefined ? Number(updates.ageYears) : existing.ageYears;
+    const nextPreWeight =
+      updates.prePregnancyWeightKg !== undefined ? Number(updates.prePregnancyWeightKg) : existing.prePregnancyWeightKg;
+    const nextCurrWeight =
+      updates.currentWeightKg !== undefined ? Number(updates.currentWeightKg) : existing.currentWeightKg;
+    const nextHeight = updates.heightCm !== undefined ? Number(updates.heightCm) : existing.heightCm;
+    const nextLila = updates.lilaCm !== undefined ? Number(updates.lilaCm) : existing.lilaCm;
+    const nextHb = updates.hemoglobinGdL !== undefined ? Number(updates.hemoglobinGdL) : existing.hemoglobinGdL;
+    const nextSys = updates.systolicBp !== undefined ? Number(updates.systolicBp) : existing.systolicBp;
+    const nextDia = updates.diastolicBp !== undefined ? Number(updates.diastolicBp) : existing.diastolicBp;
+    const nextTtd = updates.ttdCompliant !== undefined ? updates.ttdCompliant : existing.ttdCompliant;
+
+    const assessment = calculateMaternalHealthAssessment({
+      ageYears: nextAge,
+      gestationalWeeks: nextWeeks,
+      prePregnancyWeightKg: nextPreWeight,
+      currentWeightKg: nextCurrWeight,
+      heightCm: nextHeight,
+      lilaCm: nextLila,
+      hemoglobinGdL: nextHb,
+      systolicBp: nextSys,
+      diastolicBp: nextDia,
+      ttdCompliant: nextTtd,
+    });
+
+    const g = updates.gravida !== undefined ? Math.max(1, Number(updates.gravida)) : existing.gravida;
+    const p = updates.para !== undefined ? Math.max(0, Number(updates.para)) : existing.para;
+    const a = updates.abortus !== undefined ? Math.max(0, Number(updates.abortus)) : existing.abortus;
+    const nextInstId = updates.institutionId ?? existing.institutionId;
+
+    const updatedRecord: MaternalHealthRecord = {
+      ...existing,
+      nik: nikCheck.cleanNik,
+      fullName: updates.fullName !== undefined ? updates.fullName.trim() : existing.fullName,
+      ageYears: nextAge,
+      phone: updates.phone !== undefined ? updates.phone.trim() : existing.phone,
+      institutionId: nextInstId,
+      institutionName: resolveMaternalInstitutionName(nextInstId, updates.institutionNameOverride),
+      villageOrPosyandu:
+        updates.villageOrPosyandu !== undefined ? updates.villageOrPosyandu.trim() : existing.villageOrPosyandu,
+      gravida: g,
+      para: p,
+      abortus: a,
+      obstetricCode: `G${g}P${p}A${a}`,
+      hphtDate: nextHpht,
+      gestationalWeeks: assessment.gestationalWeeks,
+      gestationalDaysRemainder: nextDays,
+      dueDateHpl: nextHpl,
+      trimester: assessment.trimester,
+      prePregnancyWeightKg: nextPreWeight,
+      currentWeightKg: nextCurrWeight,
+      heightCm: nextHeight,
+      prePregnancyBmi: assessment.prePregnancyBmi,
+      bmiCategory: assessment.bmiCategory,
+      weightGainKg: assessment.weightGainKg,
+      targetWeightGainRange: assessment.targetWeightGainRange,
+      weightGainStatus: assessment.weightGainStatus,
+      lilaCm: assessment.lilaCm,
+      isKek: assessment.isKek,
+      lilaCategory: assessment.lilaCategory,
+      hemoglobinGdL: assessment.hemoglobinGdL,
+      anemiaStatus: assessment.anemiaStatus,
+      systolicBp: assessment.systolicBp,
+      diastolicBp: assessment.diastolicBp,
+      bpStatus: assessment.bpStatus,
+      recommendedKcal: assessment.recommendedKcal,
+      recommendedProteinG: assessment.recommendedProteinG,
+      ttdCompliant: nextTtd,
+      measurementDate: nextMeasurementDate,
+      riskFlags: assessment.riskFlags,
+      riskLevel: assessment.riskLevel,
+      recommendation: assessment.recommendation,
+      notes: updates.notes !== undefined ? updates.notes.trim() : existing.notes,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setMaternalHealthRecords(prev => prev.map(r => (r.id === id ? updatedRecord : r)));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'maternal_health_records', id),
+          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn('Firestore update fallback for maternal_health_records:', err);
+      }
+    }
+
+    await logAudit(
+      'UPDATE',
+      'institutions',
+      `Memperbarui data kesehatan Ibu Hamil ${updatedRecord.fullName} (NIK: ${updatedRecord.nik}) -> ${updatedRecord.riskLevel}`
+    );
+    addToast(
+      'success',
+      'Data Ibu Hamil Diperbarui',
+      `Status klinis ${updatedRecord.fullName} (${updatedRecord.riskLevel}) berhasil dihitung ulang.`
+    );
+    return { ok: true, record: updatedRecord };
+  };
+
+  const deleteMaternalHealthRecord = async (id: string) => {
+    const target = maternalHealthRecords.find(r => r.id === id);
+    setMaternalHealthRecords(prev => prev.filter(r => r.id !== id));
+
+    if (auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, 'maternal_health_records', id));
+      } catch (err) {
+        console.warn('Firestore delete fallback for maternal_health_records:', err);
+      }
+    }
+
+    await logAudit('DELETE', 'institutions', `Menghapus data kesehatan ibu hamil: ${target?.fullName || id}`);
+    addToast('info', 'Data Dihapus', `Data pemeriksaan ibu hamil ${target?.fullName || ''} telah dihapus.`);
+  };
+
   // Menu Items CRUD & Approval (auto-syncs linked Draft/Pending RAB items)
   const syncLinkedMenuPlansToRABSilently = (
     nextMenus: MenuItem[],
-    nextMap: Record<string, RecipeIngredient[]>
+    nextMap: Record<string, RecipeIngredient[]>,
+    nextInstitutions?: Institution[]
   ) => {
     const rabSync = syncRABWithMenuPlans({
       menuItems: nextMenus,
       menuIngredientsMap: nextMap,
       masterUnits,
-      institutions,
+      institutions: nextInstitutions ?? institutionsRef.current,
       rabItems: rabItemsRef.current,
       inventory: inventoryRef.current,
       masterBahan,
@@ -5858,12 +6352,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updated: PICIncentiveConfig = {
       ...picIncentiveConfig,
       ...cfg,
+      institutionRates:
+        cfg.institutionRates !== undefined
+          ? cfg.institutionRates
+          : picIncentiveConfig.institutionRates || {},
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       updatedBy: currentUser.name,
     };
     setPicIncentiveConfig(updated);
-    await logAudit('UPDATE', 'pic_incentives', `Memperbarui tarif insentif PIC Lembaga (${updated.rateMode === 'per_porsi' ? `Rp ${updated.ratePerPortion}/porsi` : `Flat Rp ${updated.flatDailyRate}/hari`})`);
-    addToast('success', 'Tarif Insentif PIC Disimpan', 'Perhitungan insentif PIC Lembaga otomatis menyesuaikan data kehadiran harian.');
+    const customCount = Object.keys(updated.institutionRates || {}).length;
+    await logAudit(
+      'UPDATE',
+      'pic_incentives',
+      `Memperbarui tarif insentif PIC Lembaga (Default: ${
+        updated.rateMode === 'per_porsi'
+          ? `Rp ${updated.ratePerPortion}/porsi`
+          : `Flat Rp ${updated.flatDailyRate}/hari`
+      }, ${customCount} tarif khusus lembaga)`
+    );
+    addToast(
+      'success',
+      'Tarif Insentif PIC Disimpan',
+      'Perhitungan insentif PIC per lembaga otomatis menyesuaikan data kehadiran harian.'
+    );
   };
 
   const upsertPICIncentivePayout = async (
@@ -5954,12 +6465,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...volunteerIncentiveConfig.divisionRates,
         ...(cfg.divisionRates || {}),
       },
+      positionRates:
+        cfg.positionRates !== undefined
+          ? cfg.positionRates
+          : volunteerIncentiveConfig.positionRates || {},
+      divisionPositionRates:
+        cfg.divisionPositionRates !== undefined
+          ? cfg.divisionPositionRates
+          : volunteerIncentiveConfig.divisionPositionRates || {},
       updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       updatedBy: currentUser.name,
     };
     setVolunteerIncentiveConfig(updated);
-    await logAudit('UPDATE', 'volunteer_incentives', `Memperbarui tarif insentif harian relawan per divisi.`);
-    addToast('success', 'Tarif Relawan Disimpan', 'Tarif insentif per divisi berhasil diperbarui.');
+    const customPosCount = Object.values(updated.divisionPositionRates || {}).reduce(
+      (sum, posMap) => sum + Object.keys(posMap || {}).length,
+      0
+    );
+    await logAudit(
+      'UPDATE',
+      'volunteer_incentives',
+      `Memperbarui tarif insentif harian relawan per divisi & jabatan (${customPosCount} tarif khusus jabatan/divisi).`
+    );
+    addToast(
+      'success',
+      'Tarif Relawan Disimpan',
+      'Tarif insentif per divisi & jabatan berhasil diperbarui.'
+    );
   };
 
   const upsertVolunteerIncentivePayout = async (
@@ -6670,6 +7201,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addBeneficiaryRecord,
         updateBeneficiaryRecord,
         deleteBeneficiaryRecord,
+        maternalHealthRecords,
+        checkDuplicateMaternalNik,
+        addMaternalHealthRecord,
+        updateMaternalHealthRecord,
+        deleteMaternalHealthRecord,
         menuItems,
         addMenuItem,
         updateMenuItem,

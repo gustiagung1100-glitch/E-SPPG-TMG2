@@ -52,7 +52,9 @@ export function exportToExcel(data: Record<string, any>[], fileName: string, she
   const worksheet = XLSX.utils.json_to_sheet(data);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
-  XLSX.writeFile(workbook, `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const outName = `${fileName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  XLSX.writeFile(workbook, outName);
+  dispatchPrintToast('success', 'Ekspor Excel Berhasil', `File ${outName} berhasil diunduh.`);
 }
 
 /**
@@ -64,11 +66,13 @@ export function exportToCSV(data: Record<string, any>[], fileName: string) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
+  const outName = `${fileName}_${new Date().toISOString().slice(0, 10)}.csv`;
   link.setAttribute('href', url);
-  link.setAttribute('download', `${fileName}_${new Date().toISOString().slice(0, 10)}.csv`);
+  link.setAttribute('download', outName);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  dispatchPrintToast('success', 'Ekspor CSV Berhasil', `File ${outName} berhasil diunduh.`);
 }
 
 export interface TableCellImage {
@@ -406,7 +410,9 @@ export async function exportTableToPDF(options: {
   }
 
   // Save the PDF
-  doc.save(`${fileName}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const outName = `${fileName}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(outName);
+  dispatchPrintToast('success', 'Ekspor PDF Berhasil', `Dokumen ${outName} berhasil diunduh.`);
 }
 
 export interface TriggerPrintOptions {
@@ -416,7 +422,7 @@ export interface TriggerPrintOptions {
   orientation?: 'portrait' | 'landscape';
 }
 
-function dispatchPrintToast(
+export function dispatchPrintToast(
   type: 'info' | 'success' | 'warning' | 'error',
   title: string,
   message: string

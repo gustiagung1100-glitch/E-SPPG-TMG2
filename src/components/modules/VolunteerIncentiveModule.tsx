@@ -23,6 +23,7 @@ import {
   FileSpreadsheet,
   Printer,
   RefreshCw,
+  RotateCcw,
   Search,
   SlidersHorizontal,
   UserCheck,
@@ -37,13 +38,27 @@ const BASE_DIVISIONS = [
   'Distribusi',
   'Cuci Ompreng',
   'Kebersihan',
+  'Keamanan',
+];
+
+const BASE_POSITIONS = [
+  'Koordinator Divisi',
+  'Wakil Koordinator',
+  'Juru Masak / Cook',
+  'Asisten Dapur',
+  'Petugas Timbang & Packing',
+  'Driver Armada',
+  'Petugas Sanitasi',
+  'Petugas Keamanan',
 ];
 
 interface ComputedVolunteerRow extends VolunteerIncentivePayout {
   positionLabel: string;
+  positionRaw?: string;
   phone: string;
   volunteerCode?: string;
   sourceLabel: 'Presensi Harian' | 'Izin Disetujui' | 'Pengganti Shift';
+  rateSource: 'Khusus Divisi & Jabatan' | 'Tarif Jabatan' | 'Tarif Divisi' | 'Default';
 }
 
 export const VolunteerIncentiveModule: React.FC = () => {
@@ -77,6 +92,10 @@ export const VolunteerIncentiveModule: React.FC = () => {
   const [divisionRatesForm, setDivisionRatesForm] = useState<Record<string, number>>(
     volunteerIncentiveConfig.divisionRates
   );
+  const [divisionPositionRatesForm, setDivisionPositionRatesForm] = useState<
+    Record<string, Record<string, number>>
+  >(volunteerIncentiveConfig.divisionPositionRates || {});
+  const [activeConfigDivTab, setActiveConfigDivTab] = useState<string>('SUMMARY');
 
   // Payout confirmation modal
   const [payoutModalRow, setPayoutModalRow] = useState<ComputedVolunteerRow | null>(null);
@@ -93,6 +112,41 @@ export const VolunteerIncentiveModule: React.FC = () => {
     });
     return Array.from(set);
   }, [masterVolunteers, volunteerAttendance, volunteerAbsences]);
+
+  const availablePositions = useMemo(() => {
+    const set = new Set<string>(BASE_POSITIONS);
+    masterVolunteers.forEach(v => v.position && set.add(v.position));
+    return Array.from(set);
+  }, [masterVolunteers]);
+
+  const customPositionRateCount = useMemo(() => {
+    const divPosMap = volunteerIncentiveConfig.divisionPositionRates || {};
+    return Object.values(divPosMap).reduce((sum, posMap) => sum + Object.keys(posMap || {}).length, 0);
+  }, [volunteerIncentiveConfig.divisionPositionRates]);
+
+  const resolveVolunteerDailyRate = (
+    division: string,
+    position?: string
+  ): {
+    rate: number;
+    rateSource: ComputedVolunteerRow['rateSource'];
+  } => {
+    if (position) {
+      const divPosRate = volunteerIncentiveConfig.divisionPositionRates?.[division]?.[position];
+      if (divPosRate !== undefined && Number.isFinite(divPosRate)) {
+        return { rate: divPosRate, rateSource: 'Khusus Divisi & Jabatan' };
+      }
+      const posRate = volunteerIncentiveConfig.positionRates?.[position];
+      if (posRate !== undefined && Number.isFinite(posRate)) {
+        return { rate: posRate, rateSource: 'Tarif Jabatan' };
+      }
+    }
+    const divRate = volunteerIncentiveConfig.divisionRates?.[division];
+    if (divRate !== undefined && Number.isFinite(divRate)) {
+      return { rate: divRate, rateSource: 'Tarif Divisi' };
+    }
+    return { rate: volunteerIncentiveConfig.defaultDailyRate, rateSource: 'Default' };
+  };
 
   const approvedAbsencesCount = useMemo(
     () => volunteerAbsences.filter(a => a.approvalStatus === 'Disetujui').length,
@@ -141,9 +195,9 @@ export const VolunteerIncentiveModule: React.FC = () => {
       const isPresent = effectiveStatus === 'Hadir';
       const isLocked = isPresent && saved && (saved.status === 'Disetujui' || saved.status === 'Sudah Dibayarkan');
       const resolvedDivision = master?.division || att.division;
-      const divRate = isLocked
-        ? saved.dailyRate
-        : volunteerIncentiveConfig.divisionRates[resolvedDivision] ?? volunteerIncentiveConfig.defaultDailyRate;
+      const resolvedPosition = master?.position;
+      const rateResolved = resolveVolunteerDailyRate(resolvedDivision, resolvedPosition);
+      const divRate = isLocked ? saved.dailyRate : rateResolved.rate;
 
       const computedTotal = isLocked ? saved.totalIncentive : isPresent ? divRate : 0;
 
@@ -171,10 +225,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
           (isPresent
             ? att.notes
             : `Tidak hadir (${effectiveStatus}${matchedAbsence ? `: ${matchedAbsence.reason}` : ''}) - Rp 0`),
-        positionLabel: master?.position || 'Relawan Dapur',
+        positionLabel: resolvedPosition || 'Relawan Dapur',
+        positionRaw: resolvedPosition,
         phone: master?.phone || '-',
         volunteerCode: master?.code,
         sourceLabel: matchedAbsence ? 'Izin Disetujui' : 'Presensi Harian',
+        rateSource: rateResolved.rateSource,
       });
 
       // If absent and replaced by substitute volunteer, generate substitute shift row automatically
@@ -190,9 +246,8 @@ export const VolunteerIncentiveModule: React.FC = () => {
           const subLocked =
             savedSub && (savedSub.status === 'Disetujui' || savedSub.status === 'Sudah Dibayarkan');
           const subDiv = subMaster?.division || matchedAbsence?.replacementDivision || resolvedDivision;
-          const subRate = subLocked
-            ? savedSub.dailyRate
-            : volunteerIncentiveConfig.divisionRates[subDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
+          const subRateResolved = resolveVolunteerDailyRate(subDiv, subMaster?.position);
+          const subRate = subLocked ? savedSub.dailyRate : subRateResolved.rate;
 
           rows.push({
             id: savedSub?.id || `volp-${subAttendanceKey}`,
@@ -214,9 +269,11 @@ export const VolunteerIncentiveModule: React.FC = () => {
             pettyCashTxId: savedSub?.pettyCashTxId,
             notes: savedSub?.notes || `Relawan pengganti untuk ${master?.name || att.volunteerName}`,
             positionLabel: subMaster?.position ? `${subMaster.position} (Pengganti Shift)` : 'Relawan Pengganti Shift',
+            positionRaw: subMaster?.position,
             phone: subMaster?.phone || '-',
             volunteerCode: subMaster?.code,
             sourceLabel: 'Pengganti Shift',
+            rateSource: subRateResolved.rateSource,
           });
         }
       }
@@ -233,8 +290,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
           resolvedDiv === 'Cuci Ompreng' || resolvedDiv === 'Kebersihan'
             ? 'Siang (08:00 - 13:00)'
             : 'Pagi (03:30 - 08:30)';
-        const absDivRate =
-          volunteerIncentiveConfig.divisionRates[resolvedDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
+        const absRateResolved = resolveVolunteerDailyRate(resolvedDiv, master?.position);
 
         rows.push({
           id: `volp-abs-${abs.id}`,
@@ -246,14 +302,16 @@ export const VolunteerIncentiveModule: React.FC = () => {
           shift: defaultShift,
           attendanceStatus: absStatus,
           isSubstitute: false,
-          dailyRate: absDivRate,
+          dailyRate: absRateResolved.rate,
           totalIncentive: 0,
           status: 'Menunggu Pencairan',
           notes: `Izin disetujui (${abs.reason}) — digantikan ${abs.replacementVolunteerName}`,
           positionLabel: master?.position || 'Relawan Dapur',
+          positionRaw: master?.position,
           phone: master?.phone || '-',
           volunteerCode: master?.code,
           sourceLabel: 'Izin Disetujui',
+          rateSource: absRateResolved.rateSource,
         });
 
         if (abs.replacementVolunteerName) {
@@ -263,9 +321,8 @@ export const VolunteerIncentiveModule: React.FC = () => {
           const subLocked =
             savedSub && (savedSub.status === 'Disetujui' || savedSub.status === 'Sudah Dibayarkan');
           const subDiv = subMaster?.division || abs.replacementDivision || resolvedDiv;
-          const subRate = subLocked
-            ? savedSub.dailyRate
-            : volunteerIncentiveConfig.divisionRates[subDiv] ?? volunteerIncentiveConfig.defaultDailyRate;
+          const subRateResolved = resolveVolunteerDailyRate(subDiv, subMaster?.position);
+          const subRate = subLocked ? savedSub.dailyRate : subRateResolved.rate;
 
           rows.push({
             id: savedSub?.id || `volp-${subAttendanceKey}`,
@@ -287,9 +344,11 @@ export const VolunteerIncentiveModule: React.FC = () => {
             pettyCashTxId: savedSub?.pettyCashTxId,
             notes: savedSub?.notes || `Pengganti shift ${master?.name || abs.volunteerName} (${abs.reason})`,
             positionLabel: subMaster?.position ? `${subMaster.position} (Pengganti Shift)` : 'Relawan Pengganti Shift',
+            positionRaw: subMaster?.position,
             phone: subMaster?.phone || '-',
             volunteerCode: subMaster?.code,
             sourceLabel: 'Pengganti Shift',
+            rateSource: subRateResolved.rateSource,
           });
         }
       });
@@ -395,16 +454,55 @@ export const VolunteerIncentiveModule: React.FC = () => {
   const handleOpenConfig = () => {
     setDefaultRateForm(volunteerIncentiveConfig.defaultDailyRate);
     setDivisionRatesForm({ ...volunteerIncentiveConfig.divisionRates });
+    const clonedDivPos: Record<string, Record<string, number>> = {};
+    Object.entries(volunteerIncentiveConfig.divisionPositionRates || {}).forEach(([div, posMap]) => {
+      clonedDivPos[div] = { ...(posMap || {}) };
+    });
+    setDivisionPositionRatesForm(clonedDivPos);
+    setActiveConfigDivTab('SUMMARY');
     setIsConfigOpen(true);
   };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanedDivPos: Record<string, Record<string, number>> = {};
+    Object.entries(divisionPositionRatesForm).forEach(([div, posMap]) => {
+      const cleanPos: Record<string, number> = {};
+      Object.entries(posMap || {}).forEach(([pos, val]) => {
+        if (val !== undefined && Number.isFinite(val) && val >= 0) {
+          cleanPos[pos] = Number(val);
+        }
+      });
+      if (Object.keys(cleanPos).length > 0) {
+        cleanedDivPos[div] = cleanPos;
+      }
+    });
     await updateVolunteerIncentiveConfig({
       defaultDailyRate: Math.max(0, Number(defaultRateForm) || 0),
       divisionRates: divisionRatesForm,
+      divisionPositionRates: cleanedDivPos,
     });
     setIsConfigOpen(false);
+  };
+
+  const handleSetDivPosRate = (div: string, pos: string, rawValue: string) => {
+    setDivisionPositionRatesForm(prev => {
+      const next = { ...prev };
+      const curDivMap = { ...(next[div] || {}) };
+      if (rawValue.trim() === '') {
+        delete curDivMap[pos];
+      } else {
+        const parsed = Number(rawValue);
+        if (!Number.isFinite(parsed) || parsed < 0) return prev;
+        curDivMap[pos] = parsed;
+      }
+      if (Object.keys(curDivMap).length === 0) {
+        delete next[div];
+      } else {
+        next[div] = curDivMap;
+      }
+      return next;
+    });
   };
 
   const handleApproveSingle = async (row: ComputedVolunteerRow) => {
@@ -461,11 +559,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
   const handleExportPDF = () => {
     exportTableToPDF({
       title: 'DAFTAR INSENTIF HARIAN RELAWAN DAPUR SPPG',
-      subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} | Terintegrasi Absensi & Shift Pengganti`,
+      subtitle: `${sppgConfig.foundationName} - ${sppgConfig.sppgName} | Tarif per Divisi & Jabatan`,
       headers: [
         'No',
         'Tanggal',
         'Nama Relawan',
+        'Jabatan',
         'Divisi',
         'Status Absensi',
         'Tarif Harian',
@@ -476,6 +575,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
         idx + 1,
         formatIndonesianDate(r.date),
         r.isSubstitute ? `${r.volunteerName} (Pengganti ${r.replacedVolunteerName})` : r.volunteerName,
+        r.positionLabel,
         r.division,
         r.attendanceStatus,
         formatRupiah(r.dailyRate),
@@ -495,10 +595,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
       No: idx + 1,
       Tanggal: r.date,
       Nama_Relawan: r.volunteerName,
+      Jabatan: r.positionLabel,
       Pengganti_Untuk: r.isSubstitute ? r.replacedVolunteerName || '-' : '-',
       Divisi: r.division,
       Shift: r.shift,
       Status_Absensi: r.attendanceStatus,
+      Sumber_Tarif: r.rateSource,
       Tarif_Harian_Rp: r.dailyRate,
       Total_Insentif_Rp: r.totalIncentive,
       Status_Pencairan: r.attendanceStatus === 'Hadir' ? r.status : 'Tidak Berhak (Absen)',
@@ -510,18 +612,18 @@ export const VolunteerIncentiveModule: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 px-5 py-4 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-lg bg-teal-700 text-white flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-[#0D9488] text-white flex items-center justify-center shrink-0">
               <Users2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">
                 Insentif Relawan Dapur SPPG
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <p className="text-xs text-slate-600 dark:text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5">
+                <RefreshCw className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
                 <span>
                   Terhubung langsung dengan menu <strong>Relawan &amp; Ketidakhadiran</strong> ({volunteerAttendance.length} log presensi, {approvedAbsencesCount} izin &amp; pengganti disetujui
                   {pendingAbsencesCount > 0 ? `, ${pendingAbsencesCount} menunggu persetujuan` : ''})
@@ -534,20 +636,20 @@ export const VolunteerIncentiveModule: React.FC = () => {
             <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
               <button
                 onClick={() => setViewMode('daily')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200 ease-in-out ${
                   viewMode === 'daily'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400'
+                    ? 'bg-[#1E3A8A] text-white shadow-xs dark:bg-sky-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                 }`}
               >
                 Rincian Harian
               </button>
               <button
                 onClick={() => setViewMode('summary')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200 ease-in-out ${
                   viewMode === 'summary'
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400'
+                    ? 'bg-[#1E3A8A] text-white shadow-xs dark:bg-sky-600'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                 }`}
               >
                 Rekap Per Relawan
@@ -556,17 +658,21 @@ export const VolunteerIncentiveModule: React.FC = () => {
 
             {canEdit && (
               <button
+                type="button"
                 onClick={handleOpenConfig}
-                className="px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 flex items-center gap-1.5"
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 flex items-center gap-1.5 transition-all duration-200 ease-in-out cursor-pointer"
               >
                 <SlidersHorizontal className="w-4 h-4" />
-                Tarif per Divisi
+                <span>
+                  Tarif Divisi &amp; Jabatan
+                  {customPositionRateCount > 0 ? ` (${customPositionRateCount} Khusus)` : ''}
+                </span>
               </button>
             )}
             {canApprove && metrics.pendingApproveCount > 0 && (
               <button
                 onClick={handleBatchApprove}
-                className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#0D9488] hover:bg-teal-700 text-white flex items-center gap-1.5 transition-all duration-200 ease-in-out"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Setujui Semua ({metrics.pendingApproveCount})
@@ -574,21 +680,21 @@ export const VolunteerIncentiveModule: React.FC = () => {
             )}
             <button
               onClick={handleExportExcel}
-              className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 flex items-center gap-1.5"
+              className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 flex items-center gap-1.5 transition-all duration-200 ease-in-out"
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <FileSpreadsheet className="w-4 h-4 text-[#0D9488]" />
               Excel
             </button>
             <button
               onClick={handleExportPDF}
-              className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 flex items-center gap-1.5"
+              className="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 flex items-center gap-1.5 transition-all duration-200 ease-in-out"
             >
-              <Download className="w-4 h-4 text-rose-600" />
+              <Download className="w-4 h-4 text-[#E11D48]" />
               PDF
             </button>
             <button
               onClick={() => triggerPrint()}
-              className="px-3 py-2 rounded-lg text-xs font-semibold bg-blue-950 hover:bg-blue-900 text-white flex items-center gap-1.5"
+              className="px-3 py-2 rounded-lg text-xs font-semibold bg-[#1E3A8A] hover:bg-blue-900 text-white flex items-center gap-1.5 transition-all duration-200 ease-in-out"
             >
               <Printer className="w-4 h-4" />
               Cetak
@@ -599,62 +705,62 @@ export const VolunteerIncentiveModule: React.FC = () => {
 
       {/* KPI Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-teal-600">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Shift Hadir &amp; Pengganti
             </span>
-            <UserCheck className="w-4 h-4 text-teal-600" />
+            <UserCheck className="w-4 h-4 text-[#0D9488]" />
           </div>
           <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
             {formatNumber(metrics.eligibleCount)} Shift
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             {metrics.absentCount} catatan izin/sakit/alpa otomatis Rp 0
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-blue-900">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Total Insentif Terhitung
             </span>
-            <Coins className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+            <Coins className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
           <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
             {formatRupiah(metrics.totalAmount)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Tarif standar rata-rata {formatRupiah(volunteerIncentiveConfig.defaultDailyRate)}/hari
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-emerald-600">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Sudah Dibayarkan
             </span>
-            <Wallet className="w-4 h-4 text-emerald-600" />
+            <Wallet className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
             {formatRupiah(metrics.paidAmount)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Tercatat lunas ke penerima shift aktif
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-amber-600">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Sisa Belum Dibayar
             </span>
-            <Coins className="w-4 h-4 text-amber-600" />
+            <Coins className="w-4 h-4 text-[#D97706]" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-amber-700 dark:text-amber-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold text-[#D97706] dark:text-amber-400 tabular-nums font-mono">
             {formatRupiah(metrics.unpaidAmount)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             {metrics.pendingApproveCount} shift menunggu persetujuan
           </p>
         </div>
@@ -806,7 +912,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right tabular-nums font-mono text-slate-600 dark:text-slate-300">
-                          {formatRupiah(row.dailyRate)}
+                          <div>{formatRupiah(row.dailyRate)}</div>
+                          {row.rateSource === 'Khusus Divisi & Jabatan' && (
+                            <div className="text-[10px] font-sans font-semibold text-[#1E3A8A] dark:text-sky-400">
+                              Tarif Jabatan Divisi
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-right tabular-nums font-mono font-bold text-slate-900 dark:text-white">
                           {formatRupiah(row.totalIncentive)}
@@ -915,68 +1026,308 @@ export const VolunteerIncentiveModule: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Tarif per Divisi */}
+      {/* Modal Tarif per Divisi & Berdasarkan Jabatan */}
       <Modal
         isOpen={isConfigOpen}
         onClose={() => setIsConfigOpen(false)}
-        title="Pengaturan Tarif Insentif Harian Relawan"
-        maxWidth="md"
+        title="Pengaturan Tarif Insentif Relawan (Per Divisi & Jabatan)"
+        subtitle="Atur tarif dasar divisi sekaligus tarif khusus berdasarkan jabatan (termasuk tarif berbeda untuk Koordinator di setiap divisi)"
+        maxWidth="3xl"
       >
         <form onSubmit={handleSaveConfig} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
-              Tarif Standar Harian Default (Rp)
-            </label>
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-800 dark:text-slate-100">
+                Tarif Standar Harian Default (Rp)
+              </label>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Digunakan jika divisi dan jabatan belum memiliki tarif khusus.
+              </p>
+            </div>
             <input
               type="number"
               min={0}
               step={5000}
               value={defaultRateForm}
               onChange={e => setDefaultRateForm(Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+              className="w-full sm:w-44 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-right font-bold"
               required
             />
           </div>
 
-          <div className="space-y-2.5">
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-              Tarif Khusus Per Divisi Dapur (Rp / Hari Hadir)
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {availableDivisions.map(div => (
-                <div key={div}>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Div. {div}</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={5000}
-                    value={divisionRatesForm[div] ?? defaultRateForm}
-                    onChange={e =>
-                      setDivisionRatesForm(prev => ({
-                        ...prev,
-                        [div]: Number(e.target.value),
-                      }))
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
-                  />
-                </div>
-              ))}
-            </div>
+          {/* Sub-Tabs Selector inside Modal: Ringkasan Divisi & Koordinator vs Detail Jabatan per Divisi */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setActiveConfigDivTab('SUMMARY')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeConfigDivTab === 'SUMMARY'
+                  ? 'bg-[#1E3A8A] text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Ringkasan Divisi &amp; Koordinator
+            </button>
+            {availableDivisions.map(div => {
+              const countOverrides = Object.keys(divisionPositionRatesForm[div] || {}).length;
+              return (
+                <button
+                  key={div}
+                  type="button"
+                  onClick={() => setActiveConfigDivTab(div)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                    activeConfigDivTab === div
+                      ? 'bg-[#1E3A8A] text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <span>Div. {div}</span>
+                  {countOverrides > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                        activeConfigDivTab === div
+                          ? 'bg-white/20 text-white'
+                          : 'bg-blue-100 text-[#1E3A8A] dark:bg-blue-950 dark:text-sky-300'
+                      }`}
+                    >
+                      {countOverrides}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+
+          {activeConfigDivTab === 'SUMMARY' ? (
+            <div className="space-y-2">
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                Atur <strong>Tarif Dasar Divisi</strong> (untuk anggota umum) dan tarif khusus{' '}
+                <strong>Koordinator Divisi</strong> serta <strong>Wakil Koordinator</strong> untuk masing-masing divisi. Klik tab nama divisi di atas untuk mengatur seluruh jabatan lainnya.
+              </p>
+              <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Divisi Dapur</th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-right">
+                        Tarif Dasar Divisi (Rp)
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-right">
+                        Koordinator Divisi (Rp)
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-right">
+                        Wakil Koordinator (Rp)
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-center">
+                        Jabatan Khusus
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {availableDivisions.map(div => {
+                      const baseRate = divisionRatesForm[div] ?? defaultRateForm;
+                      const coordRate = divisionPositionRatesForm[div]?.['Koordinator Divisi'];
+                      const viceRate = divisionPositionRatesForm[div]?.['Wakil Koordinator'];
+                      const divCustomCount = Object.keys(divisionPositionRatesForm[div] || {}).length;
+                      return (
+                        <tr key={div} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                            Div. {div}
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              step={5000}
+                              aria-label={`Tarif dasar Div. ${div}`}
+                              value={baseRate}
+                              onChange={e =>
+                                setDivisionRatesForm(prev => ({
+                                  ...prev,
+                                  [div]: Math.max(0, Number(e.target.value) || 0),
+                                }))
+                              }
+                              className="w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-semibold"
+                            />
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              step={5000}
+                              placeholder={String(baseRate)}
+                              aria-label={`Tarif Koordinator Div. ${div}`}
+                              value={coordRate ?? ''}
+                              onChange={e =>
+                                handleSetDivPosRate(div, 'Koordinator Divisi', e.target.value)
+                              }
+                              className={`w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border font-mono font-bold ${
+                                coordRate !== undefined
+                                  ? 'border-[#1E3A8A] bg-blue-50/70 text-[#1E3A8A] dark:border-sky-500 dark:bg-blue-950/50 dark:text-sky-300'
+                                  : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200'
+                              }`}
+                            />
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              step={5000}
+                              placeholder={String(baseRate)}
+                              aria-label={`Tarif Wakil Koordinator Div. ${div}`}
+                              value={viceRate ?? ''}
+                              onChange={e =>
+                                handleSetDivPosRate(div, 'Wakil Koordinator', e.target.value)
+                              }
+                              className={`w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border font-mono font-bold ${
+                                viceRate !== undefined
+                                  ? 'border-[#0D9488] bg-teal-50/70 text-[#0D9488] dark:border-teal-500 dark:bg-teal-950/50 dark:text-teal-300'
+                                  : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200'
+                              }`}
+                            />
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setActiveConfigDivTab(div)}
+                              className="text-[11px] font-semibold text-[#1E3A8A] hover:underline cursor-pointer"
+                            >
+                              {divCustomCount > 0 ? `${divCustomCount} diatur` : 'Atur semua'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Kosongkan kolom Koordinator / Wakil Koordinator agar mengikuti Tarif Dasar Divisi masing-masing.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-extrabold text-[#1E3A8A] dark:text-sky-300">
+                    Tarif Dasar Divisi {activeConfigDivTab} (Anggota Umum)
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Berlaku untuk jabatan di Div. {activeConfigDivTab} yang tidak diisi tarif khusus di bawah.
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  step={5000}
+                  value={divisionRatesForm[activeConfigDivTab] ?? defaultRateForm}
+                  onChange={e =>
+                    setDivisionRatesForm(prev => ({
+                      ...prev,
+                      [activeConfigDivTab]: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full sm:w-40 px-3 py-1.5 text-sm text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-xl">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">
+                        Jabatan di Div. {activeConfigDivTab}
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-center">
+                        Status Tarif
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-right">
+                        Tarif Khusus (Rp / Hari)
+                      </th>
+                      <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-center">
+                        Reset
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {availablePositions.map(pos => {
+                      const baseDivRate =
+                        divisionRatesForm[activeConfigDivTab] ?? defaultRateForm;
+                      const customVal =
+                        divisionPositionRatesForm[activeConfigDivTab]?.[pos];
+                      const isOverridden = customVal !== undefined;
+                      return (
+                        <tr
+                          key={pos}
+                          className={
+                            isOverridden
+                              ? 'bg-blue-50/40 dark:bg-blue-950/20'
+                              : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                          }
+                        >
+                          <td className="p-2.5 font-semibold text-slate-900 dark:text-white">
+                            {pos}
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isOverridden
+                                  ? 'bg-[#1E3A8A] text-white'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              {isOverridden ? 'Tarif Khusus Jabatan' : 'Ikuti Tarif Divisi'}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              step={5000}
+                              placeholder={`Ikuti (${formatNumber(baseDivRate)})`}
+                              value={customVal ?? ''}
+                              onChange={e =>
+                                handleSetDivPosRate(activeConfigDivTab, pos, e.target.value)
+                              }
+                              className="w-36 px-2.5 py-1.5 text-xs text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                            />
+                          </td>
+                          <td className="p-2.5 text-center">
+                            {isOverridden ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDivPosRate(activeConfigDivTab, pos, '')}
+                                className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                                title="Kembalikan ke Tarif Divisi"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <span className="text-slate-300 dark:text-slate-600">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
               onClick={() => setIsConfigOpen(false)}
-              className="px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+              className="px-4 py-2 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-950 hover:bg-blue-900 text-white"
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-[#1E3A8A] hover:bg-blue-900 text-white cursor-pointer"
             >
-              Simpan Tarif Divisi
+              Simpan Tarif Divisi &amp; Jabatan
             </button>
           </div>
         </form>

@@ -26,6 +26,7 @@ interface DataTableProps<T> {
   title?: string;
   subtitle?: string;
   isLoading?: boolean;
+  stickyFirstColumn?: boolean;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -44,6 +45,7 @@ export function DataTable<T extends Record<string, any>>({
   title,
   subtitle,
   isLoading = false,
+  stickyFirstColumn = false,
 }: DataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -113,7 +115,7 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/85 dark:border-slate-800 shadow-sm overflow-hidden print:overflow-visible print:shadow-none print:border-slate-300">
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden print:overflow-visible print:shadow-none print:border-slate-300 transition-all duration-200">
       {/* Top Card Title & Single-Row Inline Search + Export Toolbar */}
       <div className="p-5 sm:px-6 border-b border-slate-200/80 dark:border-slate-800 print:p-2 print:border-slate-300 space-y-4">
         {(title || subtitle) && (
@@ -124,7 +126,7 @@ export function DataTable<T extends Record<string, any>>({
               </h3>
             )}
             {subtitle && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 {subtitle}
               </p>
             )}
@@ -172,7 +174,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onExportExcel}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/70 dark:hover:bg-emerald-900/60 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-[#0D9488] bg-teal-50 hover:bg-teal-100 border border-teal-200/80 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800/70 dark:hover:bg-teal-900/60 rounded-lg transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer"
                 title="Ekspor ke Excel (.xlsx)"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -183,7 +185,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onExportPDF}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/80 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/70 dark:hover:bg-rose-900/60 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-[#E11D48] bg-rose-50 hover:bg-rose-100 border border-rose-200/80 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/70 dark:hover:bg-rose-900/60 rounded-lg transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer"
                 title="Ekspor ke PDF resmi"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -194,7 +196,7 @@ export function DataTable<T extends Record<string, any>>({
               <button
                 type="button"
                 onClick={onPrint}
-                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:border-slate-700 rounded-lg transition whitespace-nowrap shrink-0 cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 min-h-[38px] px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:border-slate-700 rounded-lg transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer"
                 title="Cetak dokumen"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -205,25 +207,43 @@ export function DataTable<T extends Record<string, any>>({
         </div>
       </div>
 
+      {/* Subtle Horizontal Scroll Indicator for Mobile / Tablet */}
+      {columns.length >= 4 && (
+        <div className="lg:hidden px-4 py-1.5 bg-slate-50/90 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400 print:hidden">
+          <span>Geser tabel ke samping untuk melihat seluruh kolom</span>
+          <span className="font-semibold text-[#1E3A8A] dark:text-sky-400">↔ Scroll</span>
+        </div>
+      )}
+
       {/* Table Element */}
       <div className="overflow-x-auto max-h-[calc(100vh-22rem)] scrollbar-thin print:max-h-none print:overflow-visible">
         <table className="w-full text-left text-xs tabular-nums">
           <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-xs border-b border-slate-200/80 dark:border-slate-700/80 text-slate-600 dark:text-slate-300 uppercase font-bold text-[11px] tracking-wider">
             <tr>
-              <th className="py-3.5 px-4 w-12 text-center text-slate-500">#</th>
-              {columns.map(col => {
+              <th
+                className={`py-3.5 px-4 w-12 text-center text-slate-600 dark:text-slate-300 ${
+                  stickyFirstColumn ? 'sticky left-0 z-20 bg-slate-50 dark:bg-slate-800' : ''
+                }`}
+              >
+                #
+              </th>
+              {columns.map((col, colIdx) => {
                 const alignClass =
                   col.align === 'center'
                     ? 'text-center'
                     : col.align === 'right'
                     ? 'text-right'
                     : 'text-left';
+                const stickyColClass =
+                  stickyFirstColumn && colIdx === 0
+                    ? 'sticky left-12 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]'
+                    : '';
 
                 return (
                   <th
                     key={col.key}
                     onClick={() => col.sortable !== false && handleSort(col.key)}
-                    className={`py-3.5 px-4 whitespace-nowrap ${alignClass} ${
+                    className={`py-3.5 px-4 whitespace-nowrap ${alignClass} ${stickyColClass} ${
                       col.sortable !== false
                         ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/70 select-none transition-colors'
                         : ''
@@ -235,9 +255,9 @@ export function DataTable<T extends Record<string, any>>({
                         <span className="text-slate-400">
                           {sortKey === col.key ? (
                             sortDirection === 'asc' ? (
-                              <ArrowUp className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 font-bold" />
+                              <ArrowUp className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400 font-bold" />
                             ) : (
-                              <ArrowDown className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 font-bold" />
+                              <ArrowDown className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400 font-bold" />
                             )
                           ) : (
                             <ArrowUpDown className="w-3 h-3 opacity-40 hover:opacity-80" />
@@ -278,23 +298,31 @@ export function DataTable<T extends Record<string, any>>({
                 return (
                   <tr
                     key={keyExtractor(row)}
-                    className="hover:bg-blue-50/45 dark:hover:bg-slate-800/40 transition-colors text-slate-700 dark:text-slate-200"
+                    className="group hover:bg-blue-50/45 dark:hover:bg-slate-800/40 transition-colors text-slate-700 dark:text-slate-200"
                   >
-                    <td className="py-4 px-4 text-center text-slate-400 dark:text-slate-500 font-mono text-[11px] align-top">
+                    <td
+                      className={`py-4 px-4 text-center text-slate-500 dark:text-slate-400 font-mono text-[11px] align-top ${
+                        stickyFirstColumn ? 'sticky left-0 z-10 bg-white group-hover:bg-blue-50/90 dark:bg-slate-900 dark:group-hover:bg-slate-800' : ''
+                      }`}
+                    >
                       {rowNumber}
                     </td>
-                    {columns.map(col => {
+                    {columns.map((col, colIdx) => {
                       const alignClass =
                         col.align === 'center'
                           ? 'text-center'
                           : col.align === 'right'
                           ? 'text-right'
                           : 'text-left';
+                      const stickyBodyClass =
+                        stickyFirstColumn && colIdx === 0
+                          ? 'sticky left-12 z-10 bg-white group-hover:bg-blue-50/90 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]'
+                          : '';
 
                       return (
                         <td
                           key={col.key}
-                          className={`py-4 px-4 align-middle ${alignClass} ${col.className || ''}`}
+                          className={`py-4 px-4 align-middle ${alignClass} ${stickyBodyClass} ${col.className || ''}`}
                         >
                           {col.render ? col.render(row) : (row[col.key] ?? '-')}
                         </td>
@@ -309,7 +337,7 @@ export function DataTable<T extends Record<string, any>>({
       </div>
 
       {/* Pagination Footer */}
-      <div className="px-5 py-4 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400 print:hidden">
+      <div className="px-5 py-4 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400 print:hidden">
         <div className="flex items-center gap-3">
           <span>
             Menampilkan {totalItems === 0 ? 0 : startIndex + 1} -{' '}

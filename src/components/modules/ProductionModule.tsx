@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
+import {
+  getDefaultDivisionOfficerName,
+  getDivisionOfficerSelectOptions,
+} from '../../lib/volunteerUtils';
 import { PrintHeader } from '../common/PrintHeader';
 import { Modal } from '../common/Modal';
 import { DataTable, Column } from '../common/DataTable';
@@ -113,6 +117,27 @@ export const ProductionModule: React.FC = () => {
     dynamicFormSchemas,
   } = useApp();
 
+  const prepVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Persiapan'),
+    [masterVolunteers]
+  );
+  const cookingVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Pengolahan'),
+    [masterVolunteers]
+  );
+  const portioningVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Pemorsian'),
+    [masterVolunteers]
+  );
+  const distVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Distribusi'),
+    [masterVolunteers]
+  );
+  const washingVolunteerOptions = useMemo(
+    () => getDivisionOfficerSelectOptions(masterVolunteers, 'Cuci Ompreng'),
+    [masterVolunteers]
+  );
+
   const [activeTab, setActiveTab] = useState<ProductionTab>('prep');
   const [isEditingWasteSchema, setIsEditingWasteSchema] = useState(false);
   const [isModalWasteSchemaEdit, setIsModalWasteSchemaEdit] = useState(false);
@@ -175,6 +200,7 @@ export const ProductionModule: React.FC = () => {
     setPrepForm(f => ({
       ...f,
       date: new Date().toISOString().slice(0, 10),
+      officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Persiapan', f.officerName),
       facilityTemps: { ...defaultFacilityTemperatures },
     }));
     setIsPrepModalOpen(true);
@@ -412,7 +438,11 @@ export const ProductionModule: React.FC = () => {
     setCookingForm({
       date: todayIso,
       time: '06:15 WIB',
-      officerName: 'Suparman & Hadi Sukamto',
+      officerName: getDefaultDivisionOfficerName(
+        masterVolunteers,
+        'Pengolahan',
+        'Suparman (Juru Masak / Cook)'
+      ),
       menuId: defaultMenu?.id || '',
       itemEntries: buildCookingItemEntries(defaultMenu),
       facilityTemps: { ...defaultFacilityTemperatures },
@@ -696,6 +726,7 @@ export const ProductionModule: React.FC = () => {
     setPortioningForm(f => ({
       ...f,
       date: new Date().toISOString().slice(0, 10),
+      officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Pemorsian', f.officerName),
       menuId: menuItems[0]?.id || '',
       facilityTemps: { ...defaultFacilityTemperatures },
     }));
@@ -900,6 +931,15 @@ export const ProductionModule: React.FC = () => {
     notes: 'Boks termal tersegel rapi, uji organoleptik PIC disetujui, dan serah terima selesai di lokasi.',
   });
 
+  const resolveInstitutionPicName = useCallback(
+    (instId?: string): string => {
+      const inst = institutions.find(i => i.id === instId);
+      if (!inst) return '';
+      return (inst.picName || '').trim() || (inst.contactPerson || '').trim() || '';
+    },
+    [institutions]
+  );
+
   const openNewDeliveryModal = () => {
     const defaultInst = institutions[0];
     setEditingDeliveryId(null);
@@ -908,9 +948,9 @@ export const ProductionModule: React.FC = () => {
       institutionId: defaultInst?.id || '',
       departureTime: '08:15 WIB',
       arrivalTime: '08:35 WIB',
-      driverName: 'Agus Santoso',
+      driverName: getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', 'Agus Santoso'),
       vehicleNumber: 'N 8921 RA (Armada Box Isothermal 1)',
-      picName: defaultInst?.picName || defaultInst?.contactPerson || 'Kepala Sekolah',
+      picName: resolveInstitutionPicName(defaultInst?.id),
       status: 'Selesai Serah Terima',
       activityPhoto: '',
       handoverPhoto: '',
@@ -930,7 +970,7 @@ export const ProductionModule: React.FC = () => {
       arrivalTime: rec.arrivalTime,
       driverName: rec.driverName,
       vehicleNumber: rec.vehicleNumber,
-      picName: rec.picName,
+      picName: rec.picName || resolveInstitutionPicName(rec.institutionId),
       status: rec.status,
       activityPhoto: rec.activityPhoto || '',
       handoverPhoto: rec.handoverPhoto || '',
@@ -940,6 +980,23 @@ export const ProductionModule: React.FC = () => {
     });
     setIsDeliveryModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!isDeliveryModalOpen || editingDeliveryId) return;
+    if (institutions.length === 0) return;
+    const targetInstId = deliveryForm.institutionId || institutions[0].id;
+    const autoPic = resolveInstitutionPicName(targetInstId);
+    setDeliveryForm(f => {
+      if (f.institutionId === targetInstId && f.picName.trim() !== '') {
+        return f;
+      }
+      return {
+        ...f,
+        institutionId: targetInstId,
+        picName: autoPic,
+      };
+    });
+  }, [isDeliveryModalOpen, editingDeliveryId, institutions, deliveryForm.institutionId, resolveInstitutionPicName]);
 
   const handleSaveDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1001,7 +1058,10 @@ export const ProductionModule: React.FC = () => {
     arrivalTime: '13:05 WIB',
     driverName: 'Agus Santoso',
     vehicleNumber: 'N 8921 RA',
-    receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+    receivedByOfficer:
+      (institutions[0]?.picName || '').trim() ||
+      (institutions[0]?.contactPerson || '').trim() ||
+      '',
     activityPhoto: '',
     returnHandoverPhoto: '',
     locationPhoto: '',
@@ -1018,9 +1078,9 @@ export const ProductionModule: React.FC = () => {
       largePortions: defaultInst?.largePortions || 0,
       departureTime: '12:30 WIB',
       arrivalTime: '13:05 WIB',
-      driverName: 'Agus Santoso',
+      driverName: getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', 'Agus Santoso'),
       vehicleNumber: 'N 8921 RA',
-      receivedByOfficer: currentUser.name || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      receivedByOfficer: resolveInstitutionPicName(defaultInst?.id),
       activityPhoto: '',
       returnHandoverPhoto: '',
       locationPhoto: '',
@@ -1030,12 +1090,31 @@ export const ProductionModule: React.FC = () => {
     setIsReturnModalOpen(true);
   };
 
+  useEffect(() => {
+    if (!isReturnModalOpen) return;
+    if (institutions.length === 0) return;
+    const targetInstId = returnForm.institutionId || institutions[0].id;
+    const autoPic = resolveInstitutionPicName(targetInstId);
+    setReturnForm(f => {
+      if (f.institutionId === targetInstId && f.receivedByOfficer.trim() !== '') {
+        return f;
+      }
+      return {
+        ...f,
+        institutionId: targetInstId,
+        receivedByOfficer: autoPic,
+      };
+    });
+  }, [isReturnModalOpen, institutions, returnForm.institutionId, resolveInstitutionPicName]);
+
   const handleSaveReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === returnForm.institutionId) || institutions[0];
     if (!inst) return;
     const smallQty = Number(returnForm.smallPortions) || 0;
     const largeQty = Number(returnForm.largePortions) || 0;
+    const resolvedPic =
+      returnForm.receivedByOfficer.trim() || resolveInstitutionPicName(inst.id) || 'PIC Lembaga';
     await addOmprengReturn({
       date: returnForm.date,
       institutionId: inst.id,
@@ -1050,7 +1129,7 @@ export const ProductionModule: React.FC = () => {
       activityPhoto: returnForm.activityPhoto || undefined,
       returnHandoverPhoto: returnForm.returnHandoverPhoto || undefined,
       locationPhoto: returnForm.locationPhoto || undefined,
-      receivedByOfficer: returnForm.receivedByOfficer || 'Fahrur Rozi (Div. Cuci Ompreng)',
+      receivedByOfficer: resolvedPic,
       conditionStatus: returnForm.conditionStatus,
       notes: returnForm.notes,
     });
@@ -1089,6 +1168,14 @@ export const ProductionModule: React.FC = () => {
     setIsFuelModalOpen(false);
   };
 
+  const openNewFuelModal = () => {
+    setFuelForm(f => ({
+      ...f,
+      driverName: getDefaultDivisionOfficerName(masterVolunteers, 'Distribusi', f.driverName),
+    }));
+    setIsFuelModalOpen(true);
+  };
+
   // -------------------------------------------------------------
   // TAB E: Form State Divisi Cuci Ompreng & Food Waste
   // -------------------------------------------------------------
@@ -1114,6 +1201,8 @@ export const ProductionModule: React.FC = () => {
   const handleOpenWasteModal = () => {
     setWasteForm(prev => ({
       ...prev,
+      date: new Date().toISOString().slice(0, 10),
+      officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Cuci Ompreng', prev.officerName),
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.production_waste_form),
     }));
     setIsWasteModalOpen(true);
@@ -1189,20 +1278,22 @@ export const ProductionModule: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Print-only Header */}
-      <PrintHeader
-        title="LEMBAR KENDALI OPERASIONAL DAN PRODUKSI DAPUR MBG"
-        subtitle="Divisi Persiapan, Pengolahan, Pemorsian, Distribusi & Cuci Ompreng (Sanitasi Food Waste)"
-        docNumber="BAP-PROD/SPPG-TMG2/2026/XI/009"
-      />
+      <div className="hidden print:block">
+        <PrintHeader
+          title="LEMBAR KENDALI OPERASIONAL DAN PRODUKSI DAPUR MBG"
+          subtitle="Divisi Persiapan, Pengolahan, Pemorsian, Distribusi & Cuci Ompreng (Sanitasi Food Waste)"
+          docNumber="BAP-PROD/SPPG-TMG2/2026/XI/009"
+        />
+      </div>
 
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Compact Header Bar */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-            <Flame className="w-6 h-6 text-blue-900 dark:text-sky-400" />
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <Flame className="w-5 h-5 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
             Modul Produksi dan Operasional Dapur
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
             Satuan Pelayanan Pemenuhan Gizi: <strong>{sppgConfig.sppgName}</strong> (ID: {sppgConfig.sppgId})
           </p>
         </div>
@@ -1218,7 +1309,7 @@ export const ProductionModule: React.FC = () => {
           <button
             type="button"
             onClick={triggerPrint}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all duration-200 ease-in-out shadow-xs"
           >
             <Printer className="w-4 h-4" />
             <span>Cetak BAP Operasional</span>
@@ -1233,87 +1324,89 @@ export const ProductionModule: React.FC = () => {
         />
       )}
 
-      {/* 5-Division Tab Navigation */}
-      <div className="flex border-b border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('prep')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeTab === 'prep'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <Scissors className="w-4 h-4" />
-          <span>A. Divisi Persiapan</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {prepRecords.length}
-          </span>
-        </button>
+      {/* 5-Division Responsive Pill Tab Navigation */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setActiveTab('prep')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'prep'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Scissors className="w-4 h-4 shrink-0" />
+            <span>A. Divisi Persiapan</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeTab === 'prep' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {prepRecords.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('cooking')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeTab === 'cooking'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <CookingPot className="w-4 h-4" />
-          <span>B. Divisi Pengolahan</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {cookingRecords.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('cooking')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'cooking'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <CookingPot className="w-4 h-4 shrink-0" />
+            <span>B. Divisi Pengolahan</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeTab === 'cooking' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {cookingRecords.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('portioning')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeTab === 'portioning'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <Scale className="w-4 h-4" />
-          <span>C. Divisi Pemorsian</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {portioningRecords.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('portioning')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'portioning'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Scale className="w-4 h-4 shrink-0" />
+            <span>C. Divisi Pemorsian</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeTab === 'portioning' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {portioningRecords.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('distribution')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeTab === 'distribution'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <Truck className="w-4 h-4" />
-          <span>D. Divisi Distribusi & Armada</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {distributionDeliveries.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('distribution')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'distribution'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Truck className="w-4 h-4 shrink-0" />
+            <span>D. Divisi Distribusi & Armada</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeTab === 'distribution' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {distributionDeliveries.length}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('washing')}
-          className={`flex items-center gap-2 px-4 py-3 text-xs font-bold transition whitespace-nowrap border-b-2 ${
-            activeTab === 'washing'
-              ? 'border-blue-900 text-blue-900 dark:border-sky-400 dark:text-sky-400 bg-blue-50/50 dark:bg-sky-950/20'
-              : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>E. Divisi Cuci & Food Waste</span>
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800">
-            {washingWasteRecords.length}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('washing')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'washing'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 shrink-0" />
+            <span>E. Divisi Cuci & Food Waste</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${activeTab === 'washing' ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+              {washingWasteRecords.length}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* ========================================================= */}
@@ -1954,7 +2047,7 @@ export const ProductionModule: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setIsFuelModalOpen(true)}
+                onClick={openNewFuelModal}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 <Fuel className="w-3.5 h-3.5" />
@@ -2110,7 +2203,7 @@ export const ProductionModule: React.FC = () => {
                           Kembali: <strong>{ret.totalPortions} Ompreng</strong> (Kecil: {ret.smallPortions}, Besar: {ret.largePortions})
                         </div>
                         <div className="text-[11px] text-slate-400 mt-1">
-                          {ret.date} • Driver: {ret.driverName} • Tiba SPPG: {ret.arrivalTime}
+                          {ret.date} • Driver: {ret.driverName} • PIC Lembaga: {ret.receivedByOfficer} • Tiba SPPG: {ret.arrivalTime}
                         </div>
                       </div>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 shrink-0">
@@ -2600,14 +2693,28 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Nama Petugas Pemeriksa</label>
-                <input
-                  type="text"
+                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                  Nama Petugas Pemeriksa (Div. Persiapan)
+                </label>
+                <select
                   required
                   value={prepForm.officerName}
                   onChange={e => setPrepForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {prepVolunteerOptions.length === 0 && !prepForm.officerName && (
+                    <option value="">-- Belum ada relawan Divisi Persiapan --</option>
+                  )}
+                  {prepVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {prepForm.officerName &&
+                    !prepVolunteerOptions.some(o => o.value === prepForm.officerName) && (
+                      <option value={prepForm.officerName}>{prepForm.officerName}</option>
+                    )}
+                </select>
               </div>
             </div>
 
@@ -2873,31 +2980,27 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Petugas (Master Relawan Pengolahan)
+                  Nama Petugas (Div. Pengolahan)
                 </label>
                 <select
-                  value=""
-                  onChange={e => {
-                    if (e.target.value) setCookingForm(f => ({ ...f, officerName: e.target.value }));
-                  }}
-                  className="w-full px-2.5 py-1.5 mb-1 border rounded-lg bg-slate-50 dark:bg-slate-800 dark:border-slate-700 text-[11px]"
-                >
-                  <option value="">-- Pilih Relawan Div. Pengolahan --</option>
-                  {masterVolunteers
-                    .filter(v => v.isActive && v.division === 'Pengolahan')
-                    .map(v => (
-                      <option key={v.id} value={`${v.name} (${v.position})`}>
-                        {v.name} — {v.position}
-                      </option>
-                    ))}
-                </select>
-                <input
-                  type="text"
                   required
                   value={cookingForm.officerName}
                   onChange={e => setCookingForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {cookingVolunteerOptions.length === 0 && !cookingForm.officerName && (
+                    <option value="">-- Belum ada relawan Divisi Pengolahan --</option>
+                  )}
+                  {cookingVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {cookingForm.officerName &&
+                    !cookingVolunteerOptions.some(o => o.value === cookingForm.officerName) && (
+                      <option value={cookingForm.officerName}>{cookingForm.officerName}</option>
+                    )}
+                </select>
               </div>
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
@@ -3188,30 +3291,26 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">Petugas Pemorsian</label>
+                <label className="block font-bold mb-1">Nama Petugas (Div. Pemorsian)</label>
                 <select
-                  value=""
-                  onChange={e => {
-                    if (e.target.value) setPortioningForm(f => ({ ...f, officerName: e.target.value }));
-                  }}
-                  className="w-full px-2.5 py-1.5 mb-1 border rounded-lg bg-slate-50 dark:bg-slate-800 text-[11px]"
-                >
-                  <option value="">-- Pilih Relawan Pemorsian --</option>
-                  {masterVolunteers
-                    .filter(v => v.isActive)
-                    .map(v => (
-                      <option key={v.id} value={`${v.name} (${v.position})`}>
-                        {v.name} — {v.division}
-                      </option>
-                    ))}
-                </select>
-                <input
-                  type="text"
                   required
                   value={portioningForm.officerName}
                   onChange={e => setPortioningForm(f => ({ ...f, officerName: e.target.value }))}
-                  className="w-full px-3 py-1.5 border rounded-lg dark:bg-slate-800"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {portioningVolunteerOptions.length === 0 && !portioningForm.officerName && (
+                    <option value="">-- Belum ada relawan Divisi Pemorsian --</option>
+                  )}
+                  {portioningVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {portioningForm.officerName &&
+                    !portioningVolunteerOptions.some(o => o.value === portioningForm.officerName) && (
+                      <option value={portioningForm.officerName}>{portioningForm.officerName}</option>
+                    )}
+                </select>
               </div>
               <div>
                 <label className="block font-bold mb-1">Menu Harian (Master Menu)</label>
@@ -3535,11 +3634,11 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={deliveryForm.institutionId}
                   onChange={e => {
-                    const inst = institutions.find(i => i.id === e.target.value);
+                    const nextInstId = e.target.value;
                     setDeliveryForm(f => ({
                       ...f,
-                      institutionId: e.target.value,
-                      picName: inst?.picName || inst?.contactPerson || f.picName,
+                      institutionId: nextInstId,
+                      picName: resolveInstitutionPicName(nextInstId),
                     }));
                   }}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -3587,14 +3686,26 @@ export const ProductionModule: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block font-bold mb-1">Petugas Distribusi (Driver/Kru)</label>
-                <input
-                  type="text"
+                <label className="block font-bold mb-1">Petugas Distribusi (Div. Distribusi)</label>
+                <select
                   required
                   value={deliveryForm.driverName}
                   onChange={e => setDeliveryForm(f => ({ ...f, driverName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {distVolunteerOptions.length === 0 && !deliveryForm.driverName && (
+                    <option value="">-- Belum ada relawan Divisi Distribusi --</option>
+                  )}
+                  {distVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {deliveryForm.driverName &&
+                    !distVolunteerOptions.some(o => o.value === deliveryForm.driverName) && (
+                      <option value={deliveryForm.driverName}>{deliveryForm.driverName}</option>
+                    )}
+                </select>
               </div>
               <div>
                 <label className="block font-bold mb-1">Kendaraan / Plat Nomor</label>
@@ -3607,14 +3718,42 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">PIC Penerima di Lokasi</label>
-                <input
-                  type="text"
-                  required
-                  value={deliveryForm.picName}
-                  onChange={e => setDeliveryForm(f => ({ ...f, picName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                {(() => {
+                  const selectedInst = institutions.find(i => i.id === deliveryForm.institutionId);
+                  const autoPic = resolveInstitutionPicName(deliveryForm.institutionId);
+                  const isSynced = Boolean(autoPic && deliveryForm.picName === autoPic);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label className="block font-bold">PIC Penerima di Lokasi</label>
+                        {autoPic && !isSynced && (
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryForm(f => ({ ...f, picName: autoPic }))}
+                            className="text-[10px] font-bold text-blue-800 dark:text-sky-400 hover:underline"
+                          >
+                            Isi Otomatis PIC
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Otomatis terisi sesuai PIC Lembaga..."
+                        value={deliveryForm.picName}
+                        onChange={e => setDeliveryForm(f => ({ ...f, picName: e.target.value }))}
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                      />
+                      {selectedInst && (
+                        <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          {autoPic
+                            ? `PIC Lembaga: ${autoPic}${selectedInst.picPhone ? ` (${selectedInst.picPhone})` : ''}`
+                            : 'PIC belum diisi di Master Lembaga Penerima Manfaat.'}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -3758,12 +3897,14 @@ export const ProductionModule: React.FC = () => {
                   required
                   value={returnForm.institutionId}
                   onChange={e => {
-                    const inst = institutions.find(i => i.id === e.target.value);
+                    const nextInstId = e.target.value;
+                    const inst = institutions.find(i => i.id === nextInstId);
                     setReturnForm(f => ({
                       ...f,
-                      institutionId: e.target.value,
+                      institutionId: nextInstId,
                       smallPortions: inst?.smallPortions || 0,
                       largePortions: inst?.largePortions || 0,
+                      receivedByOfficer: resolveInstitutionPicName(nextInstId),
                     }));
                   }}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -3830,14 +3971,26 @@ export const ProductionModule: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-bold mb-1">Petugas Penjemput</label>
-                <input
-                  type="text"
+                <label className="block font-bold mb-1">Petugas Penjemput (Div. Distribusi)</label>
+                <select
                   required
                   value={returnForm.driverName}
                   onChange={e => setReturnForm(f => ({ ...f, driverName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {distVolunteerOptions.length === 0 && !returnForm.driverName && (
+                    <option value="">-- Belum ada relawan Divisi Distribusi --</option>
+                  )}
+                  {distVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {returnForm.driverName &&
+                    !distVolunteerOptions.some(o => o.value === returnForm.driverName) && (
+                      <option value={returnForm.driverName}>{returnForm.driverName}</option>
+                    )}
+                </select>
               </div>
               <div>
                 <label className="block font-bold mb-1">Kendaraan</label>
@@ -3853,14 +4006,42 @@ export const ProductionModule: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block font-bold mb-1">Petugas Penerima di SPPG</label>
-                <input
-                  type="text"
-                  required
-                  value={returnForm.receivedByOfficer}
-                  onChange={e => setReturnForm(f => ({ ...f, receivedByOfficer: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
-                />
+                {(() => {
+                  const selectedInst = institutions.find(i => i.id === returnForm.institutionId);
+                  const autoPic = resolveInstitutionPicName(returnForm.institutionId);
+                  const isSynced = Boolean(autoPic && returnForm.receivedByOfficer === autoPic);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label className="block font-bold">PIC Lembaga</label>
+                        {autoPic && !isSynced && (
+                          <button
+                            type="button"
+                            onClick={() => setReturnForm(f => ({ ...f, receivedByOfficer: autoPic }))}
+                            className="text-[10px] font-bold text-blue-800 dark:text-sky-400 hover:underline"
+                          >
+                            Isi Otomatis PIC
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Otomatis terisi sesuai PIC Lembaga..."
+                        value={returnForm.receivedByOfficer}
+                        onChange={e => setReturnForm(f => ({ ...f, receivedByOfficer: e.target.value }))}
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                      />
+                      {selectedInst && (
+                        <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          {autoPic
+                            ? `PIC Lembaga: ${autoPic}${selectedInst.picPhone ? ` (${selectedInst.picPhone})` : ''}`
+                            : 'PIC belum diisi di Master Lembaga Penerima Manfaat.'}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div>
                 <label className="block font-bold mb-1">Status Fisik Ompreng</label>
@@ -4000,14 +4181,26 @@ export const ProductionModule: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block font-bold mb-1">Nama Pengemudi</label>
-                <input
-                  type="text"
+                <label className="block font-bold mb-1">Nama Pengemudi (Div. Distribusi)</label>
+                <select
                   required
                   value={fuelForm.driverName}
                   onChange={e => setFuelForm(f => ({ ...f, driverName: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
-                />
+                  className="w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 dark:border-slate-700"
+                >
+                  {distVolunteerOptions.length === 0 && !fuelForm.driverName && (
+                    <option value="">-- Belum ada relawan Divisi Distribusi --</option>
+                  )}
+                  {distVolunteerOptions.map(opt => (
+                    <option key={opt.volunteer.id} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                  {fuelForm.driverName &&
+                    !distVolunteerOptions.some(o => o.value === fuelForm.driverName) && (
+                      <option value={fuelForm.driverName}>{fuelForm.driverName}</option>
+                    )}
+                </select>
               </div>
               <div>
                 <label className="block font-bold mb-1">Jenis BBM</label>
@@ -4141,6 +4334,12 @@ export const ProductionModule: React.FC = () => {
               values={{
                 ...wasteForm,
                 ...(wasteForm.customFields || {}),
+              }}
+              dynamicOptions={{
+                officerName: washingVolunteerOptions.map(o => ({
+                  value: o.value,
+                  label: o.label,
+                })),
               }}
               excludeKeys={['notes']}
               onChange={(key, value, field) => {

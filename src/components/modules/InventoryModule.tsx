@@ -673,26 +673,26 @@ export const InventoryModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Header */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Compact Top Banner Header */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-900 text-white flex items-center justify-center shadow-md shadow-blue-950/20 font-black">
-            <Boxes className="w-6 h-6 text-sky-400" />
+          <div className="w-10 h-10 rounded-xl bg-[#1E3A8A] text-white flex items-center justify-center shadow-sm shrink-0">
+            <Boxes className="w-5 h-5 text-sky-300" />
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
+              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-blue-50 text-[#1E3A8A] dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
                 GUDANG & LOGISTIK MBG
               </span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300">
                 <Link2 className="w-3 h-3" />
                 Stok Gudang Diambil Otomatis dari Hasil Input Quality Control ({qualityControlRecords.length} QC)
               </span>
             </div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+            <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">
               Modul Pengadaan dan Gudang (Inventory Control)
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-600 dark:text-slate-400">
               Alur Terhubung: Perencanaan Menu → RAB → Purchase Order → Quality Control → Stok Gudang & Kartu Stok
             </p>
           </div>
@@ -717,7 +717,7 @@ export const InventoryModule: React.FC = () => {
           <button
             type="button"
             onClick={() => syncInventoryFromQualityControl()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/70 text-[#0D9488] dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
             title="Sinkronkan ulang seluruh penerimaan stok gudang langsung dari hasil Quality Control (QC)"
           >
             <RefreshCw className="w-4 h-4" />
@@ -727,7 +727,7 @@ export const InventoryModule: React.FC = () => {
           <button
             type="button"
             onClick={() => items[0] && handleOpenQuickMutation(items[0], 'Barang Keluar')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
           >
             <ArrowDownRight className="w-4 h-4" />
             <span>Catat Barang Keluar / Retur</span>
@@ -744,54 +744,54 @@ export const InventoryModule: React.FC = () => {
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Total Komoditas Gudang</span>
-            <Warehouse className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+            <Warehouse className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
             {kpiData.totalItems} Komoditas
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Bahan Basah & Kering</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Bahan Basah & Kering</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Peringatan Stok Minimum</span>
-            <AlertTriangle className={`w-4 h-4 ${kpiData.criticalCount > 0 ? 'text-rose-600' : 'text-slate-400'}`} />
+            <AlertTriangle className={`w-4 h-4 ${kpiData.criticalCount > 0 ? 'text-[#E11D48]' : 'text-slate-400'}`} />
           </div>
           <div
             className={`text-2xl font-black font-mono mt-1 ${
-              kpiData.criticalCount > 0 ? 'text-rose-600' : 'text-slate-900 dark:text-white'
+              kpiData.criticalCount > 0 ? 'text-[#E11D48]' : 'text-slate-900 dark:text-white'
             }`}
           >
             {kpiData.criticalCount} Item Kritis
           </div>
-          <div className="text-[11px] text-rose-600 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#E11D48] font-semibold mt-0.5">
             {kpiData.criticalCount > 0 ? 'Wajib terbitkan PO segera' : 'Seluruh stok di atas batas aman'}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Total Valuasi Nilai Stok</span>
-            <DollarSign className="w-4 h-4 text-emerald-600" />
+            <DollarSign className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="text-xl font-black text-emerald-600 font-mono mt-1">
+          <div className="text-xl font-black text-[#0D9488] font-mono mt-1">
             {formatRupiah(kpiData.totalValuation)}
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Aset Bahan Pangan Tersimpan</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Aset Bahan Pangan Tersimpan</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>FEFO Mendekati Expired</span>
-            <Clock className="w-4 h-4 text-amber-500" />
+            <Clock className="w-4 h-4 text-[#D97706]" />
           </div>
-          <div className="text-2xl font-black text-amber-600 font-mono mt-1">
+          <div className="text-2xl font-black text-[#D97706] font-mono mt-1">
             {kpiData.expiringSoonItems.length} Batch
           </div>
-          <div className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#D97706] dark:text-amber-400 font-semibold mt-0.5">
             Kadaluarsa dalam &le; 5 Hari
           </div>
         </div>
@@ -799,8 +799,8 @@ export const InventoryModule: React.FC = () => {
 
       {/* Critical Stock Alert Bar (If any critical item exists) */}
       {kpiData.criticalCount > 0 && (
-        <div className="bg-rose-50 dark:bg-rose-950/40 p-4 rounded-xl border border-rose-200 dark:border-rose-900 flex items-start gap-3 text-xs text-rose-900 dark:text-rose-200 shadow-xs">
-          <BadgeAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+        <div className="bg-rose-50 dark:bg-rose-950/40 p-4 rounded-xl border border-rose-200 dark:border-rose-900 flex items-start gap-3 text-xs text-rose-900 dark:text-rose-200 shadow-sm">
+          <BadgeAlert className="w-5 h-5 text-[#E11D48] shrink-0 mt-0.5" />
           <div className="flex-1 space-y-1">
             <div className="font-bold flex items-center gap-2">
               <span>PERINGATAN STOK MINIMUM (SAFETY STOCK BREACH)</span>
@@ -823,66 +823,73 @@ export const InventoryModule: React.FC = () => {
               setFilterStockStatus('CRITICAL');
               setActiveTab('stok_gudang');
             }}
-            className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition shrink-0"
+            className="px-3 py-1.5 bg-[#E11D48] hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition shrink-0"
           >
             Lihat Bahan Kritis
           </button>
         </div>
       )}
 
-      {/* Sub-Tabs Navigation */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold scrollbar-thin">
-        {[
-          {
-            key: 'stok_gudang' as InventoryTab,
-            label: '1. Inventaris Stok & FEFO',
-            icon: <Warehouse className="w-4 h-4" />,
-            badge: `${items.length} Item`,
-          },
-          {
-            key: 'mutasi_barang' as InventoryTab,
-            label: '2. Riwayat Mutasi (Masuk, Keluar, Retur)',
-            icon: <ArrowRightLeft className="w-4 h-4" />,
-            badge: `${mutations.length} Transaksi`,
-          },
-          {
-            key: 'kartu_stok' as InventoryTab,
-            label: '3. Buku Kartu Stok (Stock Card)',
-            icon: <ClipboardList className="w-4 h-4" />,
-          },
-          {
-            key: 'stok_opname' as InventoryTab,
-            label: '4. Stok Opname (Fisik vs Sistem)',
-            icon: <Scale className="w-4 h-4" />,
-            badge: `${opnameList.length} Opname`,
-          },
-          {
-            key: 'rekap_penggunaan' as InventoryTab,
-            label: '5. Rekap Penggunaan Bahan MBG',
-            icon: <FileSpreadsheet className="w-4 h-4" />,
-          },
-        ].map(tab => {
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 ${
-                isActive
-                  ? 'border-blue-900 dark:border-sky-400 text-blue-900 dark:text-sky-300 bg-blue-50/50 dark:bg-blue-950/40'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
-              }`}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-              {tab.badge && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      {/* Sub-Tabs Navigation (Responsive Pill Tabs) */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+          {[
+            {
+              key: 'stok_gudang' as InventoryTab,
+              label: '1. Inventaris Stok & FEFO',
+              icon: <Warehouse className="w-4 h-4 shrink-0" />,
+              badge: `${items.length} Item`,
+            },
+            {
+              key: 'mutasi_barang' as InventoryTab,
+              label: '2. Riwayat Mutasi (Masuk, Keluar, Retur)',
+              icon: <ArrowRightLeft className="w-4 h-4 shrink-0" />,
+              badge: `${mutations.length} Transaksi`,
+            },
+            {
+              key: 'kartu_stok' as InventoryTab,
+              label: '3. Buku Kartu Stok (Stock Card)',
+              icon: <ClipboardList className="w-4 h-4 shrink-0" />,
+            },
+            {
+              key: 'stok_opname' as InventoryTab,
+              label: '4. Stok Opname (Fisik vs Sistem)',
+              icon: <Scale className="w-4 h-4 shrink-0" />,
+              badge: `${opnameList.length} Opname`,
+            },
+            {
+              key: 'rekap_penggunaan' as InventoryTab,
+              label: '5. Rekap Penggunaan Bahan MBG',
+              icon: <FileSpreadsheet className="w-4 h-4 shrink-0" />,
+            },
+          ].map(tab => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+                  isActive
+                    ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -891,16 +898,16 @@ export const InventoryModule: React.FC = () => {
       {activeTab === 'stok_gudang' && (
         <div className="space-y-4">
           {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-bold text-slate-400 uppercase text-[10px]">Kategori:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">Kategori:</span>
               {['ALL', 'Bahan Segar', 'Bahan Kering', 'Bumbu & Rempah', 'Kemasan & Higiene'].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setFilterCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all duration-200 ease-in-out ${
                     filterCategory === cat
-                      ? 'bg-blue-900 text-white dark:bg-sky-600'
+                      ? 'bg-[#1E3A8A] text-white dark:bg-sky-600'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
                   }`}
                 >
@@ -910,13 +917,13 @@ export const InventoryModule: React.FC = () => {
 
               <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
 
-              <span className="font-bold text-slate-400 uppercase text-[10px]">Status:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400 uppercase text-[10px]">Status:</span>
               <button
                 onClick={() => setFilterStockStatus(filterStockStatus === 'CRITICAL' ? 'ALL' : 'CRITICAL')}
-                className={`px-2.5 py-1.5 rounded-lg font-bold transition text-xs flex items-center gap-1 ${
+                className={`px-2.5 py-1.5 rounded-lg font-bold transition-all duration-200 ease-in-out text-xs flex items-center gap-1 ${
                   filterStockStatus === 'CRITICAL'
-                    ? 'bg-rose-600 text-white'
-                    : 'bg-slate-100 text-rose-700 dark:bg-slate-800 dark:text-rose-400'
+                    ? 'bg-[#E11D48] text-white'
+                    : 'bg-slate-100 text-[#E11D48] dark:bg-slate-800 dark:text-rose-400'
                 }`}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
@@ -927,21 +934,21 @@ export const InventoryModule: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleExportInventoryExcel}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition-all duration-200 ease-in-out shadow-2xs"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Excel</span>
               </button>
               <button
                 onClick={handleExportInventoryPDF}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1E3A8A] hover:bg-blue-900 text-white rounded-lg text-xs font-bold transition-all duration-200 ease-in-out shadow-2xs"
               >
                 <FileText className="w-3.5 h-3.5" />
                 <span>PDF Stok</span>
               </button>
               <button
                 onClick={triggerPrint}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition-all duration-200 ease-in-out"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Cetak</span>
@@ -958,6 +965,7 @@ export const InventoryModule: React.FC = () => {
             searchPlaceholder="Cari kode bahan, nama, lokasi simpan, atau supplier..."
             searchKeys={['code', 'name', 'category', 'storageLocation', 'supplierName']}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'code',
@@ -967,12 +975,12 @@ export const InventoryModule: React.FC = () => {
                     <div className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
                       <span>{row.name}</span>
                       {row.currentStock <= row.minimumStock && (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 animate-pulse">
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-rose-100 text-[#E11D48] dark:bg-rose-950 dark:text-rose-300">
                           KRITIS
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    <div className="text-[10px] text-slate-600 dark:text-slate-400 font-mono mt-0.5">
                       Kode: <strong>{row.code}</strong> • {row.category}
                     </div>
                   </div>

@@ -63,6 +63,12 @@ import {
   formatRpNoSpace,
 } from '../common/FoodCostReportSheet';
 import {
+  NutritionReportSheet,
+  resolveNutritionReportData,
+  exportNutritionReportPDF,
+  formatNutrCell,
+} from '../common/NutritionReportSheet';
+import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
   getCustomTableFields,
@@ -181,12 +187,12 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'informasi_gizi',
-    title: 'Informasi Nilai Gizi Menu (AKG BGN)',
+    title: 'Informasi Nilai Gizi Menu (Laporan Perhitungan Nilai Gizi)',
     category: 'Gizi & Menu',
     codePrefix: 'GIZI-AKG',
-    description: 'Rincian makronutrien (energi, protein, lemak, karbohidrat) dan mikronutrien per porsi sasaran.',
-    sourceModule: 'Data Master & Gizi (menuId, materialId)',
-    defaultOrientation: 'portrait',
+    description: 'Laporan Perhitungan Nilai Gizi BGN per hari, hidangan, dan bahan makanan untuk Porsi Kecil & Porsi Besar (Berat, Energi, Protein, Lemak, KH, Serat & TOTAL).',
+    sourceModule: 'Modul Perencanaan Menu & Gizi PLOG (menuId, bahan)',
+    defaultOrientation: 'landscape',
     approverRole: 'Nutrisionis / Ahli Gizi SPPG',
   },
   {
@@ -956,6 +962,40 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     startDate,
     endDate,
     selectedInstitutionId,
+    selectedPortionCategory,
+    searchKeyword,
+  ]);
+
+  // Auto-resolved Laporan Perhitungan Nilai Gizi — 100% sinkron dengan Modul Perencanaan Menu & Gizi PLOG
+  const nutritionReportData = useMemo(() => {
+    const selectedInst =
+      selectedInstitutionId !== 'ALL'
+        ? institutions.find(i => i.id === selectedInstitutionId)
+        : undefined;
+    return resolveNutritionReportData({
+      menuItems,
+      menuIngredientsMap,
+      sppgConfig,
+      periodType,
+      selectedDate,
+      selectedMonth,
+      startDate,
+      endDate,
+      selectedPortionCategory,
+      searchKeyword,
+      sasaranLabel: selectedInst ? selectedInst.name : '3B & Siswa',
+    });
+  }, [
+    menuItems,
+    menuIngredientsMap,
+    sppgConfig,
+    periodType,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
+    selectedInstitutionId,
+    institutions,
     selectedPortionCategory,
     searchKeyword,
   ]);
@@ -1965,119 +2005,114 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 7. Informasi Gizi (Terhubung real-time dengan Menu, Resep PLOG & Kategori Porsi)
+      // 7. Informasi Nilai Gizi Menu / Laporan Perhitungan Nilai Gizi (Format BGN)
       case 'informasi_gizi': {
-        headers = ['Zat Gizi', 'Satuan', 'Kandungan Menu', 'Standar AKG BGN (Porsi Kecil)', 'Standar AKG BGN (Porsi Besar)', 'Capaian % AKG'];
-        const recipeRows = menuIngredientsMap[todayMenu.id] || [];
-        const useSmall = selectedPortionCategory === 'kecil';
-
-        const summedMacros =
-          recipeRows.length > 0
-            ? recipeRows.reduce(
-                (acc, ing) => {
-                  const wSmall = (ing.netWeightSmall || 0) / 100;
-                  const wLarge = (ing.netWeightLarge || 0) / 100;
-                  return {
-                    calSmall: acc.calSmall + wSmall * (ing.calories100g || 0),
-                    calLarge: acc.calLarge + wLarge * (ing.calories100g || 0),
-                    protSmall: acc.protSmall + wSmall * (ing.protein100g || 0),
-                    protLarge: acc.protLarge + wLarge * (ing.protein100g || 0),
-                    fatSmall: acc.fatSmall + wSmall * (ing.fat100g || 0),
-                    fatLarge: acc.fatLarge + wLarge * (ing.fat100g || 0),
-                    carbSmall: acc.carbSmall + wSmall * (ing.carb100g || 0),
-                    carbLarge: acc.carbLarge + wLarge * (ing.carb100g || 0),
-                    fiberSmall: acc.fiberSmall + wSmall * (ing.fiber100g || 0),
-                    fiberLarge: acc.fiberLarge + wLarge * (ing.fiber100g || 0),
-                  };
-                },
-                {
-                  calSmall: 0,
-                  calLarge: 0,
-                  protSmall: 0,
-                  protLarge: 0,
-                  fatSmall: 0,
-                  fatLarge: 0,
-                  carbSmall: 0,
-                  carbLarge: 0,
-                  fiberSmall: 0,
-                  fiberLarge: 0,
-                }
-              )
-            : null;
-
-        const calSmall = summedMacros && summedMacros.calSmall > 0 ? Math.round(summedMacros.calSmall) : todayMenu.caloriesSmall;
-        const calLarge = summedMacros && summedMacros.calLarge > 0 ? Math.round(summedMacros.calLarge) : todayMenu.caloriesLarge;
-        const calVal =
-          selectedPortionCategory === 'kecil'
-            ? `${calSmall} kkal`
-            : selectedPortionCategory === 'besar'
-            ? `${calLarge} kkal`
-            : `${calSmall} / ${calLarge}`;
-
-        const protVal = Number(
-          (summedMacros
-            ? useSmall
-              ? summedMacros.protSmall
-              : summedMacros.protLarge
-            : todayMenu.proteinGrams || 0
-          ).toFixed(1)
-        );
-        const fatVal = Number(
-          (summedMacros
-            ? useSmall
-              ? summedMacros.fatSmall
-              : summedMacros.fatLarge
-            : todayMenu.fatGrams || 0
-          ).toFixed(1)
-        );
-        const carbVal = Number(
-          (summedMacros
-            ? useSmall
-              ? summedMacros.carbSmall
-              : summedMacros.carbLarge
-            : todayMenu.carbGrams || 0
-          ).toFixed(1)
-        );
-        const fiberVal = Number(
-          (summedMacros && summedMacros.fiberLarge > 0
-            ? useSmall
-              ? summedMacros.fiberSmall
-              : summedMacros.fiberLarge
-            : todayMenu.fiberGrams || 6.5
-          ).toFixed(1)
-        );
-        const calcVal = todayMenu.calciumMg || 245;
-        const ironVal = todayMenu.ironMg || 4.8;
-
-        const targetCal = useSmall ? 600 : 750;
-        const activeCal = useSmall ? calSmall : calLarge;
-
-        rows = [
-          ['Energi Total', 'kkal', calVal, '550 - 650', '650 - 850', `${Math.round((activeCal / targetCal) * 100)}% Terpenuhi`],
-          ['Protein', 'gram', protVal, '22.0 - 28.0', '28.0 - 35.0', `${Math.round((protVal / (useSmall ? 24 : 28)) * 100)}%`],
-          ['Lemak Sehat', 'gram', fatVal, '15.0 - 20.0', '18.0 - 25.0', `${Math.round((fatVal / (useSmall ? 17 : 20)) * 100)}%`],
-          ['Karbohidrat', 'gram', carbVal, '85.0 - 105.0', '100.0 - 125.0', `${Math.round((carbVal / (useSmall ? 90 : 100)) * 100)}%`],
-          ['Kalsium (Ca)', 'mg', calcVal.toFixed(1), '200.0', '250.0', `${Math.round((calcVal / 240) * 100)}%`],
-          ['Zat Besi (Fe)', 'mg', ironVal.toFixed(1), '4.0', '5.5', `${Math.round((ironVal / 4.8) * 100)}%`],
-          ['Serat Pangan', 'gram', fiberVal.toFixed(1), '5.0', '7.0', `${Math.round((fiberVal / 6.5) * 100)}%`],
+        headers = [
+          'Hari/tgl',
+          'Menu',
+          'Bahan Makanan',
+          'Kecil - Berat',
+          'Kecil - Energi (kkal)',
+          'Kecil - Protein (g)',
+          'Kecil - Lemak (g)',
+          'Kecil - KH (g)',
+          'Kecil - Serat (mg)',
+          'Besar - Berat',
+          'Besar - Energi (kkal)',
+          'Besar - Protein (g)',
+          'Besar - Lemak (g)',
+          'Besar - KH (g)',
+          'Besar - Serat (mg)',
         ];
 
-        excelData = rows.map(r => ({
-          'Zat Gizi': r[0],
-          'Satuan': r[1],
-          'Nilai': r[2],
-          'Standar Kecil': r[3],
-          'Standar Besar': r[4],
-          'Capaian': r[5],
-        }));
+        const flattenedRows: (string | number)[][] = [];
+        const excelRows: Record<string, unknown>[] = [];
+
+        nutritionReportData.groups.forEach(group => {
+          group.dishes.forEach(dish => {
+            dish.ingredients.forEach(ing => {
+              flattenedRows.push([
+                group.hariTglDisplay,
+                dish.menuName,
+                ing.name,
+                formatNutrCell(ing.beratSmall, 1),
+                formatNutrCell(ing.energiSmall, 2),
+                formatNutrCell(ing.proteinSmall, 2),
+                formatNutrCell(ing.lemakSmall, 2),
+                formatNutrCell(ing.khSmall, 2),
+                formatNutrCell(ing.seratSmall, 2),
+                formatNutrCell(ing.beratLarge, 1),
+                formatNutrCell(ing.energiLarge, 2),
+                formatNutrCell(ing.proteinLarge, 2),
+                formatNutrCell(ing.lemakLarge, 2),
+                formatNutrCell(ing.khLarge, 2),
+                formatNutrCell(ing.seratLarge, 2),
+              ]);
+
+              excelRows.push({
+                'Hari/tgl': `${group.hariTglDisplay} (${group.sasaranLabel})`,
+                'Menu': dish.menuName,
+                'Bahan Makanan': ing.name,
+                'Porsi Kecil - Berat (g)': Number(ing.beratSmall.toFixed(2)),
+                'Porsi Kecil - Energi (kkal)': Number(ing.energiSmall.toFixed(2)),
+                'Porsi Kecil - Protein (g)': Number(ing.proteinSmall.toFixed(2)),
+                'Porsi Kecil - Lemak (g)': Number(ing.lemakSmall.toFixed(2)),
+                'Porsi Kecil - KH (g)': Number(ing.khSmall.toFixed(2)),
+                'Porsi Kecil - Serat (mg)': Number(ing.seratSmall.toFixed(2)),
+                'Porsi Besar - Berat (g)': Number(ing.beratLarge.toFixed(2)),
+                'Porsi Besar - Energi (kkal)': Number(ing.energiLarge.toFixed(2)),
+                'Porsi Besar - Protein (g)': Number(ing.proteinLarge.toFixed(2)),
+                'Porsi Besar - Lemak (g)': Number(ing.lemakLarge.toFixed(2)),
+                'Porsi Besar - KH (g)': Number(ing.khLarge.toFixed(2)),
+                'Porsi Besar - Serat (mg)': Number(ing.seratLarge.toFixed(2)),
+              });
+            });
+          });
+        });
+
+        rows = flattenedRows;
+        excelData = excelRows;
+
+        const latestGroup =
+          nutritionReportData.groups[nutritionReportData.groups.length - 1];
+        const smallEnergi = latestGroup ? Math.round(latestGroup.totalsSmall.energi) : todayMenu.caloriesSmall;
+        const largeEnergi = latestGroup ? Math.round(latestGroup.totalsLarge.energi) : todayMenu.caloriesLarge;
+        const useSmall = selectedPortionCategory === 'kecil';
+        const activeProtein = latestGroup
+          ? useSmall
+            ? latestGroup.totalsSmall.protein
+            : latestGroup.totalsLarge.protein
+          : todayMenu.proteinGrams || 0;
+        const activeSerat = latestGroup
+          ? useSmall
+            ? latestGroup.totalsSmall.serat
+            : latestGroup.totalsLarge.serat
+          : todayMenu.fiberGrams || 0;
 
         metrics = [
-          { label: useSmall ? 'Kalori Menu Porsi Kecil' : 'Kalori Menu Porsi Besar', value: `${activeCal} kkal`, color: 'text-blue-700' },
-          { label: 'Protein Bersih', value: `${protVal} g`, color: 'text-emerald-700' },
-          { label: 'Serat Pangan', value: `${fiberVal.toFixed(1)} g`, color: 'text-emerald-700' },
-          { label: 'Ahli Gizi Verifikator', value: sppgConfig.nutritionOfficer || 'Pengawas Gizi SPPG', color: 'text-slate-700' },
+          {
+            label: 'Energi Total (Kecil / Besar)',
+            value: `${smallEnergi} / ${largeEnergi} kkal`,
+            color: 'text-[#1E3A8A]',
+          },
+          {
+            label: useSmall ? 'Protein Porsi Kecil' : 'Protein Porsi Besar',
+            value: `${activeProtein.toFixed(2)} g`,
+            color: 'text-[#0D9488]',
+          },
+          {
+            label: useSmall ? 'Serat Porsi Kecil' : 'Serat Porsi Besar',
+            value: `${activeSerat.toFixed(2)} mg`,
+            color: 'text-[#0D9488]',
+          },
+          {
+            label: 'Ahli Gizi Verifikator',
+            value: sppgConfig.nutritionOfficer || 'Pengawas Gizi SPPG',
+            color: 'text-slate-700',
+          },
         ];
-        notes = 'Komposisi nilai gizi dihitung real-time dari gramasi bahan pada Modul Gizi & Resep PLOG sesuai menu aktif dan kategori porsi.';
+        notes =
+          'Format Laporan Perhitungan Nilai Gizi BGN (Porsi Kecil & Porsi Besar) tersinkron langsung dari gramasi bahan dan komposisi TKPI pada Modul PLOG.';
         break;
       }
 
@@ -3777,6 +3812,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       await exportFoodCostReportPDF(foodCostReportData);
       return;
     }
+    if (activeReportKey === 'informasi_gizi') {
+      await exportNutritionReportPDF(nutritionReportData);
+      return;
+    }
     if (activeReportKey === 'surat_tugas') {
       await exportSuratTugasPDF(suratTugasData);
       return;
@@ -3827,7 +3866,8 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         activeReportKey !== 'suhu_makanan_pengolahan' &&
         activeReportKey !== 'suhu_makanan_pemorsian' &&
         !FACILITY_REPORT_UNIT_MAP[activeReportKey] &&
-        activeReportKey !== 'food_cost' && (
+        activeReportKey !== 'food_cost' &&
+        activeReportKey !== 'informasi_gizi' && (
         <div className="hidden print:block mb-6">
           <PrintHeader
             title={reportPayload.title}
@@ -3842,24 +3882,24 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       )}
 
       {/* Screen Title & Quick Actions */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print:hidden">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-white px-5 py-4 rounded-xl border border-slate-200/80 shadow-sm print:hidden">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-[#1E3A8A] border border-blue-200">
               ID SPPG: {sppgConfig.sppgId}
             </span>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-teal-50 text-[#0D9488] border border-teal-200">
               Integrasi Antarmodul Aktif
             </span>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-[#D97706] border border-amber-200">
               Standar BGN RI 2025
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            <Printer className="w-6 h-6 text-blue-600" />
-            Pusat Laporan & Cetak Resmi SPPG
+          <h1 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+            <Printer className="w-5 h-5 text-[#1E3A8A]" />
+            Pusat Laporan &amp; Cetak Resmi SPPG
           </h1>
-          <p className="text-sm text-slate-600 mt-1">
+          <p className="text-xs text-slate-600 mt-0.5">
             Pusat administrasi {REPORT_CONFIGS.length} laporan resmi operasional pemenuhan gizi, terhubung otomatis ke relasi ID unik antar-modul dengan pratinjau dan pengesahan sah.
           </p>
         </div>
@@ -3869,7 +3909,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={() => setIsPreviewModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-medium transition shadow-sm border border-slate-300"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm border border-slate-300"
           >
             <Eye className="w-4 h-4 text-slate-600" />
             <span>Pratinjau Dokumen</span>
@@ -3878,7 +3918,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={triggerPrint}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-medium transition shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] text-white hover:bg-blue-900 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm"
           >
             <Printer className="w-4 h-4" />
             <span>Cetak Langsung</span>
@@ -3887,7 +3927,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={handleExportPDF}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 text-white hover:bg-rose-700 rounded-xl text-sm font-medium transition shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#E11D48] text-white hover:bg-rose-700 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm"
           >
             <FileText className="w-4 h-4" />
             <span>Unduh PDF Resmi</span>
@@ -3896,7 +3936,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={handleExportExcel}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl text-sm font-medium transition shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0D9488] text-white hover:bg-teal-700 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Excel (.xlsx)</span>
@@ -3905,7 +3945,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           <button
             type="button"
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white hover:bg-slate-800 rounded-xl text-sm font-medium transition shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 text-white hover:bg-slate-800 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm"
             title="Ekspor CSV"
           >
             <Download className="w-4 h-4" />
@@ -3916,7 +3956,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             <button
               type="button"
               onClick={() => onNavigate('menu_flyer')}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-600 hover:to-amber-700 rounded-xl text-sm font-medium transition shadow-sm animate-pulse"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#D97706] text-white hover:bg-amber-700 rounded-xl text-xs font-semibold transition-all duration-200 ease-in-out shadow-sm"
             >
               <Sparkles className="w-4 h-4" />
               <span>Buka Generator Flyer</span>
@@ -3926,27 +3966,27 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       </div>
 
       {/* FILTER PANEL */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 print:hidden">
+      <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-4 print:hidden">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2 text-slate-800 font-semibold text-sm">
-            <Filter className="w-4 h-4 text-blue-600" />
-            <span>Panel Filter & Kriteria Laporan</span>
+            <Filter className="w-4 h-4 text-[#1E3A8A]" />
+            <span>Panel Filter &amp; Kriteria Laporan</span>
           </div>
-          <span className="text-xs text-slate-500">
-            Terhubung ke Master Bahan, PO, QC, Pemorsian, Distribusi & Kasir
+          <span className="text-xs text-slate-600">
+            Terhubung ke Master Bahan, PO, QC, Pemorsian, Distribusi &amp; Kasir
           </span>
         </div>
 
         {/* Categories Tab Bar */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {categoriesList.map(cat => (
             <button
               key={cat}
               type="button"
               onClick={() => setCategoryFilter(cat)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
                 categoryFilter === cat
-                  ? 'bg-blue-900 text-white shadow-sm'
+                  ? 'bg-[#1E3A8A] text-white shadow-sm'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -5324,6 +5364,35 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 />
               </div>
             </div>
+          ) : activeReportKey === 'informasi_gizi' ? (
+            <div className="space-y-4">
+              {/* Control Bar Integrasi Perhitungan Nilai Gizi Menu PLOG (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    Sinkronisasi Otomatis: Modul Perencanaan Menu &amp; Kandungan Gizi (PLOG)
+                  </h3>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Rincian Hari/tgl, Menu, Bahan Makanan, serta nilai Berat, Energi, Protein, Lemak, KH, dan Serat untuk Porsi Kecil &amp; Porsi Besar ditarik otomatis dari Modul PLOG dalam format cetak Landscape BGN.
+                  </p>
+                </div>
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('menu')}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                  >
+                    <span>Edit Gizi &amp; Resep di PLOG</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi LAPORAN PERHITUNGAN NILAI GIZI (BGN) */}
+              <div className="w-full">
+                <NutritionReportSheet data={nutritionReportData} />
+              </div>
+            </div>
           ) : (
             <div className="p-6 bg-white border border-slate-200 rounded-xl shadow-xs relative">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-900 via-amber-500 to-blue-900 rounded-t-xl" />
@@ -5691,6 +5760,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <FoodCostReportSheet
                   data={foodCostReportData}
                   onPreviewPhoto={setPreviewPhoto}
+                  className="max-w-6xl w-full border-slate-300 shadow-md"
+                />
+              ) : activeReportKey === 'informasi_gizi' ? (
+                <NutritionReportSheet
+                  data={nutritionReportData}
                   className="max-w-6xl w-full border-slate-300 shadow-md"
                 />
               ) : (

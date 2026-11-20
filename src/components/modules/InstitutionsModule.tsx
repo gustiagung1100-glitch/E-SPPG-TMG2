@@ -4,6 +4,7 @@ import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
+import { MaternalHealthTab } from './MaternalHealthTab';
 import {
   BASTDocumentSheet,
   resolveBastAutoFields,
@@ -65,6 +66,7 @@ import {
   Users2,
   Download,
   HeartPulse,
+  Baby,
 } from 'lucide-react';
 
 type TabKey =
@@ -74,7 +76,8 @@ type TabKey =
   | 'rekap_harian'
   | 'rekap_mingguan_bulanan'
   | 'rekap_lembaga'
-  | 'data_gizi_anak';
+  | 'data_gizi_anak'
+  | 'cek_kesehatan_ibu_hamil';
 
 export const InstitutionsModule: React.FC = () => {
   const {
@@ -87,6 +90,7 @@ export const InstitutionsModule: React.FC = () => {
     recordBeneficiaryAttendance,
     beneficiaryQuotaHistory,
     beneficiaryRecords,
+    maternalHealthRecords,
     masterVolunteers,
     distributionLogs,
     hasPermission,
@@ -119,6 +123,7 @@ export const InstitutionsModule: React.FC = () => {
       rekap_mingguan_bulanan: '5. Rekap Mingguan & Bulanan',
       rekap_lembaga: '6. Rekap per Lembaga',
       data_gizi_anak: '7. Data Anak & Status Gizi WHO',
+      cek_kesehatan_ibu_hamil: '8. Cek Kesehatan Ibu Hamil & Rekap',
     };
     window.dispatchEvent(
       new CustomEvent('sppg-subtab-change', {
@@ -141,8 +146,8 @@ export const InstitutionsModule: React.FC = () => {
   // Form State for Lembaga CRUD
   const [formData, setFormData] = useState<Omit<Institution, 'id'>>({
     name: '',
-    institutionType: 'Sekolah Dasar (SD)',
-    level: 'SD',
+    institutionType: 'KB/PAUD',
+    level: 'KB/PAUD',
     address: '',
     npsn: '',
     contactPerson: '',
@@ -207,7 +212,12 @@ export const InstitutionsModule: React.FC = () => {
   // Filtered institutions
   const filteredInstitutions = useMemo(() => {
     if (filterLevel === 'ALL') return institutions;
-    return institutions.filter(i => i.level === filterLevel);
+    return institutions.filter(i => {
+      if (i.level === filterLevel || i.institutionType === filterLevel) return true;
+      if (filterLevel === 'KB/PAUD' && (i.level === 'PAUD' || i.institutionType === 'PAUD/TK')) return true;
+      if (filterLevel === 'MI' && i.institutionType === 'Madrasah Ibtidaiyah (MI)') return true;
+      return false;
+    });
   }, [institutions, filterLevel]);
 
   // Aggregate stats
@@ -248,8 +258,8 @@ export const InstitutionsModule: React.FC = () => {
     setSelectedInst(null);
     setFormData({
       name: '',
-      institutionType: 'Sekolah Dasar (SD)',
-      level: 'SD',
+      institutionType: 'KB/PAUD',
+      level: 'KB/PAUD',
       address: 'Dusun Krajan Desa Temenggungan, Kec. Krejengan',
       npsn: '',
       contactPerson: '',
@@ -770,19 +780,19 @@ export const InstitutionsModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      {/* Compact Banner Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-blue-900 text-white flex items-center justify-center shadow-md">
-              <School className="w-6 h-6 text-sky-400" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-[#1E3A8A] text-white flex items-center justify-center shadow-sm shrink-0">
+              <School className="w-5 h-5 text-sky-300" />
             </div>
             <div>
-              <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                Modul Penerima Manfaat & Presensi Siswa (Modul 7)
+              <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">
+                Modul Penerima Manfaat &amp; Presensi Siswa (Modul 7)
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sistem Pengelolaan Kuota, Presensi Harian, BAST Kehadiran & Rekapitulasi MBG Temenggungan 2
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Sistem Pengelolaan Kuota, Presensi Harian, BAST Kehadiran &amp; Rekapitulasi MBG Temenggungan 2
               </p>
             </div>
           </div>
@@ -808,7 +818,7 @@ export const InstitutionsModule: React.FC = () => {
             <button
               type="button"
               onClick={handleOpenCreateLembaga}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out"
             >
               <Plus className="w-4 h-4" />
               <span>Tambah Lembaga Baru</span>
@@ -826,60 +836,60 @@ export const InstitutionsModule: React.FC = () => {
 
       {/* KPI Cards: High-level Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Total Lembaga</span>
-            <Building className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+            <Building className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
             {institutions.length} Sekolah
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Wilayah Krejengan</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Wilayah Krejengan</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Total Kuota Terdaftar</span>
-            <Users2 className="w-4 h-4 text-sky-600" />
+            <Users2 className="w-4 h-4 text-[#1E3A8A]" />
           </div>
-          <div className="text-2xl font-black text-blue-900 dark:text-sky-400 mt-1">
+          <div className="text-2xl font-black text-[#1E3A8A] dark:text-sky-400 mt-1">
             {formatNumber(totalRegisteredAll)}
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 font-mono">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 font-mono">
             <span>Kecil: {formatNumber(totalRegisteredSmall)}</span>
             <span>•</span>
             <span>Besar: {formatNumber(totalRegisteredLarge)}</span>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Porsi Aktual Hari Ini</span>
-            <ClipboardCheck className="w-4 h-4 text-emerald-600" />
+            <ClipboardCheck className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+          <div className="text-2xl font-black text-[#0D9488] dark:text-teal-400 mt-1">
             {formatNumber(dailyRekapSummary.actTotal)} Porsi
           </div>
-          <div className="text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#0D9488] dark:text-teal-400 font-semibold mt-0.5">
             {dailyRekapSummary.overallRate}% Kehadiran Siswa
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
             <span>Tidak Hadir Hari Ini</span>
-            <UserX className="w-4 h-4 text-rose-500" />
+            <UserX className="w-4 h-4 text-[#E11D48]" />
           </div>
-          <div className="text-2xl font-black text-rose-600 mt-1">
+          <div className="text-2xl font-black text-[#E11D48] mt-1">
             {formatNumber(dailyRekapSummary.absTotal)} Siswa
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Sakit / Izin / Dinas Luar</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Sakit / Izin / Dinas Luar</div>
         </div>
       </div>
 
-      {/* Sub-Tabs Navigation (Pill Tabs) */}
-      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max text-xs font-semibold">
+      {/* Sub-Tabs Navigation (Responsive Pill Tabs) */}
+      <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
           {[
             { key: 'data_lembaga' as TabKey, label: '1. Data Lembaga & Kuota', icon: <School className="w-4 h-4 shrink-0" /> },
             { key: 'presensi_harian' as TabKey, label: '2. Presensi Kehadiran Siswa', icon: <UserCheck className="w-4 h-4 shrink-0" /> },
@@ -888,6 +898,7 @@ export const InstitutionsModule: React.FC = () => {
             { key: 'rekap_mingguan_bulanan' as TabKey, label: '5. Rekap Mingguan & Bulanan', icon: <BarChart3 className="w-4 h-4 shrink-0" /> },
             { key: 'rekap_lembaga' as TabKey, label: '6. Rekap per Lembaga', icon: <Building className="w-4 h-4 shrink-0" /> },
             { key: 'data_gizi_anak' as TabKey, label: '7. Data Anak & Status Gizi WHO', icon: <HeartPulse className="w-4 h-4 shrink-0" />, count: beneficiaryRecords.length },
+            { key: 'cek_kesehatan_ibu_hamil' as TabKey, label: '8. Cek Kesehatan Ibu Hamil & Rekap', icon: <Baby className="w-4 h-4 shrink-0" />, count: maternalHealthRecords.length },
           ].map(tab => {
             const isActive = activeTab === tab.key;
             return (
@@ -895,9 +906,9 @@ export const InstitutionsModule: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`min-h-[40px] flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                className={`min-h-[38px] inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
-                    ? 'bg-blue-600 text-white shadow-sm dark:bg-sky-600'
+                    ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
                 }`}
               >
@@ -906,8 +917,8 @@ export const InstitutionsModule: React.FC = () => {
                 {tab.count !== undefined && (
                   <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
                     isActive
-                      ? 'bg-white/25 text-white'
-                      : 'bg-blue-50 text-blue-700 border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-blue-50 text-[#1E3A8A] border border-blue-200/80 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800'
                   }`}>
                     {tab.count}
                   </span>
@@ -925,14 +936,14 @@ export const InstitutionsModule: React.FC = () => {
         <div className="space-y-4">
           {/* Filter Jenjang */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-            <span className="text-slate-400 font-bold uppercase text-[11px] mr-1">Filter Jenjang:</span>
-            {['ALL', 'SD', 'MI', 'SMP', 'MTs', 'SMA', 'SMK', 'PAUD', 'Pesantren'].map(lvl => (
+            <span className="text-slate-600 dark:text-slate-400 font-bold uppercase text-[11px] mr-1">Filter Jenjang:</span>
+            {['ALL', 'KB/PAUD', 'TK', 'MI', 'MTs', 'MA', 'Posyandu'].map(lvl => (
               <button
                 key={lvl}
                 onClick={() => setFilterLevel(lvl)}
-                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap ${
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${
                   filterLevel === lvl
-                    ? 'bg-blue-900 text-white dark:bg-sky-600'
+                    ? 'bg-[#1E3A8A] text-white dark:bg-sky-600'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
                 }`}
               >
@@ -953,6 +964,7 @@ export const InstitutionsModule: React.FC = () => {
             onExportPDF={handleExportLembagaPDF}
             onExportExcel={handleExportLembagaExcel}
             onPrint={triggerPrint}
+            stickyFirstColumn
           />
         </div>
       )}
@@ -1174,6 +1186,7 @@ export const InstitutionsModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari berdasarkan sekolah, tanggal, atau pencatat..."
             searchKeys={['institutionName', 'date', 'recordedBy', 'notes']}
+            stickyFirstColumn
             columns={[
               {
                 key: 'date',
@@ -1836,6 +1849,11 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 7: DATA ANAK, ANTI-DUPLIKASI NIK & KALKULATOR Z-SCORE WHO/KEMENKES */}
       {/* ========================================================================= */}
       {activeTab === 'data_gizi_anak' && <BeneficiaryNutritionTab />}
+
+      {/* ========================================================================= */}
+      {/* TAB 8: KALKULATOR CEK KESEHATAN IBU HAMIL (3B) & REKAPITULASI */}
+      {/* ========================================================================= */}
+      {activeTab === 'cek_kesehatan_ibu_hamil' && <MaternalHealthTab />}
 
       {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT LEMBAGA */}

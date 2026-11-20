@@ -107,6 +107,21 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isExistingSameSppg();
     }
 
+    match /maternal_health_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(recordId)
+        && isSameSppg()
+        && incoming().nik is string
+        && incoming().nik.matches('^[0-9]{16}$')
+        && incoming().fullName is string
+        && incoming().fullName.size() > 0
+        && incoming().fullName.size() <= 120
+        && incoming().lilaCm is number
+        && incoming().hemoglobinGdL is number;
+      allow delete: if isSignedIn() && isExistingSameSppg();
+    }
+
     // -------------------------------------------------------------------------
     // 8-9. Volunteers & Suppliers
     // -------------------------------------------------------------------------

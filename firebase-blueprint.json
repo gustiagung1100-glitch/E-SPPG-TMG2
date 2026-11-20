@@ -127,6 +127,28 @@
       },
       "required": ["id", "sppgId", "nik", "fullName", "gender", "ageMonths", "institutionId", "weightKg", "heightCm", "primaryStatus"]
     },
+    "MaternalHealthRecord": {
+      "title": "MaternalHealthRecord",
+      "description": "Pregnant beneficiary maternal health screening, LILA KEK, hemoglobin anemia, blood pressure, and MBG nutrition recommendation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "sppgId": { "type": "string", "maxLength": 64 },
+        "nik": { "type": "string", "maxLength": 16 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "ageYears": { "type": "number" },
+        "institutionId": { "type": "string", "maxLength": 64 },
+        "trimester": { "type": "string", "maxLength": 30 },
+        "gestationalWeeks": { "type": "number" },
+        "lilaCm": { "type": "number" },
+        "hemoglobinGdL": { "type": "number" },
+        "systolicBp": { "type": "number" },
+        "diastolicBp": { "type": "number" },
+        "riskLevel": { "type": "string", "maxLength": 40 },
+        "measurementDate": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "sppgId", "nik", "fullName", "ageYears", "trimester", "lilaCm", "hemoglobinGdL", "riskLevel"]
+    },
     "Volunteer": {
       "title": "Volunteer",
       "description": "Kitchen and field volunteer personnel",
@@ -621,6 +643,10 @@
     "/beneficiary_nutrition_records/{recordId}": {
       "schema": { "$ref": "#/entities/BeneficiaryNutritionRecord" },
       "description": "7b. Individual beneficiary anthropometry, NIK, and WHO Z-Score assessments"
+    },
+    "/maternal_health_records/{recordId}": {
+      "schema": { "$ref": "#/entities/MaternalHealthRecord" },
+      "description": "8. Pregnant beneficiary maternal health screening and recapitulation"
     },
     "/volunteers/{volunteerId}": {
       "schema": { "$ref": "#/entities/Volunteer" },

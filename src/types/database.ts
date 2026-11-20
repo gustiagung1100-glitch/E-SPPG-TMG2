@@ -88,8 +88,8 @@ export interface SPPGProfileDocument extends BaseEntityMetadata {
 // -----------------------------------------------------------------------------
 export interface InstitutionDocument extends BaseEntityMetadata {
   name: string;
-  institutionType: 'Sekolah Dasar (SD)' | 'Madrasah Ibtidaiyah (MI)' | 'SMP' | 'MTs' | 'SMA' | 'SMK' | 'PAUD/TK' | 'Pondok Pesantren';
-  level: 'PAUD' | 'SD' | 'MI' | 'SMP' | 'MTs' | 'SMA' | 'SMK' | 'Pesantren';
+  institutionType: 'KB/PAUD' | 'TK' | 'MI' | 'MTs' | 'MA' | 'Posyandu' | string;
+  level: 'KB/PAUD' | 'TK' | 'MI' | 'MTs' | 'MA' | 'Posyandu' | string;
   npsn: string;
   address: string;
   contactPerson: string;
@@ -136,7 +136,7 @@ export interface BeneficiaryDailyRecordDocument extends BaseEntityMetadata {
 export interface VolunteerDocument extends BaseEntityMetadata {
   volunteerCode: string;
   name: string;
-  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan';
+  division: 'Persiapan' | 'Pengolahan' | 'Pemorsian' | 'Distribusi' | 'Cuci Ompreng' | 'Kebersihan' | 'Keamanan';
   phone: string;
   address: string;
   joinDate: string;

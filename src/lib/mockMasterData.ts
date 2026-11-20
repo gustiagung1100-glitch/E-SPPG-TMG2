@@ -57,7 +57,7 @@ export const initialInstitutionsData: Institution[] = [
   {
     id: 'inst-3',
     name: 'MIS Hafshawaty Zainul Hasan',
-    institutionType: 'Madrasah Ibtidaiyah (MI)',
+    institutionType: 'MI',
     level: 'MI',
     address: 'Kompleks Pesantren Hafshawaty, Temenggungan, Krejengan',
     npsn: '60728910',
@@ -123,8 +123,8 @@ export const initialInstitutionsData: Institution[] = [
   {
     id: 'inst-6',
     name: 'PAUD & TK Al-Hafsh Krejengan',
-    institutionType: 'PAUD/TK',
-    level: 'PAUD',
+    institutionType: 'KB/PAUD',
+    level: 'KB/PAUD',
     address: 'Jl. Melati RT 01/RW 02 Temenggungan, Krejengan',
     npsn: '69921004',
     contactPerson: 'Umi Kalsum, S.Pd.AUD.',
@@ -167,8 +167,8 @@ export const initialInstitutionsData: Institution[] = [
   {
     id: 'inst-8',
     name: 'MA Model Hafshawaty',
-    institutionType: 'Pondok Pesantren',
-    level: 'Pesantren',
+    institutionType: 'MA',
+    level: 'MA',
     address: 'Kompleks Asrama Putri Hafshawaty Temenggungan',
     npsn: '20583100',
     contactPerson: 'Nyai Hj. Hasanah',

@@ -377,9 +377,9 @@ export const PettyCashModule: React.FC = () => {
 
       {/* 4 Core Petty Cash Calculation Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-slate-700">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               1. Saldo Awal
             </span>
             <Calculator className="w-4 h-4 text-slate-600 dark:text-slate-300" />
@@ -387,58 +387,58 @@ export const PettyCashModule: React.FC = () => {
           <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
             {formatRupiah(periodSummary.saldoAwalPeriode)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             {startDate ? `Posisi kas sebelum ${startDate}` : 'Saldo awal buku Petty Cash aktif'}
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-emerald-600">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               2. Pemasukan (+)
             </span>
-            <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
+            <ArrowDownLeft className="w-4 h-4 text-[#0D9488]" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-700 dark:text-emerald-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
             {formatRupiah(periodSummary.totalPemasukan)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Top up &amp; pengisian dana kas kecil periode ini
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-rose-600">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               3. Pengeluaran (&minus;)
             </span>
-            <ArrowUpRight className="w-4 h-4 text-rose-600" />
+            <ArrowUpRight className="w-4 h-4 text-[#E11D48]" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-rose-700 dark:text-rose-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold text-[#E11D48] dark:text-rose-400 tabular-nums font-mono">
             {formatRupiah(periodSummary.totalPengeluaran)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Operasional, bahan darurat &amp; pencairan insentif
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 border-l-4 border-l-blue-900">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               4. Saldo Akhir
             </span>
-            <Wallet className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+            <Wallet className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
           </div>
           <div
             className={`mt-2 text-2xl font-bold tabular-nums font-mono ${
               periodSummary.saldoAkhirPeriode >= 0
-                ? 'text-blue-950 dark:text-sky-400'
-                : 'text-rose-700 dark:text-rose-400'
+                ? 'text-[#1E3A8A] dark:text-sky-400'
+                : 'text-[#E11D48] dark:text-rose-400'
             }`}
           >
             {formatRupiah(periodSummary.saldoAkhirPeriode)}
           </div>
-          <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 tabular-nums">
             = Saldo Awal + Pemasukan &minus; Pengeluaran
           </p>
         </div>

@@ -39,7 +39,7 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         key: 'level',
         label: 'Jenjang Pendidikan',
         type: 'select',
-        options: ['PAUD', 'SD', 'MI', 'SMP', 'MTs', 'SMA', 'SMK', 'Pesantren'],
+        options: ['KB/PAUD', 'TK', 'MI', 'MTs', 'MA', 'Posyandu'],
         required: true,
         isSystem: true,
         width: 'half',
@@ -59,16 +59,7 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         key: 'institutionType',
         label: 'Jenis Lembaga',
         type: 'select',
-        options: [
-          'Sekolah Dasar (SD)',
-          'Madrasah Ibtidaiyah (MI)',
-          'SMP',
-          'MTs',
-          'SMA',
-          'SMK',
-          'PAUD/TK',
-          'Pondok Pesantren',
-        ],
+        options: ['KB/PAUD', 'TK', 'MI', 'MTs', 'MA', 'Posyandu'],
         required: true,
         isSystem: true,
         width: 'half',
@@ -397,9 +388,10 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
       {
         id: 'dist_driver',
         key: 'driverName',
-        label: 'Nama Pengemudi',
-        type: 'text',
-        placeholder: 'Contoh: Agus Santoso',
+        label: 'Nama Pengemudi / Petugas Distribusi',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi petugas diambil dari Master Relawan Divisi Distribusi (Koordinator Divisi di urutan pertama).',
         required: true,
         isSystem: true,
         width: 'half',
@@ -667,7 +659,7 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         key: 'division',
         label: 'Divisi Asal',
         type: 'select',
-        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan'],
+        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan', 'Keamanan'],
         required: true,
         isSystem: true,
         width: 'half',
@@ -705,7 +697,7 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         key: 'replacementDivision',
         label: 'Divisi Pengganti',
         type: 'select',
-        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan'],
+        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan', 'Keamanan'],
         required: true,
         isSystem: true,
         width: 'half',
@@ -756,7 +748,7 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         key: 'division',
         label: 'Divisi Kerja',
         type: 'select',
-        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan'],
+        options: ['Persiapan', 'Pengolahan', 'Pemorsian', 'Distribusi', 'Cuci Ompreng', 'Kebersihan', 'Keamanan'],
         required: true,
         isSystem: true,
         width: 'half',
@@ -1119,7 +1111,9 @@ export const defaultDynamicFormSchemas: Record<DynamicFormId, DynamicFormSchema>
         id: 'fw_officer',
         key: 'officerName',
         label: 'Petugas Sanitasi / Cuci Ompreng',
-        type: 'text',
+        type: 'select',
+        options: [],
+        helperText: 'Opsi petugas diambil dari Master Relawan Divisi Cuci Ompreng (Koordinator Divisi di urutan pertama).',
         required: true,
         isSystem: true,
         width: 'full',
@@ -1173,6 +1167,47 @@ export function mergeDynamicFormSchemas(
             options: [],
             helperText:
               f.helperText || 'Opsi relawan ditarik otomatis dari Master Relawan (Master Data).',
+          };
+        }
+        if (
+          f.isSystem &&
+          formId === 'institution_form' &&
+          (f.key === 'level' || f.key === 'institutionType')
+        ) {
+          return {
+            ...f,
+            type: 'select' as const,
+            options: ['KB/PAUD', 'TK', 'MI', 'MTs', 'MA', 'Posyandu'],
+          };
+        }
+        if (
+          f.isSystem &&
+          formId === 'distribution_dispatch_form' &&
+          f.key === 'driverName' &&
+          f.type === 'text'
+        ) {
+          return {
+            ...f,
+            type: 'select' as const,
+            options: [],
+            helperText:
+              f.helperText ||
+              'Opsi petugas diambil dari Master Relawan Divisi Distribusi (Koordinator Divisi di urutan pertama).',
+          };
+        }
+        if (
+          f.isSystem &&
+          formId === 'production_waste_form' &&
+          f.key === 'officerName' &&
+          f.type === 'text'
+        ) {
+          return {
+            ...f,
+            type: 'select' as const,
+            options: [],
+            helperText:
+              f.helperText ||
+              'Opsi petugas diambil dari Master Relawan Divisi Cuci Ompreng (Koordinator Divisi di urutan pertama).',
           };
         }
         return f;

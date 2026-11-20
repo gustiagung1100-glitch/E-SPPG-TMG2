@@ -5,6 +5,12 @@ import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import {
+  NutritionReportSheet,
+  resolveNutritionReportData,
+  exportNutritionReportPDF,
+  formatNutrCell,
+} from '../common/NutritionReportSheet';
 import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
 import {
   exportTableToPDF,
@@ -44,6 +50,8 @@ import {
   sampleIngredientsMenu1,
   buildDefaultGrammagesForMenu,
   resolveMenuGrammages,
+  resolveFoodNutritionLookup,
+  getFoodNutritionSuggestions,
 } from '../../lib/plogData';
 import {
   UtensilsCrossed,
@@ -85,6 +93,8 @@ import {
   Star,
   HeartPulse,
   RotateCcw,
+  CalendarDays,
+  Calendar,
 } from 'lucide-react';
 
 type SubModuleTab =
@@ -92,7 +102,8 @@ type SubModuleTab =
   | 'gramasi_item'
   | 'kandungan_gizi'
   | 'food_cost'
-  | 'jobdesk_divisi';
+  | 'jobdesk_divisi'
+  | 'daftar_rekap';
 
 interface FormulaNumericCellProps {
   value: number;
@@ -233,6 +244,7 @@ export const NutritionMenuModule: React.FC = () => {
       kandungan_gizi: 'Evaluasi Kandungan Gizi (TKPI)',
       food_cost: 'Analisis Food Cost & Pagu BGN',
       jobdesk_divisi: 'Jobdesk Divisi & SOP',
+      daftar_rekap: 'Daftar Menu & Rekap Mingguan/Bulanan',
     };
     window.dispatchEvent(
       new CustomEvent('sppg-subtab-change', {
@@ -254,6 +266,7 @@ export const NutritionMenuModule: React.FC = () => {
   // Nutrition Target Config (AKG)
   const [nutritionTarget, setNutritionTarget] = useState<NutritionTargetConfig>(defaultNutritionTarget);
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
+  const [nutritionTableView, setNutritionTableView] = useState<'bgn' | 'tkpi'>('bgn');
 
   // Two-category Pagu Anggaran Draft State (Porsi Besar 10.000 & Porsi Kecil 8.000)
   const [smallCapDraft, setSmallCapDraft] = useState<number>(sppgConfig.smallPortionBudget || 8000);
@@ -301,9 +314,79 @@ export const NutritionMenuModule: React.FC = () => {
   const [customUnitPrice, setCustomUnitPrice] = useState<number>(30000);
   const [customPurchaseUnit, setCustomPurchaseUnit] = useState<string>(masterUnits[0]?.code || 'kg');
 
-  // Modal State for Create Menu
+  // Quick Add Row Modal State inside Tab C: Rincian Kandungan Gizi Menu
+  const [isAddNutritionRowModalOpen, setIsAddNutritionRowModalOpen] = useState(false);
+  const [nutritionRowTargetMenuId, setNutritionRowTargetMenuId] = useState<string>('');
+  const [newNutritionRowForm, setNewNutritionRowForm] = useState<{
+    menuName: string;
+    ingredientName: string;
+    category: string;
+    netWeightSmall: number;
+    netWeightLarge: number;
+    calories100g: number;
+    protein100g: number;
+    fat100g: number;
+    carb100g: number;
+    fiber100g: number;
+    ediblePortionPercent: number;
+    referenceSource: string;
+  }>({
+    menuName: '',
+    ingredientName: '',
+    category: 'Lauk Hewani',
+    netWeightSmall: 50,
+    netWeightLarge: 75,
+    calories100g: 155,
+    protein100g: 12.8,
+    fat100g: 11.5,
+    carb100g: 0.8,
+    fiber100g: 0,
+    ediblePortionPercent: 100,
+    referenceSource: 'Input Manual / TKPI 2020',
+  });
+
+  // Modal State for Create, Edit & Delete Menu + Weekly/Monthly Recap Filters
   const [isCreateMenuModalOpen, setIsCreateMenuModalOpen] = useState(false);
   const [isSavingNewMenu, setIsSavingNewMenu] = useState(false);
+  const [editingMenuItem, setEditingMenuItem] = useState<MenuItem | null>(null);
+  const [isEditModalSchemaEdit, setIsEditModalSchemaEdit] = useState(false);
+  const [isSavingEditMenu, setIsSavingEditMenu] = useState(false);
+  const [deleteMenuTarget, setDeleteMenuTarget] = useState<MenuItem | null>(null);
+  const [recapViewMode, setRecapViewMode] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const [recapMonthFilter, setRecapMonthFilter] = useState<string>('ALL');
+  const [recapWeekFilter, setRecapWeekFilter] = useState<string>('ALL');
+  const [recapStatusFilter, setRecapStatusFilter] = useState<string>('ALL');
+  const [editMenuForm, setEditMenuForm] = useState<{
+    date: string;
+    dayName: string;
+    cycleWeek: number;
+    menuCode: string;
+    stapleFood: string;
+    animalProtein: string;
+    plantProtein: string;
+    vegetable: string;
+    fruit: string;
+    milkOrExtra: string;
+    estimatedCostPerPortion: number;
+    notes: string;
+    status: MenuItem['status'];
+    customFields: Record<string, any>;
+  }>({
+    date: '',
+    dayName: '',
+    cycleWeek: 1,
+    menuCode: '',
+    stapleFood: '',
+    animalProtein: '',
+    plantProtein: '',
+    vegetable: '',
+    fruit: '',
+    milkOrExtra: '',
+    estimatedCostPerPortion: 9000,
+    notes: '',
+    status: 'Draft',
+    customFields: {},
+  });
 
   const buildSuggestedMenuCode = (existingMenus: MenuItem[]) => {
     let idx = existingMenus.length + 1;
@@ -536,6 +619,16 @@ export const NutritionMenuModule: React.FC = () => {
       fiber: ingredientsCalculated.reduce((acc, i) => acc + i.nutritionLarge.fiber, 0),
     };
   }, [ingredientsCalculated]);
+
+  const activeMenuNutritionSheetData = useMemo(() => {
+    return resolveNutritionReportData({
+      menuItems: currentMenu ? [currentMenu] : [],
+      menuIngredientsMap: currentMenu ? { [currentMenu.id]: currentIngredients } : {},
+      sppgConfig,
+      periodType: 'harian',
+      selectedDate: currentMenu?.date || '',
+    });
+  }, [currentMenu, currentIngredients, sppgConfig]);
 
   // Evaluator function against configured nutrition targets
   const evaluateTarget = (
@@ -788,6 +881,275 @@ export const NutritionMenuModule: React.FC = () => {
     addToast('info', 'Bahan Dihapus', 'Bahan resep telah dikeluarkan dan Food Cost diperbarui.');
   };
 
+  // Autocomplete & TKPI Nutrition Lookup Options for Rincian Kandungan Gizi Menu
+  const foodNameOptions = useMemo(
+    () => getFoodNutritionSuggestions(foodCompositions, masterBahan),
+    [foodCompositions, masterBahan]
+  );
+
+  const menuNameSuggestions = useMemo(() => {
+    const set = new Set<string>();
+    const push = (val?: string) => {
+      const t = (val || '').trim();
+      if (t) set.add(t);
+    };
+    if (currentMenu) {
+      push(currentMenu.stapleFood);
+      push(currentMenu.animalProtein);
+      push(currentMenu.plantProtein);
+      push(currentMenu.vegetable);
+      push(currentMenu.fruit);
+      push(currentMenu.milkOrExtra);
+    }
+    currentIngredients.forEach(ing => push(ing.menuName));
+    push('Pelengkap & Bumbu');
+    return Array.from(set);
+  }, [currentMenu, currentIngredients]);
+
+  const handleUpdateNutritionDishMenuName = (
+    menuId: string,
+    ingredientIds: string[],
+    nextMenuName: string | undefined
+  ) => {
+    const idSet = new Set(ingredientIds);
+    const cleaned = nextMenuName ? nextMenuName.trim() : undefined;
+    const nextList = (menuIngredientsMap[menuId] || []).map(item => {
+      if (!idSet.has(item.id)) return item;
+      const isZeroMacros =
+        (item.calories100g || 0) === 0 &&
+        (item.protein100g || 0) === 0 &&
+        (item.fat100g || 0) === 0 &&
+        (item.carb100g || 0) === 0;
+      if (isZeroMacros && cleaned) {
+        const match = resolveFoodNutritionLookup(cleaned, foodCompositions, masterBahan);
+        if (match) {
+          return {
+            ...item,
+            menuName: cleaned,
+            calories100g: match.calories100g,
+            protein100g: match.protein100g,
+            fat100g: match.fat100g,
+            carb100g: match.carb100g,
+            fiber100g: match.fiber100g,
+            ediblePortionPercent: match.ediblePortionPercent,
+            referenceSource: match.referenceSource,
+          };
+        }
+      }
+      return {
+        ...item,
+        menuName: cleaned || undefined,
+      };
+    });
+    updateMenuIngredients(menuId, nextList);
+    addToast(
+      'success',
+      cleaned ? 'Kolom Menu Diperbarui' : 'Menu Dikembalikan Otomatis',
+      cleaned
+        ? `Nama menu pada rincian gizi diubah menjadi "${cleaned}".`
+        : 'Nama menu dikembalikan ke pengisian otomatis dari Menu PLOG.'
+    );
+  };
+
+  const handleUpdateSingleIngredientMenuName = (
+    menuId: string,
+    ingredientId: string,
+    nextMenuName: string | undefined
+  ) => {
+    const cleaned = nextMenuName ? nextMenuName.trim() : undefined;
+    const nextList = (menuIngredientsMap[menuId] || []).map(item =>
+      item.id === ingredientId ? { ...item, menuName: cleaned || undefined } : item
+    );
+    updateMenuIngredients(menuId, nextList);
+    addToast(
+      'success',
+      'Menu Baris Bahan Diperbarui',
+      cleaned
+        ? `Bahan dipindahkan ke menu "${cleaned}".`
+        : 'Menu baris dikembalikan otomatis sesuai kategori PLOG.'
+    );
+  };
+
+  const handleUpdateNutritionIngredientName = (
+    menuId: string,
+    ingredientId: string,
+    nextName: string
+  ) => {
+    const cleaned = nextName.trim();
+    if (!cleaned) return;
+    const match = resolveFoodNutritionLookup(cleaned, foodCompositions, masterBahan);
+    const nextList = (menuIngredientsMap[menuId] || []).map(item => {
+      if (item.id !== ingredientId) return item;
+      if (match) {
+        return {
+          ...item,
+          name: cleaned,
+          calories100g: match.calories100g,
+          protein100g: match.protein100g,
+          fat100g: match.fat100g,
+          carb100g: match.carb100g,
+          fiber100g: match.fiber100g,
+          ediblePortionPercent: match.ediblePortionPercent,
+          referenceSource: match.referenceSource,
+        };
+      }
+      return {
+        ...item,
+        name: cleaned,
+      };
+    });
+    updateMenuIngredients(menuId, nextList);
+    if (match) {
+      addToast(
+        'success',
+        'Bahan & Nilai Gizi Terhitung Otomatis',
+        `"${cleaned}" cocok dengan referensi ${match.referenceSource}. Energi, Protein, Lemak, KH & Serat otomatis diperbarui.`
+      );
+    } else {
+      addToast(
+        'info',
+        'Nama Bahan Diperbarui Manual',
+        `"${cleaned}" disimpan. Jika bahan khusus, Anda dapat menyesuaikan nilai gizi per 100g pada tab "Referensi TKPI / 100g".`
+      );
+    }
+  };
+
+  const handleUpdateNutritionIngredientWeight = (
+    menuId: string,
+    ingredientId: string,
+    portionType: 'small' | 'large',
+    nextWeight: number
+  ) => {
+    const safeWeight = Number.isFinite(nextWeight) ? Math.max(0, nextWeight) : 0;
+    const field = portionType === 'small' ? 'netWeightSmall' : 'netWeightLarge';
+    const nextList = (menuIngredientsMap[menuId] || []).map(item =>
+      item.id === ingredientId ? { ...item, [field]: safeWeight } : item
+    );
+    updateMenuIngredients(menuId, nextList);
+  };
+
+  const handleUpdateIngredientNutritionPer100g = (
+    ingId: string,
+    field: 'calories100g' | 'protein100g' | 'fat100g' | 'carb100g' | 'fiber100g',
+    value: number
+  ) => {
+    const safeVal = Number.isFinite(value) ? Math.max(0, value) : 0;
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item =>
+      item.id === ingId
+        ? {
+            ...item,
+            [field]: safeVal,
+            referenceSource: item.referenceSource?.includes('Manual')
+              ? item.referenceSource
+              : `${item.referenceSource || 'TKPI'} (Edit Manual)`,
+          }
+        : item
+    );
+    updateMenuIngredients(activeMenuId, nextList);
+  };
+
+  const handleOpenAddNutritionRowModal = (menuId: string, defaultMenuName?: string) => {
+    const fallbackMenu =
+      defaultMenuName || currentMenu?.animalProtein || currentMenu?.stapleFood || '';
+    const defaultComp = foodCompositions[0];
+    setNutritionRowTargetMenuId(menuId || activeMenuId);
+    setNewNutritionRowForm({
+      menuName: fallbackMenu,
+      ingredientName: '',
+      category: defaultComp?.category || 'Lauk Hewani',
+      netWeightSmall: 50,
+      netWeightLarge: 75,
+      calories100g: 0,
+      protein100g: 0,
+      fat100g: 0,
+      carb100g: 0,
+      fiber100g: 0,
+      ediblePortionPercent: 100,
+      referenceSource: 'TKPI 2020 / Input Manual',
+    });
+    setIsAddNutritionRowModalOpen(true);
+  };
+
+  const handleNutritionModalIngredientChange = (rawName: string) => {
+    const match = resolveFoodNutritionLookup(rawName, foodCompositions, masterBahan);
+    setNewNutritionRowForm(prev => ({
+      ...prev,
+      ingredientName: rawName,
+      ...(match
+        ? {
+            category: match.category || prev.category,
+            calories100g: match.calories100g,
+            protein100g: match.protein100g,
+            fat100g: match.fat100g,
+            carb100g: match.carb100g,
+            fiber100g: match.fiber100g,
+            ediblePortionPercent: match.ediblePortionPercent,
+            referenceSource: match.referenceSource,
+          }
+        : {}),
+    }));
+  };
+
+  const handleSaveNewNutritionRow = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = nutritionRowTargetMenuId || activeMenuId;
+    const ingName = newNutritionRowForm.ingredientName.trim();
+    if (!ingName) {
+      addToast('warning', 'Nama Bahan Wajib Diisi', 'Masukkan nama bahan makanan terlebih dahulu.');
+      return;
+    }
+
+    const match = resolveFoodNutritionLookup(ingName, foodCompositions, masterBahan);
+    const liveMat = masterBahan.find(mb => isMatchingMaterialName(mb.name, ingName));
+    const liveInv = inventory.find(inv => isMatchingMaterialName(inv.name, ingName));
+
+    const newIng: RecipeIngredient = {
+      id: `ing-${Date.now()}`,
+      menuName: newNutritionRowForm.menuName.trim() || undefined,
+      name: ingName,
+      category: newNutritionRowForm.category || match?.category || 'Lauk Hewani',
+      netWeightSmall: Math.max(0, Number(newNutritionRowForm.netWeightSmall) || 0),
+      netWeightLarge: Math.max(0, Number(newNutritionRowForm.netWeightLarge) || 0),
+      unit: 'gram',
+      ediblePortionPercent: Math.max(
+        1,
+        Math.min(100, Number(newNutritionRowForm.ediblePortionPercent) || 100)
+      ),
+      conversionFactorToBase: 0.001,
+      purchaseUnit: liveInv?.unit || liveMat?.unit || 'kg',
+      bufferPercentSmall: defaultBufferSmallPct,
+      bufferPercentLarge: defaultBufferLargePct,
+      unitPrice: liveInv?.pricePerUnit || liveMat?.actualPrice || 15000,
+      calories100g: Math.max(0, Number(newNutritionRowForm.calories100g) || 0),
+      protein100g: Math.max(0, Number(newNutritionRowForm.protein100g) || 0),
+      fat100g: Math.max(0, Number(newNutritionRowForm.fat100g) || 0),
+      carb100g: Math.max(0, Number(newNutritionRowForm.carb100g) || 0),
+      fiber100g: Math.max(0, Number(newNutritionRowForm.fiber100g) || 0),
+      referenceSource: newNutritionRowForm.referenceSource.trim() || 'Input Manual SPPG',
+    };
+
+    const nextList = [...(menuIngredientsMap[targetId] || []), newIng];
+    updateMenuIngredients(targetId, nextList);
+    setIsAddNutritionRowModalOpen(false);
+    addToast(
+      'success',
+      'Baris Gizi Ditambahkan',
+      `${ingName} berhasil ditambahkan & kandungan gizi Porsi Kecil/Besar terhitung otomatis.`
+    );
+  };
+
+  const handleDeleteNutritionRow = (menuId: string, ingredientId: string) => {
+    const existing = menuIngredientsMap[menuId] || [];
+    const removed = existing.find(i => i.id === ingredientId);
+    const nextList = existing.filter(i => i.id !== ingredientId);
+    updateMenuIngredients(menuId, nextList);
+    addToast(
+      'info',
+      'Baris Bahan Dihapus',
+      `${removed?.name || 'Bahan'} dihapus dan total kandungan gizi menu diperbarui otomatis.`
+    );
+  };
+
   const handleSyncActiveMenuToRAB = async () => {
     if (ingredientsCalculated.length === 0) {
       addToast('warning', 'Resep Kosong', 'Tambahkan minimal 1 bahan resep sebelum sinkronisasi ke RAB.');
@@ -902,6 +1264,125 @@ export const NutritionMenuModule: React.FC = () => {
     } finally {
       setIsSavingNewMenu(false);
     }
+  };
+
+  // Handlers: Edit & Delete Planned Menu (integrated across Tab A & Tab F)
+  const handleOpenEditMenu = (menu: MenuItem) => {
+    setEditingMenuItem(menu);
+    setEditMenuForm({
+      date: menu.date || new Date().toISOString().slice(0, 10),
+      dayName: menu.dayName || 'Senin',
+      cycleWeek: menu.cycleWeek || 1,
+      menuCode: menu.menuCode || '',
+      stapleFood: menu.stapleFood || '',
+      animalProtein: menu.animalProtein || '',
+      plantProtein: menu.plantProtein || '',
+      vegetable: menu.vegetable || '',
+      fruit: menu.fruit || '',
+      milkOrExtra: menu.milkOrExtra || 'Susu UHT Plain 125ml',
+      estimatedCostPerPortion: menu.estimatedCostPerPortion || 9000,
+      notes: menu.notes || '',
+      status: menu.status || 'Draft',
+      customFields: {
+        ...getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+        ...(menu.customFields || {}),
+      },
+    });
+    setIsEditModalSchemaEdit(false);
+  };
+
+  const handleSaveEditMenu = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMenuItem || isSavingEditMenu) return;
+
+    const err = validateDynamicFormFields(dynamicFormSchemas.menu_form, {
+      ...editMenuForm,
+      ...(editMenuForm.customFields || {}),
+    });
+    if (err) {
+      addToast('error', 'Validasi Form Menu', err);
+      return;
+    }
+
+    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const safeDate = editMenuForm.date || editingMenuItem.date || new Date().toISOString().slice(0, 10);
+    const parsedDay = new Date(`${safeDate}T00:00:00`);
+    const computedDayName = Number.isNaN(parsedDay.getTime())
+      ? editMenuForm.dayName || editingMenuItem.dayName || 'Senin'
+      : dayNames[parsedDay.getDay()];
+
+    const updatedStub: Pick<
+      MenuItem,
+      'id' | 'stapleFood' | 'animalProtein' | 'plantProtein' | 'vegetable' | 'fruit' | 'milkOrExtra'
+    > = {
+      id: editingMenuItem.id,
+      stapleFood: (editMenuForm.stapleFood || '').trim() || editingMenuItem.stapleFood,
+      animalProtein: (editMenuForm.animalProtein || '').trim() || editingMenuItem.animalProtein,
+      plantProtein: (editMenuForm.plantProtein || '').trim() || editingMenuItem.plantProtein,
+      vegetable: (editMenuForm.vegetable || '').trim() || editingMenuItem.vegetable,
+      fruit: (editMenuForm.fruit || '').trim() || editingMenuItem.fruit,
+      milkOrExtra: (editMenuForm.milkOrExtra || '').trim() || editingMenuItem.milkOrExtra,
+    };
+
+    const existingIngredients = menuIngredientsMap[editingMenuItem.id] || [];
+    const freshGrammages = buildDefaultGrammagesForMenu(updatedStub, existingIngredients);
+    const existingGrammages = editingMenuItem.itemGrammages || [];
+    const mergedGrammages: MenuItemGrammage[] = freshGrammages.map(fg => {
+      const prevMatch = existingGrammages.find(eg => eg.categoryKey === fg.categoryKey);
+      if (prevMatch?.isManuallyEdited) {
+        return prevMatch;
+      }
+      return {
+        ...fg,
+        smallGrams: prevMatch ? prevMatch.smallGrams : fg.smallGrams,
+        largeGrams: prevMatch ? prevMatch.largeGrams : fg.largeGrams,
+      };
+    });
+    const customGrammages = existingGrammages.filter(g => g.categoryKey === 'custom');
+
+    setIsSavingEditMenu(true);
+    try {
+      await updateMenuItem(editingMenuItem.id, {
+        date: safeDate,
+        dayName: computedDayName,
+        cycleWeek: Number(editMenuForm.cycleWeek) || 1,
+        menuCode: (editMenuForm.menuCode || '').trim() || editingMenuItem.menuCode,
+        stapleFood: updatedStub.stapleFood,
+        animalProtein: updatedStub.animalProtein,
+        plantProtein: updatedStub.plantProtein,
+        vegetable: updatedStub.vegetable,
+        fruit: updatedStub.fruit,
+        milkOrExtra: updatedStub.milkOrExtra,
+        estimatedCostPerPortion:
+          Number(editMenuForm.estimatedCostPerPortion) || editingMenuItem.estimatedCostPerPortion,
+        notes: (editMenuForm.notes || '').trim(),
+        status: editMenuForm.status,
+        itemGrammages: [...mergedGrammages, ...customGrammages],
+        customFields: editMenuForm.customFields || {},
+      });
+      setEditingMenuItem(null);
+    } catch (saveErr) {
+      addToast(
+        'error',
+        'Gagal Memperbarui Menu',
+        saveErr instanceof Error ? saveErr.message : 'Terjadi kesalahan saat memperbarui data menu.'
+      );
+    } finally {
+      setIsSavingEditMenu(false);
+    }
+  };
+
+  const handleConfirmDeleteMenu = async () => {
+    if (!deleteMenuTarget) return;
+    const deletedId = deleteMenuTarget.id;
+    const deletedCode = deleteMenuTarget.menuCode;
+    await deleteMenuItem(deletedId);
+    if (selectedMenuId === deletedId) {
+      const remaining = menuItems.filter(m => m.id !== deletedId);
+      setSelectedMenuId(remaining[0]?.id || 'menu-1');
+    }
+    setDeleteMenuTarget(null);
+    addToast('warning', 'Menu Dihapus', `Menu ${deletedCode} telah dihapus dari jadwal & rekapitulasi PLOG.`);
   };
 
   // Handlers Submodul B: Gramasi Item Menu (Manual Edit & Sinkron PLOG)
@@ -1317,38 +1798,134 @@ export const NutritionMenuModule: React.FC = () => {
     exportToExcel(dataToExport, `PLOG_Rincian_Resep_${currentMenu?.menuCode || 'Menu'}`, 'Rincian Bahan Resep');
   };
 
+  const formatMonthLabel = (ym: string): string => {
+    if (!/^\d{4}-\d{2}$/.test(ym)) return ym;
+    const [year, month] = ym.split('-').map(Number);
+    const d = new Date(year, month - 1, 1);
+    return new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(d);
+  };
+
+  const availableRecapMonths = useMemo(() => {
+    const months = Array.from(
+      new Set(menuItems.map(m => (m.date || '').slice(0, 7)).filter(v => /^\d{4}-\d{2}$/.test(v)))
+    );
+    return months.sort();
+  }, [menuItems]);
+
+  const filteredRecapMenus = useMemo(() => {
+    return [...menuItems]
+      .filter(m => {
+        if (recapMonthFilter !== 'ALL' && (m.date || '').slice(0, 7) !== recapMonthFilter) return false;
+        if (recapWeekFilter !== 'ALL' && String(m.cycleWeek || 1) !== recapWeekFilter) return false;
+        if (recapStatusFilter !== 'ALL' && m.status !== recapStatusFilter) return false;
+        return true;
+      })
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  }, [menuItems, recapMonthFilter, recapWeekFilter, recapStatusFilter]);
+
+  const weeklyRecapGroups = useMemo(() => {
+    const map = new Map<string, MenuItem[]>();
+    filteredRecapMenus.forEach(m => {
+      const ym = (m.date || '').slice(0, 7) || 'Tanpa Bulan';
+      const dayNum = Number((m.date || '').slice(8, 10)) || 1;
+      const weekNum = m.cycleWeek || Math.min(5, Math.max(1, Math.ceil(dayNum / 7)));
+      const key = `${ym}__W${weekNum}`;
+      const list = map.get(key) || [];
+      list.push(m);
+      map.set(key, list);
+    });
+    return Array.from(map.entries()).map(([key, items]) => {
+      const [ym, wPart] = key.split('__W');
+      const count = items.length || 1;
+      const avgCalSmall = Math.round(items.reduce((s, i) => s + (i.caloriesSmall || 0), 0) / count);
+      const avgCalLarge = Math.round(items.reduce((s, i) => s + (i.caloriesLarge || 0), 0) / count);
+      const avgCost = Math.round(items.reduce((s, i) => s + (i.estimatedCostPerPortion || 0), 0) / count);
+      const totalPortionsSum = items.reduce((s, i) => s + (i.targetPortions || totalBeneficiaries), 0);
+      const approvedCount = items.filter(i => i.status === 'Disetujui Kepala').length;
+      return {
+        key,
+        monthKey: ym,
+        monthLabel: formatMonthLabel(ym),
+        weekNumber: Number(wPart) || 1,
+        items,
+        avgCalSmall,
+        avgCalLarge,
+        avgCost,
+        totalPortionsSum,
+        approvedCount,
+      };
+    });
+  }, [filteredRecapMenus, totalBeneficiaries]);
+
+  const monthlyRecapGroups = useMemo(() => {
+    const map = new Map<string, MenuItem[]>();
+    filteredRecapMenus.forEach(m => {
+      const ym = (m.date || '').slice(0, 7) || 'Tanpa Bulan';
+      const list = map.get(ym) || [];
+      list.push(m);
+      map.set(ym, list);
+    });
+    return Array.from(map.entries()).map(([ym, items]) => {
+      const count = items.length || 1;
+      const avgCalSmall = Math.round(items.reduce((s, i) => s + (i.caloriesSmall || 0), 0) / count);
+      const avgCalLarge = Math.round(items.reduce((s, i) => s + (i.caloriesLarge || 0), 0) / count);
+      const avgProtein = Number((items.reduce((s, i) => s + (i.proteinGrams || 0), 0) / count).toFixed(1));
+      const avgCost = Math.round(items.reduce((s, i) => s + (i.estimatedCostPerPortion || 0), 0) / count);
+      const totalPortionsSum = items.reduce((s, i) => s + (i.targetPortions || totalBeneficiaries), 0);
+      const totalBudgetEst = items.reduce(
+        (s, i) => s + (i.estimatedCostPerPortion || 0) * (i.targetPortions || totalBeneficiaries),
+        0
+      );
+      const approvedCount = items.filter(i => i.status === 'Disetujui Kepala').length;
+      const weeksCovered = new Set(items.map(i => i.cycleWeek || 1)).size;
+      return {
+        monthKey: ym,
+        monthLabel: formatMonthLabel(ym),
+        items,
+        avgCalSmall,
+        avgCalLarge,
+        avgProtein,
+        avgCost,
+        totalPortionsSum,
+        totalBudgetEst,
+        approvedCount,
+        weeksCovered,
+      };
+    });
+  }, [filteredRecapMenus, totalBeneficiaries]);
+
   return (
-    <div className="space-y-6">
-      {/* Top Banner Header */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-blue-900 text-white flex items-center justify-center shadow-md shadow-blue-950/20 font-black">
-            <UtensilsCrossed className="w-6 h-6 text-sky-400" />
+    <div className="space-y-5">
+      {/* Compact Institutional Header */}
+      <div className="bg-white dark:bg-slate-900 px-5 py-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-[#1E3A8A] text-white flex items-center justify-center shadow-xs shrink-0">
+            <UtensilsCrossed className="w-5 h-5 text-teal-300" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 font-mono tracking-wider">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#1E3A8A]/10 text-[#1E3A8A] dark:bg-blue-950 dark:text-blue-300 font-mono tracking-wider">
                 MODUL PLOG
               </span>
-              <span className="text-xs text-slate-400 font-semibold">• BGN AKG 2026</span>
+              <span className="text-[11px] text-slate-600 dark:text-slate-400 font-semibold">• BGN AKG 2026</span>
             </div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-              Perencanaan dan Pelaporan Gizi Terintegrasi
+            <h2 className="text-lg font-extrabold text-slate-900 dark:text-white tracking-tight truncate">
+              Perencanaan Menu, Gizi &amp; Rekapitulasi PLOG
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Perhitungan Gramasi, Kebutuhan Bahan BDD, Kandungan Gizi TKPI, Food Cost & SOP Divisi
+            <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
+              Gramasi porsi, kebutuhan bahan BDD, evaluasi TKPI, Food Cost, SOP Divisi &amp; Rekap Mingguan/Bulanan
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           {/* Menu Selector Dropdown */}
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 hidden sm:inline">Pilih Menu:</span>
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-400 hidden sm:inline">Menu Aktif:</span>
             <select
               value={selectedMenuId}
               onChange={e => setSelectedMenuId(e.target.value)}
-              className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white max-w-[240px]"
             >
               {menuItems.map(m => (
                 <option key={m.id} value={m.id}>
@@ -1361,10 +1938,10 @@ export const NutritionMenuModule: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsZScoreModalOpen(true)}
-            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 bg-[#0F766E] hover:bg-[#0D625B] text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+            className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-2 bg-[#0D9488] hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 cursor-pointer"
           >
             <HeartPulse className="w-4 h-4" />
-            <span>Kalkulator Z-Score WHO</span>
+            <span>Kalkulator Z-Score</span>
           </button>
 
           <DynamicFormEditToggleBar
@@ -1388,7 +1965,7 @@ export const NutritionMenuModule: React.FC = () => {
               setIsModalMenuSchemaEdit(false);
               setIsCreateMenuModalOpen(true);
             }}
-            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+            className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Menu Baru</span>
@@ -1403,62 +1980,74 @@ export const NutritionMenuModule: React.FC = () => {
         />
       )}
 
-      {/* Metric Context Bar: Sasaran Penerima & Pagu Anggaran */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>Porsi Kecil (TK/SD 1-3)</span>
-            <Scale className="w-4 h-4 text-sky-600" />
+      {/* Metric Context Bar: Sasaran Penerima & Pagu Anggaran (Uniform Equal-Height Cards) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200">
+          <div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+              <span>Porsi Kecil (TK/SD 1-3)</span>
+              <Scale className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            </div>
+            <div className="text-2xl font-black text-[#1E3A8A] dark:text-sky-300 mt-1.5 tabular-nums">
+              {formatNumber(quotaSmall)} Siswa
+            </div>
           </div>
-          <div className="text-2xl font-black text-sky-600 mt-1">
-            {formatNumber(quotaSmall)} Siswa
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Gramasi anak 60-70% standar</div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>Porsi Besar (SD 4-6, SMP/SMA)</span>
-            <Scale className="w-4 h-4 text-indigo-600" />
-          </div>
-          <div className="text-2xl font-black text-indigo-600 mt-1">
-            {formatNumber(quotaLarge)} Siswa
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Gramasi standar remaja 100%</div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>Pagu Anggaran (2 Kategori)</span>
-            <Coins className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="mt-1.5 flex items-baseline gap-2 flex-wrap">
-            <span className="text-base sm:text-lg font-black text-indigo-700 dark:text-indigo-300 font-mono">
-              B: {formatRupiah(largeBudgetCap)}
-            </span>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <span className="text-base sm:text-lg font-black text-sky-700 dark:text-sky-300 font-mono">
-              K: {formatRupiah(smallBudgetCap)}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
-            Porsi Besar &amp; Porsi Kecil • Total {formatRupiah(totalBudgetCap)}
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            Gramasi anak 60-70% standar
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="text-[11px] text-slate-500 uppercase font-bold flex items-center justify-between">
-            <span>Realisasi Food Cost</span>
-            <DollarSign className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200">
+          <div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+              <span>Porsi Besar (SD 4-6, SMP/SMA)</span>
+              <Scale className="w-4 h-4 text-[#0D9488]" />
+            </div>
+            <div className="text-2xl font-black text-[#0D9488] dark:text-teal-300 mt-1.5 tabular-nums">
+              {formatNumber(quotaLarge)} Siswa
+            </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-            {formatRupiah(Math.round(avgFoodCostPerPortion))}
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            Gramasi standar remaja 100%
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200">
+          <div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+              <span>Pagu Anggaran (2 Kategori)</span>
+              <Coins className="w-4 h-4 text-[#0D9488]" />
+            </div>
+            <div className="mt-1.5 flex items-baseline gap-2 flex-wrap tabular-nums">
+              <span className="text-base sm:text-lg font-black text-[#1E3A8A] dark:text-sky-300 font-mono">
+                B: {formatRupiah(largeBudgetCap)}
+              </span>
+              <span className="text-slate-300 dark:text-slate-600">|</span>
+              <span className="text-base sm:text-lg font-black text-[#0D9488] dark:text-teal-300 font-mono">
+                K: {formatRupiah(smallBudgetCap)}
+              </span>
+            </div>
+          </div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            Porsi Besar &amp; Kecil • Total {formatRupiah(totalBudgetCap)}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200">
+          <div>
+            <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+              <span>Realisasi Food Cost</span>
+              <DollarSign className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            </div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mt-1.5 tabular-nums">
+              {formatRupiah(Math.round(avgFoodCostPerPortion))}
+            </div>
           </div>
           <div
-            className={`text-[11px] font-semibold mt-0.5 flex items-center gap-1 ${
+            className={`text-[11px] font-semibold mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1 tabular-nums ${
               budgetDifferencePerPortion >= 0
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-rose-600 dark:text-rose-400'
+                ? 'text-[#0D9488] dark:text-teal-400'
+                : 'text-[#E11D48] dark:text-rose-400'
             }`}
           >
             <span>{budgetDifferencePerPortion >= 0 ? 'Efisiensi:' : 'Melebihi Pagu:'}</span>
@@ -1471,20 +2060,20 @@ export const NutritionMenuModule: React.FC = () => {
       </div>
 
       {/* Active Menu Detail Card */}
-      <div className="bg-gradient-to-r from-blue-950 to-slate-900 text-white p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 border border-blue-900">
+      <div className="bg-gradient-to-r from-[#1E3A8A] to-slate-900 text-white p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 border border-blue-900 shadow-sm">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500 text-white font-mono">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0D9488] text-white font-mono">
               {currentMenu?.menuCode}
             </span>
-            <span className="text-xs text-sky-200 font-semibold">
+            <span className="text-xs text-blue-100 font-semibold">
               {currentMenu?.dayName}, {formatIndonesianDate(currentMenu?.date || '2026-11-08')}
             </span>
             <span
               className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                 currentMenu?.status === 'Disetujui Kepala'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  ? 'bg-teal-500/20 text-teal-200 border border-teal-400/30'
+                  : 'bg-amber-500/20 text-amber-200 border border-amber-400/30'
               }`}
             >
               {currentMenu?.status}
@@ -1493,13 +2082,13 @@ export const NutritionMenuModule: React.FC = () => {
           <div className="text-base font-bold text-white flex flex-wrap items-center gap-2">
             <span>{currentMenu?.stapleFood}</span>
             <span>•</span>
-            <span className="text-sky-300">{currentMenu?.animalProtein}</span>
+            <span className="text-sky-200">{currentMenu?.animalProtein}</span>
             <span>•</span>
             <span>{currentMenu?.plantProtein}</span>
             <span>•</span>
-            <span className="text-emerald-300">{currentMenu?.vegetable}</span>
+            <span className="text-teal-200">{currentMenu?.vegetable}</span>
             <span>•</span>
-            <span className="text-amber-300">{currentMenu?.fruit}</span>
+            <span className="text-amber-200">{currentMenu?.fruit}</span>
           </div>
           {getCustomTableFields(dynamicFormSchemas.menu_form).length > 0 && currentMenu?.customFields && (
             <div className="flex flex-wrap gap-2 pt-1">
@@ -1515,24 +2104,37 @@ export const NutritionMenuModule: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {currentMenu && (
+            <button
+              type="button"
+              onClick={() => handleOpenEditMenu(currentMenu)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              <span>Edit Menu</span>
+            </button>
+          )}
           <button
+            type="button"
             onClick={handleExportPLOGPDF}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-[#1E3A8A] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all duration-200 shadow-xs cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>PDF Laporan PLOG</span>
+            <span>PDF PLOG</span>
           </button>
           <button
+            type="button"
             onClick={handleExportPLOGExcel}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0D9488] hover:bg-teal-600 text-white rounded-lg text-xs font-bold transition-all duration-200 shadow-xs cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>Excel</span>
           </button>
           <button
+            type="button"
             onClick={triggerPrint}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Cetak</span>
@@ -1540,57 +2142,68 @@ export const NutritionMenuModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 5 Main Sub-Modules Tabs */}
-      <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold scrollbar-thin">
+      {/* Responsive Pill Sub-Module Tabs (A - F) */}
+      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm text-xs font-bold">
         {[
           {
             key: 'menu_bahan' as SubModuleTab,
-            label: 'A. Perencanaan Menu oleh PLOG & Bahan',
-            icon: <UtensilsCrossed className="w-4 h-4" />,
+            label: 'A. Perencanaan Menu & Bahan',
+            icon: <UtensilsCrossed className="w-3.5 h-3.5" />,
             badge: `${ingredientsCalculated.length} Bahan`,
           },
           {
             key: 'gramasi_item' as SubModuleTab,
             label: 'B. Gramasi Item Menu',
-            icon: <Scale className="w-4 h-4" />,
+            icon: <Scale className="w-3.5 h-3.5" />,
             badge: `${grammageDrafts.length} Item`,
-            badgeColor: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
           },
           {
             key: 'kandungan_gizi' as SubModuleTab,
-            label: 'C. Input Kandungan Gizi (TKPI & Evaluasi AKG)',
-            icon: <Apple className="w-4 h-4" />,
-            badge: nutritionTarget.isConfigured ? 'Target AKG Aktif' : 'Belum Dikonfigurasi',
-            badgeColor: nutritionTarget.isConfigured ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
+            label: 'C. Kandungan Gizi (TKPI & AKG)',
+            icon: <Apple className="w-3.5 h-3.5" />,
+            badge: nutritionTarget.isConfigured ? 'Target AKG Aktif' : 'Belum Konfig',
           },
           {
             key: 'food_cost' as SubModuleTab,
-            label: 'D. Input Food Cost Menu & Anggaran',
-            icon: <Coins className="w-4 h-4" />,
+            label: 'D. Food Cost & Pagu Anggaran',
+            icon: <Coins className="w-3.5 h-3.5" />,
             badge: `${percentToCapAvg.toFixed(1)}% Pagu`,
           },
           {
             key: 'jobdesk_divisi' as SubModuleTab,
-            label: 'E. Jobdesk Divisi & SOP Foto',
-            icon: <Layers className="w-4 h-4" />,
+            label: 'E. Jobdesk Divisi & SOP',
+            icon: <Layers className="w-3.5 h-3.5" />,
             badge: `${jobdesks.length} Divisi`,
+          },
+          {
+            key: 'daftar_rekap' as SubModuleTab,
+            label: 'F. Daftar & Rekap Menu (Mingguan/Bulanan)',
+            icon: <CalendarDays className="w-3.5 h-3.5" />,
+            badge: `${menuItems.length} Menu`,
           },
         ].map(tab => {
           const isActive = activeTab === tab.key;
           return (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-t-xl transition whitespace-nowrap border-b-2 ${
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
                 isActive
-                  ? 'border-blue-900 dark:border-sky-400 text-blue-900 dark:text-sky-300 bg-blue-50/50 dark:bg-blue-950/40'
-                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
+                  ? 'bg-[#1E3A8A] text-white shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white border border-slate-200/70 dark:border-slate-700'
               }`}
             >
               {tab.icon}
               <span>{tab.label}</span>
               {tab.badge && (
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${tab.badgeColor || 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}`}>
+                <span
+                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700'
+                  }`}
+                >
                   {tab.badge}
                 </span>
               )}
@@ -1700,15 +2313,19 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Table of Ingredients - Format Rincian Resep Sesuai Standar Spreadsheet */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-xs">
+          {/* Table of Ingredients - Format Rincian Resep Sesuai Standar Spreadsheet dengan Sticky BAHAN MAKANAN */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-700 overflow-hidden shadow-sm">
+            <div className="lg:hidden px-4 py-1.5 bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300 print:hidden">
+              <span>Kolom BAHAN MAKANAN dikunci di kiri — geser ke samping untuk detail Porsi Kecil &amp; Besar</span>
+              <span className="font-bold text-[#1E3A8A] dark:text-sky-400">↔ Scroll</span>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-[11px]">
                 <thead>
                   <tr className="font-extrabold tracking-wide text-center border-b border-slate-400 dark:border-slate-700">
                     <th
                       rowSpan={2}
-                      className="px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500/90 dark:text-slate-950 min-w-[175px] text-left align-middle"
+                      className="sticky left-0 z-20 px-2.5 py-2 border-r border-slate-400 dark:border-slate-700 bg-amber-300 text-slate-950 dark:bg-amber-500 dark:text-slate-950 min-w-[175px] text-left align-middle shadow-[2px_0_6px_-2px_rgba(15,23,42,0.12)]"
                     >
                       BAHAN MAKANAN
                     </th>
@@ -1775,8 +2392,8 @@ export const NutritionMenuModule: React.FC = () => {
                     );
 
                     return (
-                      <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="px-2 py-1.5 border-r border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-slate-100">
+                      <tr key={item.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 px-2 py-1.5 border-r border-slate-300 dark:border-slate-700 font-medium text-slate-900 dark:text-slate-100 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           <span className="hidden print:inline font-semibold">{item.name}</span>
                           <input
                             type="text"
@@ -2113,7 +2730,7 @@ export const NutritionMenuModule: React.FC = () => {
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t-2 border-slate-400 dark:border-slate-700 text-[11px]">
-                    <td colSpan={1} className="px-2.5 py-2.5 font-sans text-right uppercase tracking-wider border-r border-slate-300 dark:border-slate-700">
+                    <td colSpan={1} className="sticky left-0 z-10 bg-slate-100 dark:bg-slate-800 px-2.5 py-2.5 font-sans text-right uppercase tracking-wider border-r border-slate-300 dark:border-slate-700 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                       TOTAL ({ingredientsCalculated.length} Bahan):
                     </td>
                     <td colSpan={7} className="px-2 py-2.5 text-right text-slate-500 dark:text-slate-400 border-r border-slate-200 dark:border-slate-700 font-sans">
@@ -2195,19 +2812,40 @@ export const NutritionMenuModule: React.FC = () => {
               },
               {
                 key: 'gramasiAction',
-                header: 'Gramasi Item',
+                header: 'Aksi Menu',
+                sortable: false,
                 render: row => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedMenuId(row.id);
-                      setActiveTab('gramasi_item');
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[11px] font-bold transition cursor-pointer"
-                  >
-                    <Scale className="w-3 h-3" />
-                    <span>Atur Gramasi</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedMenuId(row.id);
+                        setActiveTab('gramasi_item');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#1E3A8A]/10 hover:bg-[#1E3A8A]/20 dark:bg-sky-950/60 dark:hover:bg-sky-900 text-[#1E3A8A] dark:text-sky-300 border border-[#1E3A8A]/20 dark:border-sky-800 text-[11px] font-bold transition cursor-pointer"
+                    >
+                      <Scale className="w-3 h-3" />
+                      <span>Gramasi</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditMenu(row)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900 text-[#D97706] dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold transition cursor-pointer"
+                      title="Edit Data Menu"
+                    >
+                      <Edit className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteMenuTarget(row)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-[#E11D48] dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-bold transition cursor-pointer"
+                      title="Hapus Menu"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus</span>
+                    </button>
+                  </div>
                 ),
               },
               ...buildDynamicTableColumns<MenuItem>(dynamicFormSchemas.menu_form),
@@ -2340,7 +2978,7 @@ export const NutritionMenuModule: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleSaveAllGrammageDrafts}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition cursor-pointer animate-pulse"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all duration-200 cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
                     <span>Simpan Perubahan Gramasi</span>
@@ -2893,58 +3531,273 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Table: Kandungan Gizi per Bahan Pangan (Nilai Gizi = Berat Bersih / 100 * Kandungan per 100g) */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+          {/* Table: Rincian Kandungan Gizi (Format Laporan Perhitungan Nilai Gizi BGN & Referensi TKPI) */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
               <div>
-                <h4 className="text-xs font-bold uppercase text-slate-700 dark:text-slate-300">
-                  Rincian Kontribusi Gizi per Bahan Pangan (TKPI 2020)
+                <h4 className="text-xs font-bold uppercase text-slate-800 dark:text-slate-200">
+                  Rincian Kandungan Gizi Menu (Porsi Kecil &amp; Porsi Besar)
                 </h4>
-                <p className="text-[11px] text-slate-500">
-                  Perhitungan: Gizi Bahan = (Berat Bersih / 100) × Kandungan Gizi per 100g
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  Terisi otomatis dari Menu &amp; Resep PLOG — klik langsung kolom{' '}
+                  <strong className="text-slate-800 dark:text-slate-200">Menu</strong>,{' '}
+                  <strong className="text-slate-800 dark:text-slate-200">Bahan Makanan</strong>, atau{' '}
+                  <strong className="text-slate-800 dark:text-slate-200">Berat</strong> untuk edit manual; nilai gizi Porsi Kecil &amp; Besar terhitung otomatis.
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setNutritionTableView('bgn')}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      nutritionTableView === 'bgn'
+                        ? 'bg-[#1E3A8A] text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Format Laporan BGN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNutritionTableView('tkpi')}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-200 cursor-pointer ${
+                      nutritionTableView === 'tkpi'
+                        ? 'bg-[#1E3A8A] text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Referensi TKPI / 100g
+                  </button>
+                </div>
+                {hasPermission('menu', 'edit') && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddNutritionRowModal(activeMenuId)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Tambah Baris Menu &amp; Bahan</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => exportNutritionReportPDF(activeMenuNutritionSheetData)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E11D48] hover:bg-rose-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>PDF Nilai Gizi</span>
+                </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">Nama Bahan</th>
-                    <th className="p-3">Kategori</th>
-                    <th className="p-3 text-center">Gram Bersih (K/B)</th>
-                    <th className="p-3 text-right">Energi per 100g</th>
-                    <th className="p-3 text-right">Protein per 100g</th>
-                    <th className="p-3 text-right">Lemak per 100g</th>
-                    <th className="p-3 text-right">Karbo per 100g</th>
-                    <th className="p-3 text-right">Serat per 100g</th>
-                    <th className="p-3 text-center">Sumber Referensi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                  {ingredientsCalculated.map(i => (
-                    <tr key={i.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">
-                        {i.name}
-                      </td>
-                      <td className="p-3 font-sans text-slate-500">{i.category}</td>
-                      <td className="p-3 text-center font-bold">
-                        <span className="text-sky-600">{i.netWeightSmall}g</span> /{' '}
-                        <span className="text-indigo-600">{i.netWeightLarge}g</span>
-                      </td>
-                      <td className="p-3 text-right">{i.calories100g} kkal</td>
-                      <td className="p-3 text-right text-sky-700 dark:text-sky-400 font-bold">{i.protein100g} g</td>
-                      <td className="p-3 text-right text-amber-700 dark:text-amber-400">{i.fat100g} g</td>
-                      <td className="p-3 text-right text-indigo-700 dark:text-indigo-400">{i.carb100g} g</td>
-                      <td className="p-3 text-right text-emerald-700 dark:text-emerald-400">{i.fiber100g} g</td>
-                      <td className="p-3 text-center font-sans text-[10px] text-slate-500">
-                        {i.referenceSource}
-                      </td>
+            {nutritionTableView === 'bgn' ? (
+              <div className="p-3 sm:p-4 overflow-x-auto bg-white">
+                <NutritionReportSheet
+                  data={activeMenuNutritionSheetData}
+                  showLetterhead={true}
+                  className="border-none shadow-none p-1 sm:p-2"
+                  editable={hasPermission('menu', 'edit')}
+                  foodNameOptions={foodNameOptions}
+                  menuNameSuggestions={menuNameSuggestions}
+                  onUpdateDishMenuName={handleUpdateNutritionDishMenuName}
+                  onUpdateSingleIngredientMenuName={handleUpdateSingleIngredientMenuName}
+                  onUpdateIngredientName={handleUpdateNutritionIngredientName}
+                  onUpdateIngredientWeight={handleUpdateNutritionIngredientWeight}
+                  onAddIngredientRow={handleOpenAddNutritionRowModal}
+                  onDeleteIngredientRow={handleDeleteNutritionRow}
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-3">Nama Bahan</th>
+                      <th className="p-3">Menu Hidangan</th>
+                      <th className="p-3 text-center">Gram Bersih (K / B)</th>
+                      <th className="p-3 text-right">Energi / 100g</th>
+                      <th className="p-3 text-right">Protein / 100g</th>
+                      <th className="p-3 text-right">Lemak / 100g</th>
+                      <th className="p-3 text-right">Karbo / 100g</th>
+                      <th className="p-3 text-right">Serat / 100g</th>
+                      <th className="p-3 text-center">Sumber Referensi</th>
                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                    {ingredientsCalculated.map(i => {
+                      const canEdit = hasPermission('menu', 'edit');
+                      return (
+                        <tr key={i.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">
+                            {canEdit ? (
+                              <input
+                                type="text"
+                                list="tkpi-ref-food-list"
+                                defaultValue={i.name}
+                                key={`${i.id}-${i.name}`}
+                                onBlur={e => {
+                                  const nextName = e.target.value.trim();
+                                  if (nextName && nextName !== i.name) {
+                                    handleUpdateNutritionIngredientName(activeMenuId, i.id, nextName);
+                                  } else {
+                                    e.target.value = i.name;
+                                  }
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') e.currentTarget.blur();
+                                }}
+                                className="w-full min-w-[140px] px-1.5 py-0.5 rounded border border-transparent hover:border-slate-300 focus:border-[#1E3A8A] focus:bg-white dark:focus:bg-slate-800 bg-transparent font-bold focus:outline-none"
+                              />
+                            ) : (
+                              i.name
+                            )}
+                          </td>
+                          <td className="p-3 font-sans text-slate-600 dark:text-slate-400">
+                            {i.menuName || i.category}
+                          </td>
+                          <td className="p-3 text-center font-bold">
+                            {canEdit ? (
+                              <div className="inline-flex items-center gap-1">
+                                <FormulaNumericCell
+                                  value={i.netWeightSmall}
+                                  decimals={1}
+                                  allowResetOnEmpty={false}
+                                  ariaLabel={`Berat Kecil ${i.name}`}
+                                  onCommit={v =>
+                                    handleUpdateNutritionIngredientWeight(
+                                      activeMenuId,
+                                      i.id,
+                                      'small',
+                                      v ?? 0
+                                    )
+                                  }
+                                  inputClassName="w-12 text-sky-600 font-bold"
+                                />
+                                <span className="text-slate-400">/</span>
+                                <FormulaNumericCell
+                                  value={i.netWeightLarge}
+                                  decimals={1}
+                                  allowResetOnEmpty={false}
+                                  ariaLabel={`Berat Besar ${i.name}`}
+                                  onCommit={v =>
+                                    handleUpdateNutritionIngredientWeight(
+                                      activeMenuId,
+                                      i.id,
+                                      'large',
+                                      v ?? 0
+                                    )
+                                  }
+                                  inputClassName="w-12 text-indigo-600 font-bold"
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-sky-600">{i.netWeightSmall}g</span> /{' '}
+                                <span className="text-indigo-600">{i.netWeightLarge}g</span>
+                              </>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            {canEdit ? (
+                              <FormulaNumericCell
+                                value={i.calories100g}
+                                decimals={1}
+                                align="right"
+                                allowResetOnEmpty={false}
+                                ariaLabel={`Energi per 100g ${i.name}`}
+                                onCommit={v =>
+                                  handleUpdateIngredientNutritionPer100g(i.id, 'calories100g', v ?? 0)
+                                }
+                                inputClassName="w-14"
+                              />
+                            ) : (
+                              `${i.calories100g} kkal`
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-sky-700 dark:text-sky-400 font-bold">
+                            {canEdit ? (
+                              <FormulaNumericCell
+                                value={i.protein100g}
+                                decimals={2}
+                                align="right"
+                                allowResetOnEmpty={false}
+                                ariaLabel={`Protein per 100g ${i.name}`}
+                                onCommit={v =>
+                                  handleUpdateIngredientNutritionPer100g(i.id, 'protein100g', v ?? 0)
+                                }
+                                inputClassName="w-12 text-sky-700 dark:text-sky-400 font-bold"
+                              />
+                            ) : (
+                              `${i.protein100g} g`
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-amber-700 dark:text-amber-400">
+                            {canEdit ? (
+                              <FormulaNumericCell
+                                value={i.fat100g}
+                                decimals={2}
+                                align="right"
+                                allowResetOnEmpty={false}
+                                ariaLabel={`Lemak per 100g ${i.name}`}
+                                onCommit={v =>
+                                  handleUpdateIngredientNutritionPer100g(i.id, 'fat100g', v ?? 0)
+                                }
+                                inputClassName="w-12 text-amber-700 dark:text-amber-400"
+                              />
+                            ) : (
+                              `${i.fat100g} g`
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-indigo-700 dark:text-indigo-400">
+                            {canEdit ? (
+                              <FormulaNumericCell
+                                value={i.carb100g}
+                                decimals={2}
+                                align="right"
+                                allowResetOnEmpty={false}
+                                ariaLabel={`Karbohidrat per 100g ${i.name}`}
+                                onCommit={v =>
+                                  handleUpdateIngredientNutritionPer100g(i.id, 'carb100g', v ?? 0)
+                                }
+                                inputClassName="w-12 text-indigo-700 dark:text-indigo-400"
+                              />
+                            ) : (
+                              `${i.carb100g} g`
+                            )}
+                          </td>
+                          <td className="p-3 text-right text-emerald-700 dark:text-emerald-400">
+                            {canEdit ? (
+                              <FormulaNumericCell
+                                value={i.fiber100g}
+                                decimals={2}
+                                align="right"
+                                allowResetOnEmpty={false}
+                                ariaLabel={`Serat per 100g ${i.name}`}
+                                onCommit={v =>
+                                  handleUpdateIngredientNutritionPer100g(i.id, 'fiber100g', v ?? 0)
+                                }
+                                inputClassName="w-12 text-emerald-700 dark:text-emerald-400"
+                              />
+                            ) : (
+                              `${i.fiber100g} g`
+                            )}
+                          </td>
+                          <td className="p-3 text-center font-sans text-[10px] text-slate-600 dark:text-slate-400">
+                            {i.referenceSource}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <datalist id="tkpi-ref-food-list">
+                  {foodNameOptions.map(opt => (
+                    <option key={opt} value={opt} />
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </datalist>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3475,6 +4328,550 @@ export const NutritionMenuModule: React.FC = () => {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUBMODUL F: DAFTAR MENU & REKAPITULASI MENU MINGGUAN DAN BULANAN          */}
+      {/* ========================================================================= */}
+      {activeTab === 'daftar_rekap' && (
+        <div className="space-y-5">
+          {/* Summary KPI Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+              <div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+                  <span>Total Menu Terinput</span>
+                  <UtensilsCrossed className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+                </div>
+                <div className="text-2xl font-black text-[#1E3A8A] dark:text-white mt-1.5 tabular-nums">
+                  {filteredRecapMenus.length} Menu
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                {weeklyRecapGroups.length} siklus minggu • {monthlyRecapGroups.length} bulan tercatat
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+              <div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+                  <span>Status Persetujuan</span>
+                  <CheckCircle className="w-4 h-4 text-[#0D9488]" />
+                </div>
+                <div className="text-2xl font-black text-[#0D9488] dark:text-teal-300 mt-1.5 tabular-nums">
+                  {filteredRecapMenus.filter(m => m.status === 'Disetujui Kepala').length} Disetujui
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                {filteredRecapMenus.filter(m => m.status === 'Diverifikasi Gizi').length} Verifikasi Gizi •{' '}
+                {filteredRecapMenus.filter(m => m.status === 'Draft').length} Draft
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+              <div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+                  <span>Rata-Rata Kalori (K / B)</span>
+                  <Apple className="w-4 h-4 text-[#D97706]" />
+                </div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white mt-1.5 tabular-nums">
+                  {filteredRecapMenus.length > 0
+                    ? `${Math.round(
+                        filteredRecapMenus.reduce((s, m) => s + (m.caloriesSmall || 0), 0) /
+                          filteredRecapMenus.length
+                      )} / ${Math.round(
+                        filteredRecapMenus.reduce((s, m) => s + (m.caloriesLarge || 0), 0) /
+                          filteredRecapMenus.length
+                      )}`
+                    : '0 / 0'}{' '}
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-400">kkal</span>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                Porsi Kecil vs Porsi Besar rata-rata
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+              <div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+                  <span>Rata-Rata Food Cost</span>
+                  <Coins className="w-4 h-4 text-[#0D9488]" />
+                </div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white mt-1.5 tabular-nums">
+                  {formatRupiah(
+                    filteredRecapMenus.length > 0
+                      ? Math.round(
+                          filteredRecapMenus.reduce(
+                            (s, m) => s + (m.estimatedCostPerPortion || 0),
+                            0
+                          ) / filteredRecapMenus.length
+                        )
+                      : 0
+                  )}
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                Per porsi dibanding pagu {formatRupiah(avgBudgetCapPerPortion)}
+              </div>
+            </div>
+          </div>
+
+          {/* Filter & View Switch Toolbar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* View Mode Pill Switch */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+              {[
+                { key: 'weekly' as const, label: 'Rekap Mingguan', icon: <CalendarDays className="w-3.5 h-3.5" /> },
+                { key: 'monthly' as const, label: 'Rekap Bulanan', icon: <Calendar className="w-3.5 h-3.5" /> },
+                { key: 'daily' as const, label: 'Daftar Lengkap (Tabel)', icon: <UtensilsCrossed className="w-3.5 h-3.5" /> },
+              ].map(mode => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  onClick={() => setRecapViewMode(mode.key)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all duration-200 cursor-pointer ${
+                    recapViewMode === mode.key
+                      ? 'bg-[#1E3A8A] text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {mode.icon}
+                  <span>{mode.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Filters + Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label="Filter Bulan Menu"
+                value={recapMonthFilter}
+                onChange={e => setRecapMonthFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              >
+                <option value="ALL">Semua Bulan</option>
+                {availableRecapMonths.map(ym => (
+                  <option key={ym} value={ym}>
+                    {formatMonthLabel(ym)}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter Siklus Minggu"
+                value={recapWeekFilter}
+                onChange={e => setRecapWeekFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              >
+                <option value="ALL">Semua Minggu</option>
+                {[1, 2, 3, 4, 5].map(w => (
+                  <option key={w} value={String(w)}>
+                    Minggu ke-{w}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter Status Menu"
+                value={recapStatusFilter}
+                onChange={e => setRecapStatusFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              >
+                <option value="ALL">Semua Status</option>
+                <option value="Draft">Draft</option>
+                <option value="Diverifikasi Gizi">Diverifikasi Gizi</option>
+                <option value="Disetujui Kepala">Disetujui Kepala</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={handleExportMenusExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportMenusPDF}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E11D48] hover:bg-rose-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>PDF</span>
+              </button>
+            </div>
+          </div>
+
+          {/* VIEW 1: REKAPITULASI MINGGUAN */}
+          {recapViewMode === 'weekly' && (
+            <div className="space-y-4">
+              {weeklyRecapGroups.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 p-10 rounded-xl border border-slate-200/80 dark:border-slate-800 text-center text-xs text-slate-600 dark:text-slate-400">
+                  Belum ada data menu sesuai filter bulan/minggu yang dipilih.
+                </div>
+              ) : (
+                weeklyRecapGroups.map(group => (
+                  <div
+                    key={group.key}
+                    className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden"
+                  >
+                    <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200/80 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="px-2.5 py-1 rounded-lg bg-[#1E3A8A] text-white text-xs font-bold">
+                          Minggu ke-{group.weekNumber}
+                        </span>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          {group.monthLabel}
+                        </h4>
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
+                          • {group.items.length} Hari Menu ({group.approvedCount} Disetujui)
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs tabular-nums">
+                        <span className="text-slate-600 dark:text-slate-300">
+                          Rata Kalori K/B: <strong>{group.avgCalSmall} / {group.avgCalLarge} kkal</strong>
+                        </span>
+                        <span className="text-[#0D9488] dark:text-teal-300 font-bold">
+                          Avg Cost: {formatRupiah(group.avgCost)}/porsi
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs tabular-nums">
+                        <thead className="bg-slate-50/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300 uppercase text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
+                          <tr>
+                            <th className="py-2.5 px-4">Tanggal &amp; Kode</th>
+                            <th className="py-2.5 px-4">Menu Lengkap</th>
+                            <th className="py-2.5 px-4 text-center">Kalori (K/B)</th>
+                            <th className="py-2.5 px-4 text-right">Est. Cost/Porsi</th>
+                            <th className="py-2.5 px-4 text-center">Status</th>
+                            <th className="py-2.5 px-4 text-center">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {group.items.map(menu => (
+                            <tr key={menu.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40">
+                              <td className="py-3 px-4 whitespace-nowrap">
+                                <div className="font-bold text-slate-900 dark:text-white font-mono">
+                                  {menu.menuCode}
+                                </div>
+                                <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                                  {menu.dayName}, {formatIndonesianDate(menu.date)}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                  {menu.stapleFood} • {menu.animalProtein}
+                                </div>
+                                <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                                  {menu.plantProtein} • {menu.vegetable} • {menu.fruit}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-center font-mono text-slate-700 dark:text-slate-300">
+                                {menu.caloriesSmall} / {menu.caloriesLarge} kkal
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                                {formatRupiah(menu.estimatedCostPerPortion)}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    menu.status === 'Disetujui Kepala'
+                                      ? 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                      : menu.status === 'Diverifikasi Gizi'
+                                      ? 'bg-blue-100 text-[#1E3A8A] dark:bg-blue-950 dark:text-blue-300'
+                                      : 'bg-amber-100 text-[#D97706] dark:bg-amber-950 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {menu.status}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMenuId(menu.id);
+                                      setActiveTab('menu_bahan');
+                                    }}
+                                    className="px-2 py-1 rounded-md bg-[#1E3A8A]/10 hover:bg-[#1E3A8A]/20 text-[#1E3A8A] dark:text-sky-300 text-[11px] font-bold cursor-pointer"
+                                    title="Buka di Formula Bahan"
+                                  >
+                                    Buka
+                                  </button>
+                                  {menu.status !== 'Disetujui Kepala' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => approveMenuItem(menu.id, currentUser.name)}
+                                      className="p-1.5 rounded-md bg-teal-50 hover:bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300 cursor-pointer"
+                                      title="Verifikasi / Setujui Menu"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditMenu(menu)}
+                                    className="p-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-[#D97706] dark:bg-amber-950 dark:text-amber-300 cursor-pointer"
+                                    title="Edit Menu"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteMenuTarget(menu)}
+                                    className="p-1.5 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950 dark:text-rose-300 cursor-pointer"
+                                    title="Hapus Menu"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* VIEW 2: REKAPITULASI BULANAN */}
+          {recapViewMode === 'monthly' && (
+            <div className="space-y-4">
+              {monthlyRecapGroups.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 p-10 rounded-xl border border-slate-200/80 dark:border-slate-800 text-center text-xs text-slate-600 dark:text-slate-400">
+                  Belum ada data rekap bulanan yang sesuai dengan filter.
+                </div>
+              ) : (
+                monthlyRecapGroups.map(month => (
+                  <div
+                    key={month.monthKey}
+                    className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden"
+                  >
+                    <div className="p-5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-700 grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+                      <div className="md:col-span-2">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+                          <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
+                            Rekap Bulan {month.monthLabel}
+                          </h4>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                          {month.items.length} hari menu • {month.weeksCovered} siklus minggu •{' '}
+                          {month.approvedCount}/{month.items.length} disetujui Kepala SPPG
+                        </p>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                          Akumulasi Target Porsi
+                        </div>
+                        <div className="text-sm font-black text-[#1E3A8A] dark:text-sky-300 tabular-nums">
+                          {formatNumber(month.totalPortionsSum)} porsi
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                          Rata-Rata Gizi &amp; Cost
+                        </div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white tabular-nums">
+                          {month.avgCalSmall}/{month.avgCalLarge} kkal • {month.avgProtein}g Prot
+                        </div>
+                        <div className="text-[11px] font-semibold text-[#0D9488] tabular-nums">
+                          {formatRupiah(month.avgCost)}/porsi
+                        </div>
+                      </div>
+
+                      <div className="text-left md:text-right">
+                        <div className="text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400">
+                          Estimasi Belanja Bulanan
+                        </div>
+                        <div className="text-base font-black text-slate-900 dark:text-white tabular-nums">
+                          {formatRupiah(month.totalBudgetEst)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 divide-y divide-slate-100 dark:divide-slate-800">
+                      {month.items.map(menu => (
+                        <div
+                          key={menu.id}
+                          className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="flex items-start gap-3 min-w-0">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono font-bold text-[#1E3A8A] dark:text-sky-300 shrink-0">
+                              M{menu.cycleWeek || 1} • {menu.menuCode}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 dark:text-white truncate">
+                                {menu.dayName}, {formatIndonesianDate(menu.date)} — {menu.stapleFood} + {menu.animalProtein}
+                              </div>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-400 truncate">
+                                {menu.plantProtein} • {menu.vegetable} • {menu.fruit} • Est. {formatRupiah(menu.estimatedCostPerPortion)}/porsi
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                menu.status === 'Disetujui Kepala'
+                                  ? 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  : 'bg-amber-100 text-[#D97706] dark:bg-amber-950 dark:text-amber-300'
+                              }`}
+                            >
+                              {menu.status}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditMenu(menu)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-[#D97706] border border-amber-200 text-[11px] font-bold cursor-pointer"
+                            >
+                              <Edit className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteMenuTarget(menu)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[11px] font-bold cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* VIEW 3: DAFTAR HARIAN LENGKAP (DATATABLE WITH EDIT & HAPUS) */}
+          {recapViewMode === 'daily' && (
+            <DataTable
+              title="Daftar Lengkap Menu Terencana PLOG"
+              subtitle="Seluruh menu yang diinput PLOG lengkap dengan aksi Edit, Hapus, Setujui, dan Atur Formula Bahan"
+              data={filteredRecapMenus}
+              keyExtractor={item => item.id}
+              stickyFirstColumn
+              searchPlaceholder="Cari kode menu, lauk, atau tanggal..."
+              searchKeys={['menuCode', 'stapleFood', 'animalProtein', 'plantProtein', 'vegetable', 'fruit', 'date']}
+              onExportExcel={handleExportMenusExcel}
+              onExportPDF={handleExportMenusPDF}
+              onPrint={triggerPrint}
+              columns={[
+                {
+                  key: 'menuCode',
+                  header: 'Kode & Tanggal',
+                  render: row => (
+                    <div>
+                      <div className="font-bold text-slate-900 dark:text-white font-mono">
+                        {row.menuCode}
+                      </div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                        M{row.cycleWeek || 1} • {row.dayName}, {formatIndonesianDate(row.date)}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'stapleFood',
+                  header: 'Komposisi Hidangan',
+                  render: row => (
+                    <div className="text-xs">
+                      <div className="font-semibold text-slate-900 dark:text-white">
+                        {row.stapleFood} • {row.animalProtein}
+                      </div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                        {row.plantProtein} • {row.vegetable} • {row.fruit}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'caloriesSmall',
+                  header: 'Kalori (K / B)',
+                  align: 'center',
+                  render: row => (
+                    <span className="font-mono text-slate-800 dark:text-slate-200">
+                      {row.caloriesSmall} / {row.caloriesLarge} kkal
+                    </span>
+                  ),
+                },
+                {
+                  key: 'estimatedCostPerPortion',
+                  header: 'Est. Food Cost',
+                  align: 'right',
+                  render: row => (
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      {formatRupiah(row.estimatedCostPerPortion)}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  align: 'center',
+                  render: row => (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        row.status === 'Disetujui Kepala'
+                          ? 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                          : 'bg-amber-100 text-[#D97706] dark:bg-amber-950 dark:text-amber-300'
+                      }`}
+                    >
+                      {row.status}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: 'Aksi',
+                  sortable: false,
+                  render: row => (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMenuId(row.id);
+                          setActiveTab('menu_bahan');
+                        }}
+                        className="px-2 py-1 rounded-md bg-[#1E3A8A]/10 hover:bg-[#1E3A8A]/20 text-[#1E3A8A] dark:text-sky-300 text-[11px] font-bold cursor-pointer"
+                      >
+                        Formula
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditMenu(row)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-[#D97706] border border-amber-200 text-[11px] font-bold cursor-pointer"
+                      >
+                        <Edit className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteMenuTarget(row)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] border border-rose-200 text-[11px] font-bold cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          )}
         </div>
       )}
 
@@ -4370,6 +5767,366 @@ export const NutritionMenuModule: React.FC = () => {
       >
         <BeneficiaryNutritionTab compactCalculatorOnly />
       </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDIT DATA MENU PLOG                                                */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={Boolean(editingMenuItem)}
+        onClose={() => setEditingMenuItem(null)}
+        title={`Edit Data Menu — ${editingMenuItem?.menuCode || ''}`}
+        subtitle="Perbarui jadwal siklus, komposisi lauk, dan status persetujuan menu PLOG"
+        maxWidth="2xl"
+      >
+        <form onSubmit={handleSaveEditMenu} className="space-y-4">
+          <DynamicFormEditToggleBar
+            formId="menu_form"
+            isEditing={isEditModalSchemaEdit}
+            onToggleEdit={() => setIsEditModalSchemaEdit(v => !v)}
+            compact
+          />
+          {isEditModalSchemaEdit && (
+            <DynamicFormBuilderPanel
+              formId="menu_form"
+              onClose={() => setIsEditModalSchemaEdit(false)}
+            />
+          )}
+
+          <DynamicFormRenderer
+            schema={dynamicFormSchemas.menu_form}
+            values={{
+              ...editMenuForm,
+              ...(editMenuForm.customFields || {}),
+            }}
+            onChange={(key, value, field) => {
+              if (field.isSystem) {
+                setEditMenuForm(prev => ({ ...prev, [key]: value }));
+              } else {
+                setEditMenuForm(prev => ({
+                  ...prev,
+                  customFields: { ...(prev.customFields || {}), [key]: value },
+                }));
+              }
+            }}
+            onUploadError={msg => addToast('error', 'Gagal Unggah Foto', msg)}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Status Persetujuan Menu
+              </label>
+              <select
+                value={editMenuForm.status}
+                onChange={e =>
+                  setEditMenuForm(prev => ({
+                    ...prev,
+                    status: e.target.value as MenuItem['status'],
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                <option value="Draft">Draft</option>
+                <option value="Diverifikasi Gizi">Diverifikasi Gizi</option>
+                <option value="Disetujui Kepala">Disetujui Kepala</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              disabled={isSavingEditMenu}
+              onClick={() => setEditingMenuItem(null)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-50 cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={isSavingEditMenu}
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-[#1E3A8A] hover:bg-blue-800 text-white shadow-xs disabled:opacity-60 cursor-pointer"
+            >
+              {isSavingEditMenu ? 'Menyimpan...' : 'Simpan Perubahan Menu'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: TAMBAH BARIS MENU, BAHAN & KANDUNGAN GIZI */}
+      <Modal
+        isOpen={isAddNutritionRowModalOpen}
+        onClose={() => setIsAddNutritionRowModalOpen(false)}
+        title="Tambah Baris Rincian Kandungan Gizi"
+        subtitle="Isi Menu, Bahan Makanan & Berat (g). Kandungan gizi Porsi Kecil & Porsi Besar terhitung otomatis sesuai referensi TKPI."
+        maxWidth="lg"
+      >
+        <form onSubmit={handleSaveNewNutritionRow} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kolom Menu (Nama Hidangan)
+              </label>
+              <input
+                type="text"
+                list="modal-menu-suggestions"
+                placeholder="Contoh: Telur Dadar Sayur"
+                value={newNutritionRowForm.menuName}
+                onChange={e =>
+                  setNewNutritionRowForm(prev => ({ ...prev, menuName: e.target.value }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              />
+              <datalist id="modal-menu-suggestions">
+                {menuNameSuggestions.map(opt => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kolom Bahan Makanan (TKPI / Ketik Manual) *
+              </label>
+              <input
+                type="text"
+                required
+                list="modal-food-suggestions"
+                placeholder="Contoh: Telur Ayam Ras / Minyak"
+                value={newNutritionRowForm.ingredientName}
+                onChange={e => handleNutritionModalIngredientChange(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              />
+              <datalist id="modal-food-suggestions">
+                {foodNameOptions.map(opt => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kategori Bahan
+              </label>
+              <select
+                value={newNutritionRowForm.category}
+                onChange={e =>
+                  setNewNutritionRowForm(prev => ({ ...prev, category: e.target.value }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                <option value="Makanan Pokok">Makanan Pokok</option>
+                <option value="Lauk Hewani">Lauk Hewani</option>
+                <option value="Lauk Nabati">Lauk Nabati</option>
+                <option value="Sayuran">Sayuran</option>
+                <option value="Buah Segar">Buah Segar</option>
+                <option value="Ekstra / Susu">Ekstra / Susu</option>
+                <option value="Bumbu & Minyak">Bumbu &amp; Minyak</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
+                Berat Porsi Kecil (g) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                required
+                value={newNutritionRowForm.netWeightSmall}
+                onChange={e =>
+                  setNewNutritionRowForm(prev => ({
+                    ...prev,
+                    netWeightSmall: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50/40 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
+                Berat Porsi Besar (g) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                required
+                value={newNutritionRowForm.netWeightLarge}
+                onChange={e =>
+                  setNewNutritionRowForm(prev => ({
+                    ...prev,
+                    netWeightLarge: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-800 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase text-slate-700 dark:text-slate-300">
+                Komposisi Gizi per 100g (Otomatis dari TKPI / Bisa Diedit Manual)
+              </span>
+              <span className="text-[10px] font-mono text-slate-500">
+                {newNutritionRowForm.referenceSource}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
+                  Energi (kkal)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newNutritionRowForm.calories100g}
+                  onChange={e =>
+                    setNewNutritionRowForm(prev => ({
+                      ...prev,
+                      calories100g: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
+                  Protein (g)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newNutritionRowForm.protein100g}
+                  onChange={e =>
+                    setNewNutritionRowForm(prev => ({
+                      ...prev,
+                      protein100g: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
+                  Lemak (g)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newNutritionRowForm.fat100g}
+                  onChange={e =>
+                    setNewNutritionRowForm(prev => ({
+                      ...prev,
+                      fat100g: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
+                  KH (g)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newNutritionRowForm.carb100g}
+                  onChange={e =>
+                    setNewNutritionRowForm(prev => ({
+                      ...prev,
+                      carb100g: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
+                  Serat (mg/100g)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newNutritionRowForm.fiber100g}
+                  onChange={e =>
+                    setNewNutritionRowForm(prev => ({
+                      ...prev,
+                      fiber100g: Math.max(0, Number(e.target.value) || 0),
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Live Calculation Preview */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800">
+              <div className="font-bold text-sky-900 dark:text-sky-200 mb-1">
+                Pratinjau Otomatis Porsi Kecil ({formatNutrCell(newNutritionRowForm.netWeightSmall, 1)}g)
+              </div>
+              <div className="font-mono text-sky-800 dark:text-sky-300">
+                E: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.calories100g, 2)} kkal |{' '}
+                P: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
+                L: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
+                KH: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
+                S: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fiber100g, 2)}
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
+              <div className="font-bold text-indigo-900 dark:text-indigo-200 mb-1">
+                Pratinjau Otomatis Porsi Besar ({formatNutrCell(newNutritionRowForm.netWeightLarge, 1)}g)
+              </div>
+              <div className="font-mono text-indigo-800 dark:text-indigo-300">
+                E: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.calories100g, 2)} kkal |{' '}
+                P: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
+                L: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
+                KH: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
+                S: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fiber100g, 2)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsAddNutritionRowModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 text-xs font-bold rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white shadow-xs cursor-pointer"
+            >
+              Simpan &amp; Hitung Otomatis
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* CONFIRM DELETE MENU DIALOG */}
+      <ConfirmDialog
+        isOpen={Boolean(deleteMenuTarget)}
+        onClose={() => setDeleteMenuTarget(null)}
+        onConfirm={handleConfirmDeleteMenu}
+        title="Hapus Data Menu PLOG?"
+        message={`Anda yakin ingin menghapus menu "${deleteMenuTarget?.menuCode || ''} (${deleteMenuTarget?.stapleFood || ''} + ${deleteMenuTarget?.animalProtein || ''})" tanggal ${deleteMenuTarget?.date || ''}? Data resep terkait juga akan disinkronkan ulang.`}
+        confirmLabel="Ya, Hapus Menu"
+        isDestructive
+      />
     </div>
   );
 };

@@ -358,7 +358,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 h-14 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 px-3 sm:px-5 lg:px-6 flex items-center justify-between gap-2.5 sm:gap-4 transition-colors">
+    <header className="sticky top-0 z-30 h-14 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 px-3 sm:px-5 lg:px-6 flex items-center justify-between gap-2.5 sm:gap-4 transition-all duration-200 ease-in-out">
       {/* Left Zone: Sidebar Toggle + App Name / Breadcrumb Trail */}
       <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 shrink-0">
         <button
@@ -375,7 +375,7 @@ export const Header: React.FC<HeaderProps> = ({
               ? 'Tampilkan Sidebar Navigasi'
               : 'Sembunyikan / Tampilkan Sidebar Navigasi'
           }
-          className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 border border-slate-200/90 dark:border-slate-700 transition-colors shrink-0 cursor-pointer"
+          className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-[#1E3A8A] dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 transition-all duration-200 shrink-0 cursor-pointer"
         >
           <span className="lg:hidden flex items-center justify-center">
             {isMobileSidebarOpen ? (
@@ -398,10 +398,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onNavigateHome}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md font-bold text-slate-800 dark:text-slate-100 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md font-bold text-slate-800 dark:text-slate-100 hover:bg-blue-50 hover:text-[#1E3A8A] dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             title="Kembali ke Dashboard Utama"
           >
-            <Home className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 shrink-0" />
+            <Home className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
             <span>E-SPPG TMG2</span>
           </button>
 
@@ -409,7 +409,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <span
             aria-current={subItemTitle ? undefined : 'page'}
-            className="font-semibold text-slate-900 dark:text-white truncate max-w-[160px] md:max-w-[220px] lg:max-w-[280px]"
+            className="font-semibold text-slate-800 dark:text-white truncate max-w-[160px] md:max-w-[220px] lg:max-w-[280px]"
           >
             {activeModuleTitle}
           </span>
@@ -419,7 +419,7 @@ export const Header: React.FC<HeaderProps> = ({
               <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
               <span
                 aria-current="page"
-                className="font-semibold text-blue-700 dark:text-sky-400 truncate max-w-[220px]"
+                className="font-semibold text-[#1E3A8A] dark:text-sky-400 truncate max-w-[220px]"
               >
                 {subItemTitle}
               </span>
@@ -449,7 +449,7 @@ export const Header: React.FC<HeaderProps> = ({
             onKeyDown={handleSearchKeyDown}
             placeholder="Cari cepat modul, sekolah, bahan..."
             aria-label="Pencarian cepat di header"
-            className="w-full h-9 pl-9 pr-14 text-xs sm:text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-900 focus:border-blue-500 dark:focus:border-sky-500 focus:ring-2 focus:ring-blue-500/15 focus:outline-none transition-all"
+            className="w-full h-9 pl-9 pr-14 text-xs sm:text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:border-[#1E3A8A] dark:focus:border-sky-500 focus:ring-2 focus:ring-[#1E3A8A]/15 focus:outline-none transition-all duration-200"
           />
           {searchQuery ? (
             <button
@@ -459,12 +459,12 @@ export const Header: React.FC<HeaderProps> = ({
                 searchInputRef.current?.focus();
               }}
               aria-label="Hapus kata kunci pencarian"
-              className="absolute right-2.5 p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-700 transition cursor-pointer"
+              className="absolute right-2.5 p-1 rounded-md text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-700 transition cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded absolute right-2 pointer-events-none">
+            <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded absolute right-2 pointer-events-none">
               Ctrl K
             </kbd>
           )}
@@ -472,10 +472,10 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Search Results Dropdown */}
         {isSearchOpen && searchQuery.trim().length > 0 && (
-          <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 overflow-hidden z-50">
+          <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 overflow-hidden z-50">
             {searchResults.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
-                Tidak ditemukan hasil untuk "<strong className="text-slate-700 dark:text-slate-200">{searchQuery}</strong>"
+              <div className="px-4 py-6 text-center text-xs text-slate-600 dark:text-slate-400">
+                Tidak ditemukan hasil untuk "<strong className="text-slate-800 dark:text-slate-200">{searchQuery}</strong>"
               </div>
             ) : (
               <ul className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 py-1">
@@ -487,7 +487,7 @@ export const Header: React.FC<HeaderProps> = ({
                         type="button"
                         onMouseEnter={() => setHighlightedIndex(idx)}
                         onClick={() => handleSelectSearchResult(item)}
-                        className={`w-full px-3.5 py-2.5 flex items-center justify-between gap-3 text-left transition cursor-pointer ${
+                        className={`w-full px-3.5 py-2.5 flex items-center justify-between gap-3 text-left transition-all duration-150 cursor-pointer ${
                           isHighlighted
                             ? 'bg-blue-50 dark:bg-sky-950/50'
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
@@ -501,14 +501,14 @@ export const Header: React.FC<HeaderProps> = ({
                             <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
                               {item.title}
                             </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            <div className="text-[11px] text-slate-600 dark:text-slate-400 truncate">
                               {item.subtitle}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                             {item.category}
                           </span>
                           <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
@@ -529,18 +529,18 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={handleRefreshClick}
-          className="inline-flex items-center justify-center w-9 h-9 text-slate-500 hover:text-blue-700 dark:text-slate-400 dark:hover:text-sky-300 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors border border-transparent hover:border-blue-100 dark:hover:border-slate-700 cursor-pointer"
+          className="inline-flex items-center justify-center w-9 h-9 text-slate-600 hover:text-[#1E3A8A] dark:text-slate-400 dark:hover:text-sky-300 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors border border-transparent hover:border-blue-100 dark:hover:border-slate-700 cursor-pointer"
           aria-label="Segarkan data"
           title="Segarkan Data"
         >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600 dark:text-sky-400' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#1E3A8A] dark:text-sky-400' : ''}`} />
         </button>
 
         {/* Dark Mode Toggle */}
         <button
           type="button"
           onClick={toggleDarkMode}
-          className="inline-flex items-center justify-center w-9 h-9 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+          className="inline-flex items-center justify-center w-9 h-9 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           aria-label="Ubah mode gelap/terang"
           title={darkMode ? 'Mode Terang' : 'Mode Gelap'}
         >
@@ -552,13 +552,13 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => setShowNotifications(prev => !prev)}
-            className="inline-flex items-center justify-center w-9 h-9 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors relative cursor-pointer"
+            className="inline-flex items-center justify-center w-9 h-9 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors relative cursor-pointer"
             aria-label="Notifikasi sistem"
             title="Notifikasi Operasional"
           >
             <Bell className="w-4 h-4" />
             {totalAlerts > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center tabular-nums shadow-xs">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 bg-[#E11D48] text-white text-[9px] font-bold rounded-full flex items-center justify-center tabular-nums shadow-xs">
                 {totalAlerts}
               </span>
             )}
@@ -566,15 +566,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notification Dropdown */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 p-4 z-50">
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 p-4 z-50">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  <AlertTriangle className="w-4 h-4 text-[#D97706]" />
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                     Peringatan Operasional
                   </h4>
                 </div>
-                <span className="text-[10px] bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200/80 dark:border-rose-800 px-2 py-0.5 rounded-full font-bold tabular-nums">
+                <span className="text-[10px] bg-rose-50 dark:bg-rose-950 text-[#E11D48] dark:text-rose-300 border border-rose-200/80 dark:border-rose-800 px-2 py-0.5 rounded-full font-bold tabular-nums">
                   {totalAlerts} Butuh Tindakan
                 </span>
               </div>
@@ -604,28 +604,28 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {pendingQCOrder.length > 0 && (
                   <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg text-xs">
-                    <div className="font-bold text-blue-900 dark:text-blue-300">
+                    <div className="font-bold text-[#1E3A8A] dark:text-blue-300">
                       Pemeriksaan QC Belum Selesai:
                     </div>
-                    <p className="text-[11px] text-blue-700 dark:text-blue-400 mt-0.5">
+                    <p className="text-[11px] text-blue-800 dark:text-blue-400 mt-0.5">
                       Bahan baku yang tiba memerlukan uji fisik suhu & organoleptik.
                     </p>
                   </div>
                 )}
 
                 {absentVolunteers.length > 0 && (
-                  <div className="p-2.5 bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900 rounded-lg text-xs">
-                    <div className="font-bold text-orange-800 dark:text-orange-300">
+                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg text-xs">
+                    <div className="font-bold text-amber-800 dark:text-amber-300">
                       Relawan Tidak Hadir Hari Ini:
                     </div>
-                    <p className="text-[11px] text-orange-700 dark:text-orange-400 mt-0.5">
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
                       {absentVolunteers.map(v => `${v.volunteerName} (${v.status} - Divisi ${v.division})`).join(', ')}
                     </p>
                   </div>
                 )}
 
                 {totalAlerts === 0 && (
-                  <div className="py-6 text-center text-xs text-slate-500">
+                  <div className="py-6 text-center text-xs text-slate-600 dark:text-slate-400">
                     Semua sistem dan alur operasional berjalan normal tanpa kendala.
                   </div>
                 )}
@@ -635,7 +635,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowNotifications(false)}
-                  className="text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
+                  className="text-[11px] text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 font-medium cursor-pointer"
                 >
                   Tutup Notifikasi
                 </button>
@@ -650,7 +650,7 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={logout}
           title="Keluar dari sistem"
           aria-label="Keluar dari sistem"
-          className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-rose-700 hover:bg-rose-50 hover:border-rose-200 dark:hover:text-rose-300 dark:hover:bg-rose-950/50 dark:hover:border-rose-800 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          className="inline-flex items-center justify-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-[#E11D48] hover:bg-rose-50 hover:border-rose-200 dark:hover:text-rose-300 dark:hover:bg-rose-950/50 dark:hover:border-rose-800 text-xs font-semibold transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           <span className="hidden sm:inline">Keluar</span>
