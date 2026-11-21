@@ -127,9 +127,9 @@ import {
   reconcilePurchaseOrdersWithQC,
   reconcileInventoryFromQualityControl,
 } from './supplyChainSync';
-import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType } from './firebase';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 
 export interface ToastMessage {
   id: string;
@@ -144,7 +144,11 @@ interface AppContextType {
   isAuthenticated: boolean;
   authReady: boolean;
   canSwitchRole: boolean;
-  loginWithProfile: (user: UserProfile, rememberMe?: boolean) => void;
+  loginWithProfile: (
+    user: UserProfile,
+    rememberMe?: boolean,
+    options?: { isDemoSession?: boolean }
+  ) => void;
   logout: () => Promise<void>;
   switchRole: (role: RoleType) => void;
   hasPermission: (module: ModuleKey, action: ActionPermission) => boolean;
@@ -169,6 +173,12 @@ interface AppContextType {
     allowGoogleLogin: boolean;
     notes?: string;
   }) => Promise<boolean>;
+  registerSelfWebAccessUser: (payload: {
+    name: string;
+    email: string;
+    password: string;
+    firebaseUid?: string;
+  }) => Promise<WebAccessUser | null>;
   updateWebAccessUser: (
     id: string,
     updates: Partial<Omit<WebAccessUser, 'id' | 'passwordHash'>> & { newPassword?: string }
@@ -1745,6 +1755,18 @@ function readStoredWebAccessPolicy(): WebAccessPolicy {
   }
 }
 
+function resolveDivisionForRole(role: RoleType, explicitDivision?: string): string | undefined {
+  if (explicitDivision && explicitDivision.trim()) return explicitDivision.trim();
+  const map: Partial<Record<RoleType, string>> = {
+    'Relawan Div. Persiapan': 'Persiapan',
+    'Relawan Div. Pengolahan': 'Pengolahan',
+    'Relawan Div. Pemorsian': 'Pemorsian',
+    'Relawan Div. Distribusi': 'Distribusi',
+    'Relawan Div. Cuci Ompreng': 'Cuci Ompreng',
+  };
+  return map[role];
+}
+
 function validateStoredSessionAgainstPolicy(
   usersList: WebAccessUser[],
   policy: WebAccessPolicy
@@ -1763,6 +1785,35 @@ function validateStoredSessionAgainstPolicy(
 
     const emailLower = verified.email.toLowerCase();
     const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+
+    if (verified.isDemoSession) {
+      if (!policy.allowDemoPreview) {
+        clearStoredSessionStorage();
+        return null;
+      }
+      let savedUser: UserProfile | null = null;
+      try {
+        const rawUser = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+        if (rawUser) savedUser = JSON.parse(rawUser);
+      } catch {
+        savedUser = null;
+      }
+      const matchedDemo = initialUsers.find(u => u.email.toLowerCase() === emailLower);
+      const demoRole = (matchedDemo?.role || verified.role) as RoleType;
+      const isOriginAdmin = demoRole === 'Admin Utama' || isSuperAdmin;
+      const demoProfile: UserProfile =
+        isOriginAdmin && savedUser && savedUser.isActive
+          ? savedUser
+          : matchedDemo || {
+              uid: verified.uid,
+              name: verified.email.split('@')[0],
+              email: verified.email,
+              role: demoRole,
+              isActive: true,
+            };
+      return { session: verified, user: demoProfile, isOriginAdmin };
+    }
+
     const webEntry = usersList.find(u => u.email.trim().toLowerCase() === emailLower);
 
     if (webEntry) {
@@ -2610,8 +2661,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         localStorage.setItem(key, serialized);
         return true;
-      } catch (err2) {
-        console.warn(`LocalStorage write skipped for ${key} (quota/access error):`, err2);
+      } catch {
+        const criticalKeys = new Set<string>([
+          'esppg_web_access_users_v1',
+          'esppg_web_access_policy_v1',
+          AUTH_SESSION_STORAGE_KEY,
+          CURRENT_USER_STORAGE_KEY,
+          ROLE_MODULE_ACCESS_STORAGE_KEY,
+          'esppg_role_permissions',
+        ]);
+        if (criticalKeys.has(key)) {
+          try {
+            // Reclaim space aggressively so auth & login access records never drop silently
+            const rawLogs = localStorage.getItem('esppg_audit_logs');
+            if (rawLogs) {
+              const parsed = JSON.parse(rawLogs);
+              if (Array.isArray(parsed)) {
+                localStorage.setItem('esppg_audit_logs', JSON.stringify(parsed.slice(0, 5)));
+              }
+            }
+            const heavyArrayKeys = [
+              'esppg_distribution_deliveries',
+              'esppg_ompreng_returns',
+              'esppg_prep_records',
+              'esppg_cooking_records',
+              'esppg_portioning_records',
+              'esppg_qc_records',
+              'esppg_fuel_logs',
+              'esppg_washing_waste_records',
+              'esppg_letters',
+              'esppg_outgoing_docs',
+              'esppg_incoming_letters',
+            ];
+            for (const heavyKey of heavyArrayKeys) {
+              const rawVal = localStorage.getItem(heavyKey);
+              if (rawVal && rawVal.length > 80000 && rawVal.includes('data:')) {
+                const stripped = rawVal.replace(/"data:[^"]+"/g, '""');
+                localStorage.setItem(heavyKey, stripped);
+              }
+            }
+            localStorage.setItem(key, serialized);
+            return true;
+          } catch (errCritical) {
+            console.warn(`Critical LocalStorage write failed for ${key}:`, errCritical);
+            return false;
+          }
+        }
         return false;
       }
     }
@@ -2875,13 +2970,141 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 1500);
 
     const unsubscribe = onAuthStateChanged(auth, async fbUser => {
-      const latestUsers = webAccessUsersRef.current;
-      const latestPolicy = webAccessPolicyRef.current;
+      let latestUsers = [...webAccessUsersRef.current];
+      let latestPolicy = { ...webAccessPolicyRef.current };
 
       if (fbUser && !explicitLogoutRef.current) {
         const emailLower = (fbUser.email || '').trim().toLowerCase();
         const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
-        const webEntry = latestUsers.find(u => u.email.toLowerCase() === emailLower);
+
+        // 1. Hydrate web_access_policy & user profile from Firestore before evaluating whitelist/block status
+        try {
+          const [policySnap, selfUserSnap] = await Promise.all([
+            getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
+            getDoc(doc(db, 'users', fbUser.uid)).catch(() => null),
+          ]);
+
+          if (policySnap && policySnap.exists()) {
+            const pData = policySnap.data();
+            latestPolicy = {
+              strictWhitelistOnly:
+                typeof pData.strictWhitelistOnly === 'boolean'
+                  ? pData.strictWhitelistOnly
+                  : latestPolicy.strictWhitelistOnly,
+              allowSelfRegistration:
+                typeof pData.allowSelfRegistration === 'boolean'
+                  ? pData.allowSelfRegistration
+                  : latestPolicy.allowSelfRegistration,
+              allowDemoPreview:
+                typeof pData.allowDemoPreview === 'boolean'
+                  ? pData.allowDemoPreview
+                  : latestPolicy.allowDemoPreview,
+            };
+            webAccessPolicyRef.current = latestPolicy;
+            setWebAccessPolicy(latestPolicy);
+            safeWriteLocalStorage('esppg_web_access_policy_v1', JSON.stringify(latestPolicy));
+          }
+
+          let isCloudAdmin = isSuperAdmin;
+          if (selfUserSnap && selfUserSnap.exists()) {
+            const uData = selfUserSnap.data();
+            const docEmail = (uData.email || fbUser.email || '').trim().toLowerCase();
+            if (docEmail && uData.roleName) {
+              if (uData.roleName === 'Admin Utama' || uData.roleName === 'Kepala SPPG') {
+                isCloudAdmin = true;
+              }
+              const hydratedEntry: WebAccessUser = {
+                id: uData.webAccessId || `wau-${fbUser.uid}`,
+                firebaseUid: fbUser.uid,
+                name: uData.name || fbUser.displayName || docEmail.split('@')[0],
+                email: docEmail,
+                role: (isProtectedSuperAdminEmail(docEmail) ? 'Admin Utama' : uData.roleName) as RoleType,
+                division: uData.division || undefined,
+                supplierId: uData.supplierId || undefined,
+                supplierName: uData.supplierName || undefined,
+                passwordHash:
+                  typeof uData.passwordHash === 'string' ? uData.passwordHash : '',
+                isActive: typeof uData.isActive === 'boolean' ? uData.isActive : true,
+                allowGoogleLogin:
+                  typeof uData.allowGoogleLogin === 'boolean' ? uData.allowGoogleLogin : true,
+                isProtectedAdmin: isProtectedSuperAdminEmail(docEmail),
+                createdAt: uData.createdAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
+                createdBy: uData.createdBy || 'Firestore Sync',
+                updatedAt: uData.updatedAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
+                updatedBy: uData.updatedBy || 'Firestore Sync',
+                lastLoginAt: uData.lastLoginAt || undefined,
+                notes: uData.notes || undefined,
+              };
+              const idx = latestUsers.findIndex(u => u.email.trim().toLowerCase() === docEmail);
+              if (idx >= 0) {
+                latestUsers[idx] = {
+                  ...latestUsers[idx],
+                  ...hydratedEntry,
+                  passwordHash: hydratedEntry.passwordHash || latestUsers[idx].passwordHash,
+                };
+              } else {
+                latestUsers = mergeProtectedAdmins([...latestUsers, hydratedEntry]);
+              }
+            }
+          }
+
+          if (isCloudAdmin) {
+            const usersSnap = await getDocs(
+              query(collection(db, 'users'), where('sppgId', '==', 'GFBQSYXD'))
+            ).catch(() => null);
+            if (usersSnap && !usersSnap.empty) {
+              const nextMap = new Map<string, WebAccessUser>();
+              latestUsers.forEach(u => nextMap.set(u.email.trim().toLowerCase(), u));
+              usersSnap.forEach(docSnap => {
+                const uData = docSnap.data();
+                const docEmail = typeof uData.email === 'string' ? uData.email.trim().toLowerCase() : '';
+                if (!docEmail || !uData.roleName) return;
+                const existing = nextMap.get(docEmail);
+                const mergedUser: WebAccessUser = {
+                  id: docSnap.id.startsWith('wau_')
+                    ? docSnap.id.replace(/^wau_/, '')
+                    : uData.webAccessId || existing?.id || docSnap.id,
+                  firebaseUid: uData.firebaseUid || (!docSnap.id.startsWith('wau_') ? docSnap.id : existing?.firebaseUid),
+                  name: uData.name || existing?.name || docEmail.split('@')[0],
+                  email: docEmail,
+                  role: (isProtectedSuperAdminEmail(docEmail) ? 'Admin Utama' : uData.roleName) as RoleType,
+                  division: uData.division || existing?.division,
+                  supplierId: uData.supplierId || existing?.supplierId,
+                  supplierName: uData.supplierName || existing?.supplierName,
+                  passwordHash:
+                    typeof uData.passwordHash === 'string' && uData.passwordHash
+                      ? uData.passwordHash
+                      : existing?.passwordHash || '',
+                  isActive:
+                    typeof uData.isActive === 'boolean'
+                      ? uData.isActive
+                      : existing?.isActive ?? true,
+                  allowGoogleLogin:
+                    typeof uData.allowGoogleLogin === 'boolean'
+                      ? uData.allowGoogleLogin
+                      : existing?.allowGoogleLogin ?? true,
+                  isProtectedAdmin: isProtectedSuperAdminEmail(docEmail),
+                  createdAt: uData.createdAt || existing?.createdAt || '',
+                  createdBy: uData.createdBy || existing?.createdBy || 'Firestore Sync',
+                  updatedAt: uData.updatedAt || existing?.updatedAt || '',
+                  updatedBy: uData.updatedBy || existing?.updatedBy || 'Firestore Sync',
+                  lastLoginAt: uData.lastLoginAt || existing?.lastLoginAt,
+                  notes: uData.notes || existing?.notes,
+                };
+                nextMap.set(docEmail, mergedUser);
+              });
+              latestUsers = mergeProtectedAdmins(Array.from(nextMap.values()));
+            }
+          }
+
+          webAccessUsersRef.current = latestUsers;
+          setWebAccessUsers(latestUsers);
+          safeWriteLocalStorage('esppg_web_access_users_v1', JSON.stringify(latestUsers));
+        } catch {
+          // Non-blocking fallback to local state
+        }
+
+        const webEntry = latestUsers.find(u => u.email.trim().toLowerCase() === emailLower);
         const matched = fbUser.email ? resolveUserByIdentifier(fbUser.email) : undefined;
 
         const isBlocked =
@@ -2910,7 +3133,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             name: webEntry.name || fbUser.displayName || webEntry.email,
             email: webEntry.email,
             role: isSuperAdmin ? 'Admin Utama' : webEntry.role,
-            division: webEntry.division,
+            division: resolveDivisionForRole(
+              isSuperAdmin ? 'Admin Utama' : webEntry.role,
+              webEntry.division
+            ),
             supplierId: webEntry.supplierId,
             supplierName: webEntry.supplierName,
             isActive: webEntry.isActive,
@@ -2939,7 +3165,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role: resolvedProfile.role,
             rememberMe: true,
           });
-          localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(signed));
+          safeWriteLocalStorage(AUTH_SESSION_STORAGE_KEY, JSON.stringify(signed));
         }
 
         const originAdmin = resolvedProfile.role === 'Admin Utama' || isSuperAdmin;
@@ -3192,9 +3418,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch {
           // Ignore
         }
+      } else if (e.key === 'esppg_web_access_users_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            const merged = mergeProtectedAdmins(parsed);
+            webAccessUsersRef.current = merged;
+            setWebAccessUsers(merged);
+          }
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_web_access_policy_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            const nextPol = { ...DEFAULT_WEB_ACCESS_POLICY, ...parsed };
+            webAccessPolicyRef.current = nextPol;
+            setWebAccessPolicy(nextPol);
+          }
+        } catch {
+          // Ignore
+        }
       }
 
-      if (e.key === AUTH_SESSION_STORAGE_KEY || e.key === null) {
+      if (
+        e.key === AUTH_SESSION_STORAGE_KEY ||
+        e.key === 'esppg_web_access_users_v1' ||
+        e.key === 'esppg_web_access_policy_v1' ||
+        e.key === null
+      ) {
         if (!auth.currentUser) {
           const verified = validateStoredSessionAgainstPolicy(
             webAccessUsersRef.current,
@@ -3205,6 +3458,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setCurrentUser(GUEST_UNAUTHENTICATED_USER);
             setIsOriginAdminSession(false);
             setIsAuthenticated(false);
+          } else {
+            setCurrentUser(verified.user);
+            setIsOriginAdminSession(verified.isOriginAdmin);
+            setIsAuthenticated(true);
           }
         }
       }
@@ -3343,7 +3600,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (auth.currentUser) {
       const emailLower = (auth.currentUser.email || '').trim().toLowerCase();
       const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
-      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const webEntry = webAccessUsers.find(u => u.email.trim().toLowerCase() === emailLower);
       const isBlocked =
         (webEntry && !webEntry.isActive && !isSuperAdmin) ||
         (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin);
@@ -3366,27 +3623,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [authReady, isAuthenticated, webAccessUsers, webAccessPolicy]);
 
-  const loginWithProfile = (user: UserProfile, rememberMe: boolean = false) => {
+  const loginWithProfile = (
+    user: UserProfile,
+    rememberMe: boolean = false,
+    options?: { isDemoSession?: boolean }
+  ) => {
     explicitLogoutRef.current = false;
+    const isDemoSession = Boolean(options?.isDemoSession);
     const isSuperAdmin = user.role === 'Admin Utama' || isProtectedSuperAdminEmail(user.email);
-    setCurrentUser(user);
-    setIsOriginAdminSession(isSuperAdmin);
-    setIsAuthenticated(true);
     const signedSession = createSignedAuthSession({
       uid: user.uid,
       email: user.email,
       role: user.role,
       rememberMe,
+      isDemoSession,
     });
     const payload = JSON.stringify(signedSession);
+
     if (rememberMe) {
-      localStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
-      sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      safeWriteLocalStorage(AUTH_SESSION_STORAGE_KEY, payload);
+      try {
+        sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      } catch {
+        // Ignore
+      }
     } else {
-      sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
-      localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      let wroteSession = false;
+      try {
+        sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, payload);
+        wroteSession = true;
+      } catch {
+        wroteSession = false;
+      }
+      if (!wroteSession) {
+        safeWriteLocalStorage(AUTH_SESSION_STORAGE_KEY, payload);
+      } else {
+        try {
+          localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+        } catch {
+          // Ignore
+        }
+      }
     }
-    localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+
+    safeWriteLocalStorage(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+
+    setCurrentUser(user);
+    setIsOriginAdminSession(isSuperAdmin);
+    setIsAuthenticated(true);
 
     const loginAudit: AuditLog = {
       id: 'aud-' + Date.now(),
@@ -3396,7 +3680,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       userRole: user.role,
       action: 'LOGIN',
       module: 'auth',
-      details: `Berhasil masuk ke sistem E-SPPG TMG2 sebagai ${user.name} (${user.role})`,
+      details: `${isDemoSession ? '[Pratinjau] ' : ''}Berhasil masuk ke sistem E-SPPG TMG2 sebagai ${user.name} (${user.role})`,
     };
     setAuditLogs(prev => [loginAudit, ...prev]);
   };
@@ -3435,60 +3719,119 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       name: `Pengguna (${role})`,
       email: `${role.toLowerCase().replace(/[^a-z0-9]/g, '')}@sppg-tmg2.id`,
       role,
+      division: resolveDivisionForRole(role),
       isActive: true,
     };
     setCurrentUser(matchedUser);
+    safeWriteLocalStorage(CURRENT_USER_STORAGE_KEY, JSON.stringify(matchedUser));
     logAudit('LOGIN', 'auth', `Simulasi ganti peran aktif ke ${role}`);
     addToast('info', 'Peran Diperbarui', `Sekarang Anda bertindak sebagai: ${role}`);
   };
 
   // Manual Web Login Access Management (Admin Utama Only)
+  const canManageWebAccess = () =>
+    currentUser.role === 'Admin Utama' ||
+    isOriginAdminSession ||
+    isProtectedSuperAdminEmail(currentUser.email);
+
+  const provisionSecondaryFirebaseAccount = async (
+    email: string,
+    password: string
+  ): Promise<string | undefined> => {
+    if (!password || password.length < 6) return undefined;
+    try {
+      const secAuth = getSecondaryAuth();
+      const cred = await createUserWithEmailAndPassword(secAuth, email, password);
+      const uid = cred.user.uid;
+      await signOut(secAuth).catch(() => {});
+      return uid;
+    } catch {
+      return undefined;
+    }
+  };
+
   const syncWebAccessToFirestoreSafely = async (userRecord: WebAccessUser) => {
     if (!auth.currentUser) return;
     try {
       const safeDocId = `wau_${userRecord.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const basePayload = {
+        sppgId: 'GFBQSYXD',
+        webAccessId: userRecord.id,
+        firebaseUid: userRecord.firebaseUid || '',
+        name: userRecord.name,
+        email: userRecord.email,
+        roleId: userRecord.role === 'Admin Utama' ? 'role-admin' : 'role-staff',
+        roleName: userRecord.role,
+        division: userRecord.division || '',
+        supplierId: userRecord.supplierId || '',
+        supplierName: userRecord.supplierName || '',
+        passwordHash: userRecord.passwordHash || '',
+        isActive: userRecord.isActive,
+        allowGoogleLogin: userRecord.allowGoogleLogin,
+        isProtectedAdmin: Boolean(userRecord.isProtectedAdmin),
+        notes: userRecord.notes || '',
+        status: userRecord.isActive ? 'Aktif' : 'Nonaktif',
+        createdAt: userRecord.createdAt,
+        createdBy: userRecord.createdBy,
+        updatedAt: userRecord.updatedAt || new Date().toISOString(),
+        updatedBy: userRecord.updatedBy || currentUser.name,
+        lastLoginAt: userRecord.lastLoginAt || '',
+      };
+
       await setDoc(
         doc(db, 'users', safeDocId),
         {
           id: safeDocId,
-          sppgId: 'GFBQSYXD',
           uid: safeDocId,
-          name: userRecord.name,
-          email: userRecord.email,
-          roleId: userRecord.role === 'Admin Utama' ? 'role-admin' : 'role-staff',
-          roleName: userRecord.role,
-          division: userRecord.division || '',
-          isActive: userRecord.isActive,
-          allowGoogleLogin: userRecord.allowGoogleLogin,
-          status: userRecord.isActive ? 'Aktif' : 'Nonaktif',
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser.name,
+          ...basePayload,
         },
         { merge: true }
       );
+
+      if (userRecord.firebaseUid) {
+        const cleanFbUid = userRecord.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_');
+        await setDoc(
+          doc(db, 'users', cleanFbUid),
+          {
+            id: cleanFbUid,
+            uid: cleanFbUid,
+            ...basePayload,
+          },
+          { merge: true }
+        );
+      }
     } catch {
       // Non-blocking fallback when offline or guest Firebase session
     }
   };
 
+  const persistWebAccessUsers = (nextUsers: WebAccessUser[]): boolean => {
+    const normalized = mergeProtectedAdmins(nextUsers);
+    webAccessUsersRef.current = normalized;
+    setWebAccessUsers(normalized);
+    return safeWriteLocalStorage('esppg_web_access_users_v1', JSON.stringify(normalized));
+  };
+
   const findWebAccessUser = (identifier: string): WebAccessUser | undefined => {
     const normalized = identifier.trim().toLowerCase();
     if (!normalized) return undefined;
-    return webAccessUsers.find(
-      u =>
-        u.email.toLowerCase() === normalized ||
-        u.email.split('@')[0].toLowerCase() === normalized
-    );
+    const list = webAccessUsersRef.current;
+    const exactEmail = list.find(u => u.email.trim().toLowerCase() === normalized);
+    if (exactEmail) return exactEmail;
+    return list.find(u => u.email.trim().split('@')[0].toLowerCase() === normalized);
   };
 
   const recordWebLoginTimestamp = (email: string) => {
     const normalized = email.trim().toLowerCase();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    setWebAccessUsers(prev =>
-      prev.map(u =>
-        u.email.toLowerCase() === normalized ? { ...u, lastLoginAt: now } : u
-      )
+    const nextUsers = webAccessUsersRef.current.map(u =>
+      u.email.trim().toLowerCase() === normalized ? { ...u, lastLoginAt: now } : u
     );
+    persistWebAccessUsers(nextUsers);
+    const updatedTarget = nextUsers.find(u => u.email.trim().toLowerCase() === normalized);
+    if (updatedTarget) {
+      syncWebAccessToFirestoreSafely(updatedTarget).catch(() => {});
+    }
   };
 
   const addWebAccessUser = async (payload: {
@@ -3503,35 +3846,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     allowGoogleLogin: boolean;
     notes?: string;
   }): Promise<boolean> => {
-    if (currentUser.role !== 'Admin Utama') {
+    if (!canManageWebAccess()) {
       addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mendaftarkan akses login.');
       return false;
     }
     const cleanEmail = payload.email.trim().toLowerCase();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      addToast('error', 'Email Tidak Valid', 'Masukkan alamat email yang valid.');
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailPattern.test(cleanEmail)) {
+      addToast('error', 'Email Tidak Valid', 'Masukkan alamat email yang valid (contoh: nama@domain.id).');
       return false;
     }
-    if (!payload.password || payload.password.length < 4) {
+    if (!payload.password || payload.password.trim().length < 4) {
       addToast('error', 'Kata Sandi Terlalu Pendek', 'Kata sandi minimal 4 karakter.');
       return false;
     }
-    const exists = webAccessUsers.some(u => u.email.toLowerCase() === cleanEmail);
+    const exists = webAccessUsersRef.current.some(u => u.email.trim().toLowerCase() === cleanEmail);
     if (exists) {
       addToast('error', 'Email Sudah Terdaftar', `Akun ${cleanEmail} sudah ada di daftar akses login.`);
       return false;
     }
 
+    const cleanPassword = payload.password;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const firebaseUid = await provisionSecondaryFirebaseAccount(cleanEmail, cleanPassword);
+
     const newUser: WebAccessUser = {
-      id: `wau-${Date.now()}`,
+      id: `wau-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      firebaseUid,
       name: payload.name.trim() || cleanEmail.split('@')[0],
       email: cleanEmail,
       role: payload.role,
-      division: payload.division,
-      supplierId: payload.supplierId,
-      supplierName: payload.supplierName,
-      passwordHash: hashLoginPassword(cleanEmail, payload.password),
+      division: resolveDivisionForRole(payload.role, payload.division),
+      supplierId: payload.role === 'Supplier / Mitra Pangan' ? payload.supplierId : undefined,
+      supplierName: payload.role === 'Supplier / Mitra Pangan' ? payload.supplierName : undefined,
+      passwordHash: hashLoginPassword(cleanEmail, cleanPassword),
       isActive: payload.isActive,
       allowGoogleLogin: payload.allowGoogleLogin,
       isProtectedAdmin: isProtectedSuperAdminEmail(cleanEmail),
@@ -3542,37 +3890,133 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: payload.notes?.trim() || undefined,
     };
 
-    setWebAccessUsers(prev => [newUser, ...prev]);
+    const nextUsers = [newUser, ...webAccessUsersRef.current];
+    const savedLocally = persistWebAccessUsers(nextUsers);
     await syncWebAccessToFirestoreSafely(newUser);
+
+    if (!savedLocally && !auth.currentUser) {
+      addToast(
+        'error',
+        'Penyimpanan Lokal Penuh',
+        'Kapasitas penyimpanan browser penuh sehingga data akun gagal disimpan. Hapus data cache lama lalu coba lagi.'
+      );
+      return false;
+    }
+
     await logAudit(
       'CREATE',
       'settings',
       `Mendaftarkan akses login web manual untuk ${newUser.email} (${newUser.role}) — Status: ${newUser.isActive ? 'Diizinkan' : 'Dinonaktifkan'}`
     );
-    addToast('success', 'Akses Login Ditambahkan', `Akun ${newUser.email} berhasil didaftarkan.`);
+    addToast('success', 'Akses Login Disimpan', `Akun ${newUser.email} berhasil didaftarkan dan siap digunakan.`);
     return true;
+  };
+
+  const registerSelfWebAccessUser = async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    firebaseUid?: string;
+  }): Promise<WebAccessUser | null> => {
+    const cleanEmail = payload.email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return null;
+
+    const policy = webAccessPolicyRef.current;
+    if (!policy.allowSelfRegistration && !isProtectedSuperAdminEmail(cleanEmail)) {
+      return null;
+    }
+
+    const existing = webAccessUsersRef.current.find(
+      u => u.email.trim().toLowerCase() === cleanEmail
+    );
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    if (existing) {
+      if (!existing.firebaseUid && payload.firebaseUid) {
+        const updatedExisting: WebAccessUser = {
+          ...existing,
+          firebaseUid: payload.firebaseUid,
+          updatedAt: now,
+        };
+        const nextList = webAccessUsersRef.current.map(u =>
+          u.id === existing.id ? updatedExisting : u
+        );
+        persistWebAccessUsers(nextList);
+        await syncWebAccessToFirestoreSafely(updatedExisting);
+        return updatedExisting;
+      }
+      return existing;
+    }
+
+    const isSuperAdmin = isProtectedSuperAdminEmail(cleanEmail);
+    const newUser: WebAccessUser = {
+      id: `wau-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      firebaseUid: payload.firebaseUid,
+      name: payload.name.trim() || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: isSuperAdmin ? 'Admin Utama' : 'Kepala SPPG',
+      passwordHash: hashLoginPassword(cleanEmail, payload.password),
+      isActive: true,
+      allowGoogleLogin: true,
+      isProtectedAdmin: isSuperAdmin,
+      createdAt: now,
+      createdBy: 'Pendaftaran Mandiri',
+      updatedAt: now,
+      updatedBy: 'Pendaftaran Mandiri',
+      lastLoginAt: now,
+      notes: 'Akun terdaftar melalui form Pendaftaran Mandiri',
+    };
+
+    persistWebAccessUsers([newUser, ...webAccessUsersRef.current]);
+    await syncWebAccessToFirestoreSafely(newUser);
+    return newUser;
   };
 
   const updateWebAccessUser = async (
     id: string,
     updates: Partial<Omit<WebAccessUser, 'id' | 'passwordHash'>> & { newPassword?: string }
   ): Promise<boolean> => {
-    if (currentUser.role !== 'Admin Utama') {
+    if (!canManageWebAccess()) {
       addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah akses login.');
       return false;
     }
-    const target = webAccessUsers.find(u => u.id === id);
+    const target = webAccessUsersRef.current.find(u => u.id === id);
     if (!target) return false;
 
     const isProtected = Boolean(target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email));
-    const nextEmail = (updates.email ?? target.email).trim().toLowerCase();
+    const nextEmail = isProtected
+      ? target.email.trim().toLowerCase()
+      : (updates.email ?? target.email).trim().toLowerCase();
 
-    if (nextEmail !== target.email.toLowerCase()) {
-      const dup = webAccessUsers.some(u => u.id !== id && u.email.toLowerCase() === nextEmail);
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!nextEmail || !emailPattern.test(nextEmail)) {
+      addToast('error', 'Email Tidak Valid', 'Masukkan alamat email login yang valid.');
+      return false;
+    }
+
+    const isEmailChanged = nextEmail !== target.email.trim().toLowerCase();
+    if (isEmailChanged) {
+      const dup = webAccessUsersRef.current.some(
+        u => u.id !== id && u.email.trim().toLowerCase() === nextEmail
+      );
       if (dup) {
         addToast('error', 'Email Duplikat', `Email ${nextEmail} sudah dipakai oleh akun lain.`);
         return false;
       }
+    }
+
+    const trimmedNewPass = updates.newPassword?.trim() || '';
+    if (trimmedNewPass.length > 0 && trimmedNewPass.length < 4) {
+      addToast('error', 'Kata Sandi Terlalu Pendek', 'Kata sandi baru minimal 4 karakter.');
+      return false;
+    }
+    if (isEmailChanged && trimmedNewPass.length === 0) {
+      addToast(
+        'error',
+        'Kata Sandi Baru Wajib Diisi',
+        'Karena email login diubah, masukkan Kata Sandi Baru minimal 4 karakter agar akun tetap bisa login.'
+      );
+      return false;
     }
 
     if (isProtected && updates.isActive === false) {
@@ -3584,38 +4028,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
+    let nextFirebaseUid = target.firebaseUid;
+    if (!nextFirebaseUid && trimmedNewPass.length >= 6) {
+      nextFirebaseUid = await provisionSecondaryFirebaseAccount(nextEmail, trimmedNewPass);
+    }
+
+    const nextRole = isProtected ? 'Admin Utama' : (updates.role ?? target.role);
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const { newPassword: _discardPassword, ...cleanUpdates } = updates;
+    void _discardPassword;
+
     const updatedUser: WebAccessUser = {
       ...target,
-      ...updates,
-      email: isProtected ? target.email : nextEmail,
-      role: isProtected ? 'Admin Utama' : (updates.role ?? target.role),
+      ...cleanUpdates,
+      firebaseUid: nextFirebaseUid,
+      email: nextEmail,
+      name: (updates.name ?? target.name).trim() || nextEmail.split('@')[0],
+      role: nextRole,
+      division: resolveDivisionForRole(nextRole, updates.division ?? target.division),
+      supplierId:
+        nextRole === 'Supplier / Mitra Pangan'
+          ? updates.supplierId ?? target.supplierId
+          : undefined,
+      supplierName:
+        nextRole === 'Supplier / Mitra Pangan'
+          ? updates.supplierName ?? target.supplierName
+          : undefined,
       isActive: isProtected ? true : (updates.isActive ?? target.isActive),
       passwordHash:
-        updates.newPassword && updates.newPassword.trim().length > 0
-          ? hashLoginPassword(isProtected ? target.email : nextEmail, updates.newPassword)
+        trimmedNewPass.length > 0
+          ? hashLoginPassword(nextEmail, updates.newPassword!)
           : target.passwordHash,
       updatedAt: now,
       updatedBy: currentUser.name,
     };
 
-    setWebAccessUsers(prev => prev.map(u => (u.id === id ? updatedUser : u)));
+    const nextUsers = webAccessUsersRef.current.map(u => (u.id === id ? updatedUser : u));
+    const savedLocally = persistWebAccessUsers(nextUsers);
     await syncWebAccessToFirestoreSafely(updatedUser);
+
+    if (!savedLocally && !auth.currentUser) {
+      addToast('error', 'Gagal Menyimpan Lokal', 'Penyimpanan browser penuh. Perubahan gagal disimpan.');
+      return false;
+    }
+
     await logAudit(
       'UPDATE',
       'settings',
-      `Memperbarui akses login web ${updatedUser.email} (${updatedUser.role}${updates.newPassword ? ', reset sandi' : ''})`
+      `Memperbarui akses login web ${updatedUser.email} (${updatedUser.role}${trimmedNewPass ? ', reset sandi' : ''})`
     );
     addToast('success', 'Akses Login Diperbarui', `Pengaturan akun ${updatedUser.email} disimpan.`);
     return true;
   };
 
   const toggleWebAccessStatus = async (id: string) => {
-    if (currentUser.role !== 'Admin Utama') {
+    if (!canManageWebAccess()) {
       addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengaktifkan/menonaktifkan akses login.');
       return;
     }
-    const target = webAccessUsers.find(u => u.id === id);
+    const target = webAccessUsersRef.current.find(u => u.id === id);
     if (!target) return;
     if (target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email)) {
       addToast('warning', 'Akun Terlindungi', 'Akun Admin Utama inti harus tetap aktif agar sistem tetap dapat dikelola.');
@@ -3623,8 +4094,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const nextActive = !target.isActive;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const updatedUser = { ...target, isActive: nextActive, updatedAt: now, updatedBy: currentUser.name };
-    setWebAccessUsers(prev => prev.map(u => (u.id === id ? updatedUser : u)));
+    const updatedUser: WebAccessUser = {
+      ...target,
+      isActive: nextActive,
+      updatedAt: now,
+      updatedBy: currentUser.name,
+    };
+    const nextUsers = webAccessUsersRef.current.map(u => (u.id === id ? updatedUser : u));
+    persistWebAccessUsers(nextUsers);
     await syncWebAccessToFirestoreSafely(updatedUser);
     await logAudit(
       'UPDATE',
@@ -3639,29 +4116,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteWebAccessUser = async (id: string): Promise<boolean> => {
-    if (currentUser.role !== 'Admin Utama') {
+    if (!canManageWebAccess()) {
       addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat menghapus akun akses login.');
       return false;
     }
-    const target = webAccessUsers.find(u => u.id === id);
+    const target = webAccessUsersRef.current.find(u => u.id === id);
     if (!target) return false;
     if (target.isProtectedAdmin || isProtectedSuperAdminEmail(target.email)) {
       addToast('warning', 'Tidak Dapat Dihapus', 'Akun Admin Utama inti dilindungi oleh sistem.');
       return false;
     }
-    setWebAccessUsers(prev => prev.filter(u => u.id !== id));
+    const nextUsers = webAccessUsersRef.current.filter(u => u.id !== id);
+    persistWebAccessUsers(nextUsers);
+
+    if (auth.currentUser) {
+      try {
+        const safeDocId = `wau_${target.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        await deleteDoc(doc(db, 'users', safeDocId));
+        if (target.firebaseUid) {
+          await deleteDoc(doc(db, 'users', target.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_')));
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
     await logAudit('DELETE', 'settings', `Menghapus akun akses login web: ${target.email}`);
     addToast('info', 'Akun Dihapus', `Akses login untuk ${target.email} telah dihapus.`);
     return true;
   };
 
   const updateWebAccessPolicy = async (policy: Partial<WebAccessPolicy>) => {
-    if (currentUser.role !== 'Admin Utama') {
+    if (!canManageWebAccess()) {
       addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah kebijakan login.');
       return;
     }
-    const nextPolicy = { ...webAccessPolicy, ...policy };
+    const nextPolicy: WebAccessPolicy = { ...webAccessPolicyRef.current, ...policy };
+    webAccessPolicyRef.current = nextPolicy;
     setWebAccessPolicy(nextPolicy);
+    safeWriteLocalStorage('esppg_web_access_policy_v1', JSON.stringify(nextPolicy));
+
     if (auth.currentUser) {
       try {
         await setDoc(
@@ -7158,6 +7652,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         webAccessUsers,
         webAccessPolicy,
         addWebAccessUser,
+        registerSelfWebAccessUser,
         updateWebAccessUser,
         toggleWebAccessStatus,
         deleteWebAccessUser,

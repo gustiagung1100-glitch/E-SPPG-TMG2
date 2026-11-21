@@ -10,7 +10,8 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
 } from 'firebase/auth';
-import { auth } from '../../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../lib/firebase';
 import { useApp, initialUsers, resolveUserByIdentifier } from '../../lib/store';
 import { verifyLoginPassword, isProtectedSuperAdminEmail } from '../../lib/authCrypto';
 import { saveDocument, CURRENT_SPPG_ID } from '../../lib/databaseService';
@@ -90,6 +91,7 @@ export const LoginPage: React.FC = () => {
     findWebAccessUser,
     webAccessUsers,
     recordWebLoginTimestamp,
+    registerSelfWebAccessUser,
   } = useApp();
 
   const [mode, setMode] = useState<'login' | 'forgot' | 'register'>('login');
@@ -175,14 +177,15 @@ export const LoginPage: React.FC = () => {
     };
   };
 
-  const syncUserFirestoreSafely = async (profile: UserProfile) => {
+  const syncUserFirestoreSafely = async (profile: UserProfile, targetDocId?: string) => {
     if (!auth.currentUser) return;
+    const docUid = targetDocId || auth.currentUser.uid;
     try {
       await saveDocument(
         'users',
-        profile.uid,
+        docUid,
         {
-          uid: profile.uid,
+          uid: docUid,
           name: profile.name,
           email: profile.email,
           roleName: profile.role,
@@ -193,7 +196,7 @@ export const LoginPage: React.FC = () => {
           status: 'Terverifikasi',
           lastLoginAt: new Date().toISOString(),
         },
-        profile.uid,
+        auth.currentUser.uid,
         profile.name
       );
     } catch {
@@ -272,14 +275,22 @@ export const LoginPage: React.FC = () => {
         );
         const cred = await createUserWithEmailAndPassword(auth, targetEmail, password);
         const fbUser = cred.user;
-        const newProfile: UserProfile = {
-          uid: fbUser.uid,
+        const createdEntry = await registerSelfWebAccessUser({
           name: displayName.trim(),
           email: fbUser.email || targetEmail,
-          role: isProtectedSuperAdminEmail(targetEmail) ? 'Admin Utama' : 'Kepala SPPG',
+          password,
+          firebaseUid: fbUser.uid,
+        });
+        const newProfile: UserProfile = {
+          uid: fbUser.uid,
+          name: createdEntry?.name || displayName.trim(),
+          email: fbUser.email || targetEmail,
+          role:
+            createdEntry?.role ||
+            (isProtectedSuperAdminEmail(targetEmail) ? 'Admin Utama' : 'Kepala SPPG'),
           isActive: true,
         };
-        await syncUserFirestoreSafely(newProfile);
+        await syncUserFirestoreSafely(newProfile, fbUser.uid);
 
         if (rememberMe) {
           localStorage.setItem(REMEMBERED_ID_KEY, trimmedId);
@@ -289,9 +300,7 @@ export const LoginPage: React.FC = () => {
 
         setAuthSuccess(`Akun berhasil dibuat. Mengalihkan ke dashboard ${sppgConfig.sppgName}...`);
         addToast('success', 'Registrasi Berhasil', `Selamat datang, ${newProfile.name}`);
-        setTimeout(() => {
-          loginWithProfile(newProfile, rememberMe);
-        }, 320);
+        loginWithProfile(newProfile, rememberMe);
         return;
       }
 
@@ -299,7 +308,8 @@ export const LoginPage: React.FC = () => {
       // LOGIN MODE: 1. Verifikasi Akses Web Manual Terdaftar Admin Utama
       // ================================================================
       if (registeredWebUser) {
-        if (!registeredWebUser.isActive) {
+        const isSuperAdmin = isProtectedSuperAdminEmail(registeredWebUser.email);
+        if (!registeredWebUser.isActive && !isSuperAdmin) {
           const blockedMsg =
             'Akses login untuk akun ini sedang dinonaktifkan oleh Admin Utama. Hubungi Administrator SPPG.';
           setAuthError(blockedMsg);
@@ -330,31 +340,75 @@ export const LoginPage: React.FC = () => {
         }
 
         const profile: UserProfile = {
-          uid: registeredWebUser.id,
+          uid: registeredWebUser.firebaseUid || registeredWebUser.id,
           name: registeredWebUser.name,
           email: registeredWebUser.email,
-          role: isProtectedSuperAdminEmail(registeredWebUser.email)
-            ? 'Admin Utama'
-            : registeredWebUser.role,
+          role: isSuperAdmin ? 'Admin Utama' : registeredWebUser.role,
           division: registeredWebUser.division,
           supplierId: registeredWebUser.supplierId,
           supplierName: registeredWebUser.supplierName,
           isActive: true,
         };
 
+        if (
+          auth.currentUser &&
+          (auth.currentUser.email || '').trim().toLowerCase() !== registeredWebUser.email.toLowerCase()
+        ) {
+          await signOut(auth).catch(() => {});
+        }
+
         recordWebLoginTimestamp(registeredWebUser.email);
         setAuthSuccess(`Autentikasi berhasil. Memuat sistem sebagai ${profile.role}...`);
         addToast('success', 'Berhasil Masuk', `Selamat datang, ${profile.name}`);
-        setTimeout(() => {
-          loginWithProfile(profile, rememberMe);
-        }, 280);
+        loginWithProfile(profile, rememberMe);
+
+        // Opportunistic non-blocking Firebase Auth session sync if password >= 6 chars
+        if (!auth.currentUser && password.length >= 6) {
+          setPersistence(
+            auth,
+            rememberMe ? browserLocalPersistence : browserSessionPersistence
+          )
+            .then(() => signInWithEmailAndPassword(auth, registeredWebUser.email, password))
+            .catch(() => {});
+        }
         return;
       }
 
       // ================================================================
-      // LOGIN MODE: 2. Kebijakan Whitelist Ketat vs Firebase Auth Fallback
+      // LOGIN MODE: 2. Firebase Auth & Firestore Cloud Whitelist Verification
       // ================================================================
-      if (webAccessPolicy.strictWhitelistOnly) {
+      await setPersistence(
+        auth,
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      );
+      const cred = await signInWithEmailAndPassword(auth, targetEmail, password);
+      const fbUser = cred.user;
+      const emailLower = (fbUser.email || targetEmail).trim().toLowerCase();
+      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+
+      const [cloudUserSnap, cloudPolicySnap] = await Promise.all([
+        getDoc(doc(db, 'users', fbUser.uid)).catch(() => null),
+        getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
+      ]);
+
+      const effectiveStrict =
+        cloudPolicySnap && cloudPolicySnap.exists() && typeof cloudPolicySnap.data()?.strictWhitelistOnly === 'boolean'
+          ? (cloudPolicySnap.data()?.strictWhitelistOnly as boolean)
+          : webAccessPolicy.strictWhitelistOnly;
+
+      const cloudUserData = cloudUserSnap && cloudUserSnap.exists() ? cloudUserSnap.data() : null;
+      if (cloudUserData && cloudUserData.isActive === false && !isSuperAdmin) {
+        await signOut(auth).catch(() => {});
+        const blockedMsg =
+          'Akses login untuk akun ini sedang dinonaktifkan oleh Admin Utama. Hubungi Administrator SPPG.';
+        setAuthError(blockedMsg);
+        addToast('error', 'Akses Dinonaktifkan', blockedMsg);
+        setIsLoading(false);
+        return;
+      }
+
+      if (!cloudUserData && effectiveStrict && !isSuperAdmin) {
+        await signOut(auth).catch(() => {});
         const notListedMsg =
           'Email atau username belum didaftarkan untuk akses login oleh Admin Utama. Hubungi Admin Utama SPPG.';
         setAuthError(notListedMsg);
@@ -363,15 +417,25 @@ export const LoginPage: React.FC = () => {
         return;
       }
 
-      await setPersistence(
-        auth,
-        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      const fallbackProfile = buildProfileFromAuth(
+        fbUser.uid,
+        fbUser.email || targetEmail,
+        fbUser.displayName
       );
-      const cred = await signInWithEmailAndPassword(auth, targetEmail, password);
-      const fbUser = cred.user;
-      const profile = buildProfileFromAuth(fbUser.uid, fbUser.email || targetEmail, fbUser.displayName);
+      const profile: UserProfile = cloudUserData
+        ? {
+            uid: fbUser.uid,
+            name: cloudUserData.name || fallbackProfile.name,
+            email: fbUser.email || targetEmail,
+            role: (isSuperAdmin ? 'Admin Utama' : cloudUserData.roleName || fallbackProfile.role) as RoleType,
+            division: cloudUserData.division || fallbackProfile.division,
+            supplierId: cloudUserData.supplierId || fallbackProfile.supplierId,
+            supplierName: cloudUserData.supplierName || fallbackProfile.supplierName,
+            isActive: true,
+          }
+        : fallbackProfile;
 
-      await syncUserFirestoreSafely(profile);
+      await syncUserFirestoreSafely(profile, fbUser.uid);
 
       if (rememberMe) {
         localStorage.setItem(REMEMBERED_ID_KEY, trimmedId);
@@ -381,9 +445,7 @@ export const LoginPage: React.FC = () => {
 
       setAuthSuccess(`Autentikasi berhasil. Memuat sistem ${profile.role}...`);
       addToast('success', 'Berhasil Masuk', `Selamat datang, ${profile.name}`);
-      setTimeout(() => {
-        loginWithProfile(profile, rememberMe);
-      }, 280);
+      loginWithProfile(profile, rememberMe);
     } catch (err: any) {
       const friendly = mapFirebaseAuthError(err);
       setAuthError(friendly);
@@ -409,18 +471,36 @@ export const LoginPage: React.FC = () => {
       const fbUser = cred.user;
       const emailLower = (fbUser.email || '').trim().toLowerCase();
 
-      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const webEntry = webAccessUsers.find(u => u.email.trim().toLowerCase() === emailLower);
       const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
 
-      if (webEntry) {
-        if (!webEntry.isActive) {
+      const [cloudUserSnap, cloudPolicySnap] = await Promise.all([
+        getDoc(doc(db, 'users', fbUser.uid)).catch(() => null),
+        getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
+      ]);
+      const cloudUserData = cloudUserSnap && cloudUserSnap.exists() ? cloudUserSnap.data() : null;
+      const effectiveStrict =
+        cloudPolicySnap && cloudPolicySnap.exists() && typeof cloudPolicySnap.data()?.strictWhitelistOnly === 'boolean'
+          ? (cloudPolicySnap.data()?.strictWhitelistOnly as boolean)
+          : webAccessPolicy.strictWhitelistOnly;
+
+      const effectiveActive =
+        webEntry?.isActive ??
+        (typeof cloudUserData?.isActive === 'boolean' ? cloudUserData.isActive : true);
+      const effectiveAllowGoogle =
+        webEntry?.allowGoogleLogin ??
+        (typeof cloudUserData?.allowGoogleLogin === 'boolean' ? cloudUserData.allowGoogleLogin : true);
+      const hasRegisteredEntry = Boolean(webEntry || cloudUserData);
+
+      if (hasRegisteredEntry) {
+        if (!effectiveActive && !isSuperAdmin) {
           await signOut(auth);
           const msg = 'Akses login untuk akun Google ini sedang dinonaktifkan oleh Admin Utama.';
           setAuthError(msg);
           addToast('error', 'Akses Dinonaktifkan', msg);
           return;
         }
-        if (!webEntry.allowGoogleLogin && !isSuperAdmin) {
+        if (!effectiveAllowGoogle && !isSuperAdmin) {
           await signOut(auth);
           const msg =
             'Login dengan Google tidak diaktifkan untuk akun ini. Gunakan Email & Password yang didaftarkan Admin Utama.';
@@ -428,7 +508,7 @@ export const LoginPage: React.FC = () => {
           addToast('error', 'Metode Login Dibatasi', msg);
           return;
         }
-      } else if (webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
+      } else if (effectiveStrict && !isSuperAdmin) {
         await signOut(auth);
         const msg = `Akun Google ${fbUser.email} belum didaftarkan untuk akses login oleh Admin Utama.`;
         setAuthError(msg);
@@ -436,21 +516,32 @@ export const LoginPage: React.FC = () => {
         return;
       }
 
-      const profile = buildProfileFromAuth(
+      const fallbackProfile = buildProfileFromAuth(
         fbUser.uid,
         fbUser.email || '',
         fbUser.displayName
       );
+      const profile: UserProfile = cloudUserData
+        ? {
+            uid: fbUser.uid,
+            name: cloudUserData.name || fallbackProfile.name,
+            email: fbUser.email || fallbackProfile.email,
+            role: (isSuperAdmin ? 'Admin Utama' : cloudUserData.roleName || fallbackProfile.role) as RoleType,
+            division: cloudUserData.division || fallbackProfile.division,
+            supplierId: cloudUserData.supplierId || fallbackProfile.supplierId,
+            supplierName: cloudUserData.supplierName || fallbackProfile.supplierName,
+            isActive: true,
+          }
+        : { ...fallbackProfile, uid: fbUser.uid };
+
       if (webEntry) {
         recordWebLoginTimestamp(webEntry.email);
       }
-      await syncUserFirestoreSafely(profile);
+      await syncUserFirestoreSafely(profile, fbUser.uid);
 
       setAuthSuccess(`Terhubung sebagai ${profile.email}. Mengalihkan ke sistem...`);
       addToast('success', 'Login Google Berhasil', `Selamat datang, ${profile.name}`);
-      setTimeout(() => {
-        loginWithProfile(profile, rememberMe);
-      }, 280);
+      loginWithProfile(profile, rememberMe);
     } catch (err: any) {
       const friendly = mapFirebaseAuthError(err);
       setAuthError(friendly);
@@ -461,14 +552,19 @@ export const LoginPage: React.FC = () => {
   };
 
   const handleDemoRoleLogin = () => {
+    if (!webAccessPolicy.allowDemoPreview) {
+      addToast('error', 'Akses Dibatasi', 'Mode pratinjau dinonaktifkan oleh Admin Utama.');
+      return;
+    }
     const matched =
       initialUsers.find(u => u.role === selectedDemoRole) || initialUsers[0];
     setAuthError(null);
     setAuthSuccess(`Masuk mode pratinjau sebagai ${matched.role}...`);
     addToast('success', 'Mode Pratinjau Aktif', `Masuk sebagai ${matched.name} (${matched.role})`);
-    setTimeout(() => {
-      loginWithProfile(matched, rememberMe);
-    }, 220);
+    if (auth.currentUser) {
+      signOut(auth).catch(() => {});
+    }
+    loginWithProfile(matched, rememberMe, { isDemoSession: true });
   };
 
   const distinctRoles: RoleType[] = Array.from(new Set(initialUsers.map(u => u.role)));

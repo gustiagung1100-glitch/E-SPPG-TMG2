@@ -84,6 +84,7 @@ export interface UserProfile {
 
 export interface WebAccessUser {
   id: string;
+  firebaseUid?: string;
   name: string;
   email: string;
   role: RoleType;

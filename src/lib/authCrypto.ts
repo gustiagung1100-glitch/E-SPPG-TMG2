@@ -121,6 +121,7 @@ export interface StoredAuthSession {
   email: string;
   role: string;
   rememberMe: boolean;
+  isDemoSession?: boolean;
   issuedAt: number;
   expiresAt: number;
   sessionToken: string;
@@ -131,11 +132,13 @@ function computeSessionSignature(
   email: string,
   role: string,
   issuedAt: number,
-  expiresAt: number
+  expiresAt: number,
+  isDemoSession: boolean = false
 ): string {
   const normalizedEmail = email.trim().toLowerCase();
+  const demoSuffix = isDemoSession ? '::DEMO-PREVIEW' : '';
   return sha256Hex(
-    `${SESSION_TOKEN_SALT}::${uid}::${normalizedEmail}::${role}::${issuedAt}::${expiresAt}`
+    `${SESSION_TOKEN_SALT}::${uid}::${normalizedEmail}::${role}::${issuedAt}::${expiresAt}${demoSuffix}`
   );
 }
 
@@ -144,20 +147,30 @@ export function createSignedAuthSession(params: {
   email: string;
   role: string;
   rememberMe: boolean;
+  isDemoSession?: boolean;
 }): StoredAuthSession {
   const issuedAt = Date.now();
   const ttl = params.rememberMe ? SESSION_DURATION_REMEMBER_MS : SESSION_DURATION_DEFAULT_MS;
   const expiresAt = issuedAt + ttl;
   const normalizedEmail = params.email.trim().toLowerCase();
+  const isDemoSession = Boolean(params.isDemoSession);
   return {
     authenticated: true,
     uid: params.uid,
     email: normalizedEmail,
     role: params.role,
     rememberMe: Boolean(params.rememberMe),
+    ...(isDemoSession ? { isDemoSession: true } : {}),
     issuedAt,
     expiresAt,
-    sessionToken: computeSessionSignature(params.uid, normalizedEmail, params.role, issuedAt, expiresAt),
+    sessionToken: computeSessionSignature(
+      params.uid,
+      normalizedEmail,
+      params.role,
+      issuedAt,
+      expiresAt,
+      isDemoSession
+    ),
   };
 }
 
@@ -181,12 +194,14 @@ export function verifyStoredAuthSession(candidate: unknown): StoredAuthSession |
   if (!Number.isFinite(obj.issuedAt) || !Number.isFinite(obj.expiresAt)) return null;
   if (obj.expiresAt <= obj.issuedAt || Date.now() >= obj.expiresAt) return null;
 
+  const isDemoSession = Boolean(obj.isDemoSession);
   const expectedToken = computeSessionSignature(
     obj.uid,
     obj.email,
     obj.role,
     obj.issuedAt,
-    obj.expiresAt
+    obj.expiresAt,
+    isDemoSession
   );
   if (obj.sessionToken.length !== expectedToken.length) return null;
   let diff = 0;
@@ -201,6 +216,7 @@ export function verifyStoredAuthSession(candidate: unknown): StoredAuthSession |
     email: obj.email.trim().toLowerCase(),
     role: obj.role,
     rememberMe: Boolean(obj.rememberMe),
+    ...(isDemoSession ? { isDemoSession: true } : {}),
     issuedAt: obj.issuedAt,
     expiresAt: obj.expiresAt,
     sessionToken: obj.sessionToken,

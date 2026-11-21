@@ -8,7 +8,8 @@ import {
   sendPasswordResetEmail,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { auth } from '../../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../lib/firebase';
 import { useApp } from '../../lib/store';
 import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
 import { saveDocument, CURRENT_SPPG_ID } from '../../lib/databaseService';
@@ -33,7 +34,15 @@ interface FirebaseAuthModalProps {
 }
 
 export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, switchRole, addToast, logout, webAccessUsers, webAccessPolicy } = useApp();
+  const {
+    currentUser,
+    switchRole,
+    addToast,
+    logout,
+    webAccessUsers,
+    webAccessPolicy,
+    registerSelfWebAccessUser,
+  } = useApp();
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login');
   const [email, setEmail] = useState('');
@@ -123,11 +132,18 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         if (webEntry && !webEntry.isActive && !isSuperAdmin) {
           throw new Error('Akun ini dinonaktifkan oleh Admin Utama SPPG.');
         }
-        if (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
-          throw new Error(`Email ${email} belum didaftarkan pada whitelist akses login oleh Admin Utama.`);
-        }
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const user = cred.user;
+        const cloudSnap = await getDoc(doc(db, 'users', user.uid)).catch(() => null);
+        const cloudData = cloudSnap && cloudSnap.exists() ? cloudSnap.data() : null;
+        if (cloudData && cloudData.isActive === false && !isSuperAdmin) {
+          await logout();
+          throw new Error('Akun ini dinonaktifkan oleh Admin Utama SPPG.');
+        }
+        if (!webEntry && !cloudData && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
+          await logout();
+          throw new Error(`Email ${email} belum didaftarkan pada whitelist akses login oleh Admin Utama.`);
+        }
 
         await saveDocument(
           'users',
@@ -154,6 +170,13 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         const user = cred.user;
 
+        await registerSelfWebAccessUser({
+          name: displayName || email.split('@')[0],
+          email: user.email || email,
+          password,
+          firebaseUid: user.uid,
+        });
+
         // Save User Document to 'users' collection with SPPG ID
         await saveDocument(
           'users',
@@ -162,7 +185,7 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
             uid: user.uid,
             name: displayName || email.split('@')[0],
             email: user.email || '',
-            roleName: 'Staff Operasional',
+            roleName: 'Kepala SPPG',
             roleId: 'role-staff',
             sppgId: CURRENT_SPPG_ID,
             isActive: true,

@@ -1,5 +1,5 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -9,6 +9,14 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Initialize Services
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+const SECONDARY_APP_NAME = 'sppg-user-provisioner';
+
+export function getSecondaryAuth(): Auth {
+  const existing = getApps().find((a: FirebaseApp) => a.name === SECONDARY_APP_NAME);
+  const secondaryApp = existing || initializeApp(firebaseConfig, SECONDARY_APP_NAME);
+  return getAuth(secondaryApp);
+}
 
 export enum OperationType {
   CREATE = 'create',

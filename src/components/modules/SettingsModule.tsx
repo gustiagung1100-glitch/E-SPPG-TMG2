@@ -60,6 +60,7 @@ export const SettingsModule: React.FC = () => {
     resetRoleModuleAccess,
     auditLogs,
     currentUser,
+    canSwitchRole,
     isFirebaseConnected,
     addToast,
     webAccessUsers,
@@ -82,6 +83,9 @@ export const SettingsModule: React.FC = () => {
   const [deletingAccessUser, setDeletingAccessUser] = useState<WebAccessUser | null>(null);
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
+  const [addFormError, setAddFormError] = useState<string | null>(null);
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+  const [isSubmittingAccess, setIsSubmittingAccess] = useState(false);
 
   const [newUserForm, setNewUserForm] = useState<{
     name: string;
@@ -195,7 +199,7 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleTogglePerm = (role: string, action: ActionPermission) => {
-    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
+    if (role === 'Admin Utama' || !isSuperAdminSession) return;
     const current = permsState[role]?.[action] ?? false;
     const updated = {
       ...permsState,
@@ -212,7 +216,7 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleToggleModuleAccess = (role: RoleType, moduleKey: ModuleKey) => {
-    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
+    if (role === 'Admin Utama' || !isSuperAdminSession) return;
     setModuleAccessDraft(prev => {
       const currentList = prev[role] || [];
       const exists = currentList.includes(moduleKey);
@@ -227,7 +231,7 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleToggleAllModulesForRole = (role: RoleType, enableAll: boolean) => {
-    if (role === 'Admin Utama' || currentUser.role !== 'Admin Utama') return;
+    if (role === 'Admin Utama' || !isSuperAdminSession) return;
     setModuleAccessDraft(prev => ({
       ...prev,
       [role]: enableAll ? ALL_MODULES_META.map(m => m.key) : [],
@@ -235,7 +239,7 @@ export const SettingsModule: React.FC = () => {
   };
 
   const handleToggleModuleForAllRoles = (moduleKey: ModuleKey, enableAll: boolean) => {
-    if (currentUser.role !== 'Admin Utama') return;
+    if (!isSuperAdminSession) return;
     setModuleAccessDraft(prev => {
       const next = { ...prev };
       for (const role of ALL_ROLES_LIST) {
@@ -308,23 +312,23 @@ export const SettingsModule: React.FC = () => {
   };
 
   // Manual Web Login Access Handlers (Admin Utama)
-  const isSuperAdminSession = currentUser.role === 'Admin Utama';
+  const isSuperAdminSession =
+    currentUser.role === 'Admin Utama' ||
+    canSwitchRole ||
+    isProtectedSuperAdminEmail(currentUser.email);
 
-  const allAssignableRoles: RoleType[] = [
-    'Admin Utama',
-    'Kepala SPPG',
-    'Pengawas Gizi',
-    'Pengawas Keuangan',
-    'Asisten Lapangan',
-    'Admin Gudang',
-    'Cheff',
-    'Relawan Div. Persiapan',
-    'Relawan Div. Pengolahan',
-    'Relawan Div. Pemorsian',
-    'Relawan Div. Distribusi',
-    'Relawan Div. Cuci Ompreng',
-    'Supplier / Mitra Pangan',
-  ];
+  const allAssignableRoles: readonly RoleType[] = ALL_ROLES_LIST;
+
+  const deriveDivisionFromRole = (role: RoleType, existingDivision?: string): string => {
+    const map: Partial<Record<RoleType, string>> = {
+      'Relawan Div. Persiapan': 'Persiapan',
+      'Relawan Div. Pengolahan': 'Pengolahan',
+      'Relawan Div. Pemorsian': 'Pemorsian',
+      'Relawan Div. Distribusi': 'Distribusi',
+      'Relawan Div. Cuci Ompreng': 'Cuci Ompreng',
+    };
+    return map[role] || existingDivision || '';
+  };
 
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -337,43 +341,75 @@ export const SettingsModule: React.FC = () => {
 
   const handleCreateWebAccessUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAddFormError(null);
+
+    const cleanName = newUserForm.name.trim();
+    const cleanEmail = newUserForm.email.trim().toLowerCase();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!cleanName) {
+      setAddFormError('Nama lengkap pengguna wajib diisi.');
+      return;
+    }
+    if (!cleanEmail || !emailPattern.test(cleanEmail)) {
+      setAddFormError('Masukkan format email login yang valid (contoh: petugas@sppg-tmg2.id).');
+      return;
+    }
+    if (!newUserForm.password || newUserForm.password.trim().length < 4) {
+      setAddFormError('Kata sandi login wajib diisi minimal 4 karakter (disarankan 6+ karakter).');
+      return;
+    }
+    if (webAccessUsers.some(u => u.email.trim().toLowerCase() === cleanEmail)) {
+      setAddFormError(`Email ${cleanEmail} sudah terdaftar pada daftar akses login.`);
+      return;
+    }
+
     const selectedSupplier =
       newUserForm.role === 'Supplier / Mitra Pangan'
         ? masterSuppliers.find(s => s.id === newUserForm.supplierId)
         : undefined;
 
-    const ok = await addWebAccessUser({
-      name: newUserForm.name,
-      email: newUserForm.email,
-      password: newUserForm.password,
-      role: newUserForm.role,
-      division: newUserForm.division || undefined,
-      supplierId: selectedSupplier?.id,
-      supplierName: selectedSupplier?.name,
-      isActive: newUserForm.isActive,
-      allowGoogleLogin: newUserForm.allowGoogleLogin,
-      notes: newUserForm.notes,
-    });
-
-    if (ok) {
-      setIsAddUserOpen(false);
-      setNewUserForm({
-        name: '',
-        email: '',
-        password: '',
-        role: 'Kepala SPPG',
-        division: '',
-        supplierId: '',
-        isActive: true,
-        allowGoogleLogin: true,
-        notes: '',
+    setIsSubmittingAccess(true);
+    try {
+      const ok = await addWebAccessUser({
+        name: cleanName,
+        email: cleanEmail,
+        password: newUserForm.password,
+        role: newUserForm.role,
+        division: deriveDivisionFromRole(newUserForm.role, newUserForm.division) || undefined,
+        supplierId: selectedSupplier?.id,
+        supplierName: selectedSupplier?.name,
+        isActive: newUserForm.isActive,
+        allowGoogleLogin: newUserForm.allowGoogleLogin,
+        notes: newUserForm.notes,
       });
+
+      if (ok) {
+        setIsAddUserOpen(false);
+        setAddFormError(null);
+        setNewUserForm({
+          name: '',
+          email: '',
+          password: '',
+          role: 'Kepala SPPG',
+          division: '',
+          supplierId: '',
+          isActive: true,
+          allowGoogleLogin: true,
+          notes: '',
+        });
+      } else {
+        setAddFormError('Gagal menyimpan akun akses login. Periksa kembali data yang dimasukkan.');
+      }
+    } finally {
+      setIsSubmittingAccess(false);
     }
   };
 
   const openEditWebAccessModal = (user: WebAccessUser) => {
     setEditingAccessUser(user);
     setShowEditPassword(false);
+    setEditFormError(null);
     setEditUserForm({
       name: user.name,
       email: user.email,
@@ -390,25 +426,63 @@ export const SettingsModule: React.FC = () => {
   const handleSaveEditWebAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccessUser) return;
+    setEditFormError(null);
+
+    const cleanName = editUserForm.name.trim();
+    const cleanEmail = editUserForm.email.trim().toLowerCase();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const trimmedNewPass = editUserForm.newPassword.trim();
+    const isProtected = Boolean(
+      editingAccessUser.isProtectedAdmin || isProtectedSuperAdminEmail(editingAccessUser.email)
+    );
+    const isEmailChanged = !isProtected && cleanEmail !== editingAccessUser.email.trim().toLowerCase();
+
+    if (!cleanName) {
+      setEditFormError('Nama lengkap pengguna wajib diisi.');
+      return;
+    }
+    if (!isProtected && (!cleanEmail || !emailPattern.test(cleanEmail))) {
+      setEditFormError('Masukkan alamat email login yang valid.');
+      return;
+    }
+    if (trimmedNewPass.length > 0 && trimmedNewPass.length < 4) {
+      setEditFormError('Kata sandi baru minimal 4 karakter.');
+      return;
+    }
+    if (isEmailChanged && trimmedNewPass.length === 0) {
+      setEditFormError(
+        'Karena email login diubah, wajib isi Kata Sandi Baru agar akun tetap bisa login.'
+      );
+      return;
+    }
+
     const selectedSupplier =
       editUserForm.role === 'Supplier / Mitra Pangan'
         ? masterSuppliers.find(s => s.id === editUserForm.supplierId)
         : undefined;
 
-    const ok = await updateWebAccessUser(editingAccessUser.id, {
-      name: editUserForm.name,
-      email: editUserForm.email,
-      newPassword: editUserForm.newPassword.trim() || undefined,
-      role: editUserForm.role,
-      division: editUserForm.division || undefined,
-      supplierId: selectedSupplier?.id,
-      supplierName: selectedSupplier?.name,
-      isActive: editUserForm.isActive,
-      allowGoogleLogin: editUserForm.allowGoogleLogin,
-      notes: editUserForm.notes,
-    });
-    if (ok) {
-      setEditingAccessUser(null);
+    setIsSubmittingAccess(true);
+    try {
+      const ok = await updateWebAccessUser(editingAccessUser.id, {
+        name: cleanName,
+        email: isProtected ? editingAccessUser.email : cleanEmail,
+        newPassword: trimmedNewPass || undefined,
+        role: editUserForm.role,
+        division: deriveDivisionFromRole(editUserForm.role, editUserForm.division) || undefined,
+        supplierId: selectedSupplier?.id,
+        supplierName: selectedSupplier?.name,
+        isActive: editUserForm.isActive,
+        allowGoogleLogin: editUserForm.allowGoogleLogin,
+        notes: editUserForm.notes,
+      });
+      if (ok) {
+        setEditingAccessUser(null);
+        setEditFormError(null);
+      } else {
+        setEditFormError('Gagal memperbarui data akun. Periksa kembali isian formulir.');
+      }
+    } finally {
+      setIsSubmittingAccess(false);
     }
   };
 
@@ -841,6 +915,7 @@ export const SettingsModule: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setShowAddPassword(false);
+                    setAddFormError(null);
                     setIsAddUserOpen(true);
                   }}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#D8AD55] hover:bg-[#c59a43] active:scale-95 text-[#071D49] text-xs font-extrabold shadow-sm transition shrink-0 cursor-pointer"
@@ -1105,11 +1180,21 @@ export const SettingsModule: React.FC = () => {
           {/* Modal Daftarkan Akun Login Manual */}
           <Modal
             isOpen={isAddUserOpen}
-            onClose={() => setIsAddUserOpen(false)}
+            onClose={() => {
+              setIsAddUserOpen(false);
+              setAddFormError(null);
+            }}
             title="Daftarkan Akun Akses Login Web (Manual)"
             maxWidth="lg"
           >
-            <form onSubmit={handleCreateWebAccessUser} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateWebAccessUser} noValidate className="space-y-4 text-xs">
+              {addFormError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span className="font-medium leading-relaxed">{addFormError}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
@@ -1117,10 +1202,12 @@ export const SettingsModule: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    required
                     placeholder="Contoh: Siti Aminah, S.Gz."
                     value={newUserForm.name}
-                    onChange={e => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                    onChange={e => {
+                      setNewUserForm({ ...newUserForm, name: e.target.value });
+                      if (addFormError) setAddFormError(null);
+                    }}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                   />
                 </div>
@@ -1133,10 +1220,12 @@ export const SettingsModule: React.FC = () => {
                     <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
                     <input
                       type="email"
-                      required
                       placeholder="petugas@sppg-tmg2.id"
                       value={newUserForm.email}
-                      onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                      onChange={e => {
+                        setNewUserForm({ ...newUserForm, email: e.target.value });
+                        if (addFormError) setAddFormError(null);
+                      }}
                       className="w-full pl-8 pr-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                     />
                   </div>
@@ -1149,9 +1238,10 @@ export const SettingsModule: React.FC = () => {
                     </label>
                     <button
                       type="button"
-                      onClick={() =>
-                        setNewUserForm({ ...newUserForm, password: generateRandomPassword() })
-                      }
+                      onClick={() => {
+                        setNewUserForm({ ...newUserForm, password: generateRandomPassword() });
+                        if (addFormError) setAddFormError(null);
+                      }}
                       className="text-[11px] font-semibold text-[#164E91] hover:underline"
                     >
                       Buat Acak
@@ -1160,11 +1250,12 @@ export const SettingsModule: React.FC = () => {
                   <div className="relative">
                     <input
                       type={showAddPassword ? 'text' : 'password'}
-                      required
-                      minLength={4}
                       placeholder="Minimal 4 karakter"
                       value={newUserForm.password}
-                      onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                      onChange={e => {
+                        setNewUserForm({ ...newUserForm, password: e.target.value });
+                        if (addFormError) setAddFormError(null);
+                      }}
                       className="w-full pl-3 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                     />
                     <button
@@ -1183,9 +1274,14 @@ export const SettingsModule: React.FC = () => {
                   </label>
                   <select
                     value={newUserForm.role}
-                    onChange={e =>
-                      setNewUserForm({ ...newUserForm, role: e.target.value as RoleType })
-                    }
+                    onChange={e => {
+                      const nextRole = e.target.value as RoleType;
+                      setNewUserForm({
+                        ...newUserForm,
+                        role: nextRole,
+                        division: deriveDivisionFromRole(nextRole),
+                      });
+                    }}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                   >
                     {allAssignableRoles.map(r => (
@@ -1263,17 +1359,22 @@ export const SettingsModule: React.FC = () => {
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsAddUserOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
+                  disabled={isSubmittingAccess}
+                  onClick={() => {
+                    setIsAddUserOpen(false);
+                    setAddFormError(null);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50 disabled:opacity-60"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5"
+                  disabled={isSubmittingAccess}
+                  className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5 text-[#F2D58B]" />
-                  <span>Simpan & Daftarkan Akun</span>
+                  <span>{isSubmittingAccess ? 'Menyimpan...' : 'Simpan & Daftarkan Akun'}</span>
                 </button>
               </div>
             </form>
@@ -1282,12 +1383,22 @@ export const SettingsModule: React.FC = () => {
           {/* Modal Edit Pengguna & Reset Kata Sandi */}
           <Modal
             isOpen={Boolean(editingAccessUser)}
-            onClose={() => setEditingAccessUser(null)}
+            onClose={() => {
+              setEditingAccessUser(null);
+              setEditFormError(null);
+            }}
             title="Edit Akses Pengguna & Reset Kata Sandi"
             maxWidth="lg"
           >
             {editingAccessUser && (
-              <form onSubmit={handleSaveEditWebAccess} className="space-y-4 text-xs">
+              <form onSubmit={handleSaveEditWebAccess} noValidate className="space-y-4 text-xs">
+                {editFormError && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span className="font-medium leading-relaxed">{editFormError}</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
@@ -1295,9 +1406,11 @@ export const SettingsModule: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      required
                       value={editUserForm.name}
-                      onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                      onChange={e => {
+                        setEditUserForm({ ...editUserForm, name: e.target.value });
+                        if (editFormError) setEditFormError(null);
+                      }}
                       className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                     />
                   </div>
@@ -1308,13 +1421,15 @@ export const SettingsModule: React.FC = () => {
                     </label>
                     <input
                       type="email"
-                      required
                       disabled={Boolean(
                         editingAccessUser.isProtectedAdmin ||
                           isProtectedSuperAdminEmail(editingAccessUser.email)
                       )}
                       value={editUserForm.email}
-                      onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                      onChange={e => {
+                        setEditUserForm({ ...editUserForm, email: e.target.value });
+                        if (editFormError) setEditFormError(null);
+                      }}
                       className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl disabled:opacity-60"
                     />
                   </div>
@@ -1329,9 +1444,14 @@ export const SettingsModule: React.FC = () => {
                           isProtectedSuperAdminEmail(editingAccessUser.email)
                       )}
                       value={editUserForm.role}
-                      onChange={e =>
-                        setEditUserForm({ ...editUserForm, role: e.target.value as RoleType })
-                      }
+                      onChange={e => {
+                        const nextRole = e.target.value as RoleType;
+                        setEditUserForm({
+                          ...editUserForm,
+                          role: nextRole,
+                          division: deriveDivisionFromRole(nextRole),
+                        });
+                      }}
                       className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl disabled:opacity-60"
                     >
                       {allAssignableRoles.map(r => (
@@ -1351,9 +1471,10 @@ export const SettingsModule: React.FC = () => {
                         type={showEditPassword ? 'text' : 'password'}
                         placeholder="Kosongkan jika tidak diubah"
                         value={editUserForm.newPassword}
-                        onChange={e =>
-                          setEditUserForm({ ...editUserForm, newPassword: e.target.value })
-                        }
+                        onChange={e => {
+                          setEditUserForm({ ...editUserForm, newPassword: e.target.value });
+                          if (editFormError) setEditFormError(null);
+                        }}
                         className="w-full pl-3 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
                       />
                       <button
@@ -1369,6 +1490,28 @@ export const SettingsModule: React.FC = () => {
                       </button>
                     </div>
                   </div>
+
+                  {editUserForm.role === 'Supplier / Mitra Pangan' && (
+                    <div className="sm:col-span-2">
+                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                        Hubungkan ke Mitra Supplier
+                      </label>
+                      <select
+                        value={editUserForm.supplierId}
+                        onChange={e =>
+                          setEditUserForm({ ...editUserForm, supplierId: e.target.value })
+                        }
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl"
+                      >
+                        <option value="">-- Pilih Supplier --</option>
+                        {masterSuppliers.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="sm:col-span-2">
                     <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
@@ -1422,17 +1565,22 @@ export const SettingsModule: React.FC = () => {
                 <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setEditingAccessUser(null)}
-                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
+                    disabled={isSubmittingAccess}
+                    onClick={() => {
+                      setEditingAccessUser(null);
+                      setEditFormError(null);
+                    }}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50 disabled:opacity-60"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5"
+                    disabled={isSubmittingAccess}
+                    className="px-4 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-white font-bold flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
                   >
                     <Save className="w-3.5 h-3.5 text-[#F2D58B]" />
-                    <span>Simpan Perubahan</span>
+                    <span>{isSubmittingAccess ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
                   </button>
                 </div>
               </form>
