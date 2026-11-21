@@ -2,6 +2,7 @@ import React from 'react';
 import { FacilityTemperatures } from '../../types';
 import { defaultFacilityTemperatures } from '../../lib/productionData';
 import { Thermometer, Upload, Eye, Camera, CheckCircle2, X, Plus, Clock } from 'lucide-react';
+import { ClassicTimeInput } from './ClassicTimeInput';
 
 export type FacilityTempKey =
   | 'portioningRoomTemp'
@@ -718,14 +719,13 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
           {showTimeFields && (
             <div>
               <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">Waktu</label>
-              <input
-                type="time"
+              <ClassicTimeInput
                 value={timeVal}
-                onChange={e =>
-                  onChange(applyFacilityTimePatch(value, unit.tempKey, e.target.value))
-                }
-                title="Waktu Pencatatan"
-                className="w-full px-1 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-[11px]"
+                format="HH:mm"
+                compact
+                onChange={val => onChange(applyFacilityTimePatch(value, unit.tempKey, val))}
+                title="Waktu Pencatatan (Classic Dual Wheel)"
+                className="w-full pl-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-[11px]"
               />
             </div>
           )}

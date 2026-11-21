@@ -39,8 +39,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && (
-        request.auth.token.email == 'gustiagung1100@gmail.com' ||
-        request.auth.token.email == 'sppgkrejengantemenggungan2@gmail.com' ||
+        (request.auth.token.email_verified == true &&
+         request.auth.token.email.lower() in ['gustiagung1100@gmail.com', 'sppgkrejengantemenggungan2@gmail.com']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleName in ['Admin Utama', 'Kepala SPPG'])
       );
@@ -50,14 +50,43 @@ service cloud.firestore {
     // 1-4. Users, Roles, Permissions & SPPG Profile
     // -------------------------------------------------------------------------
     match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow get: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        (
+          request.auth.token.email_verified == true &&
+          existing().email is string &&
+          existing().email.lower() == request.auth.token.email.lower()
+        )
+      );
       allow list: if isAdmin();
-      allow create: if isSignedIn() && isValidId(userId) && (
-        request.auth.uid == userId || isAdmin()
-      ) && isSameSppg();
+      allow create: if isSignedIn() && isValidId(userId) && isSameSppg() && (
+        isAdmin() ||
+        (
+          request.auth.uid == userId &&
+          request.auth.token.email_verified == true &&
+          incoming().email is string &&
+          incoming().email.lower() == request.auth.token.email.lower() &&
+          (
+            !(incoming().roleName in ['Admin Utama', 'Kepala SPPG']) ||
+            (
+              incoming().webAccessEmailDocId is string &&
+              isValidId(incoming().webAccessEmailDocId) &&
+              exists(/databases/$(database)/documents/users/$(incoming().webAccessEmailDocId)) &&
+              get(/databases/$(database)/documents/users/$(incoming().webAccessEmailDocId)).data.email.lower() == request.auth.token.email.lower() &&
+              get(/databases/$(database)/documents/users/$(incoming().webAccessEmailDocId)).data.roleName == incoming().roleName &&
+              get(/databases/$(database)/documents/users/$(incoming().webAccessEmailDocId)).data.isActive == true
+            )
+          )
+        )
+      );
       allow update: if isSignedIn() && isValidId(userId) && (
-        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'updatedAt', 'lastLoginAt'])) ||
-        isAdmin()
+        isAdmin() ||
+        (
+          request.auth.uid == userId &&
+          request.auth.token.email_verified == true &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'updatedAt', 'lastLoginAt', 'status'])
+        )
       );
       allow delete: if isAdmin();
     }
@@ -119,6 +148,22 @@ service cloud.firestore {
         && incoming().fullName.size() <= 120
         && incoming().lilaCm is number
         && incoming().hemoglobinGdL is number;
+      allow delete: if isSignedIn() && isExistingSameSppg();
+    }
+
+    match /lactating_health_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(recordId)
+        && isSameSppg()
+        && incoming().nik is string
+        && incoming().nik.matches('^[0-9]{16}$')
+        && incoming().fullName is string
+        && incoming().fullName.size() > 0
+        && incoming().fullName.size() <= 120
+        && incoming().lilaCm is number
+        && incoming().hemoglobinGdL is number
+        && incoming().fluidIntakeMl is number;
       allow delete: if isSignedIn() && isExistingSameSppg();
     }
 

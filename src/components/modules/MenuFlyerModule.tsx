@@ -10,6 +10,7 @@ import {
 import { defaultNutritionTarget } from '../../lib/plogData';
 import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import { formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import { toPng } from 'html-to-image';
 import {
   Download,
@@ -1117,10 +1118,10 @@ ${largeLines}
                 <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
                   Batas Porsi Kecil
                 </label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   value={smallConsumptionDeadline}
-                  onChange={e => setSmallConsumptionDeadline(e.target.value)}
+                  onChange={setSmallConsumptionDeadline}
+                  format="HH.mm WIB"
                   className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                 />
               </div>
@@ -1128,10 +1129,10 @@ ${largeLines}
                 <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
                   Batas Porsi Besar
                 </label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   value={largeConsumptionDeadline}
-                  onChange={e => setLargeConsumptionDeadline(e.target.value)}
+                  onChange={setLargeConsumptionDeadline}
+                  format="HH.mm WIB"
                   className="w-full text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                 />
               </div>

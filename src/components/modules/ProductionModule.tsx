@@ -6,6 +6,7 @@ import {
 } from '../../lib/volunteerUtils';
 import { PrintHeader } from '../common/PrintHeader';
 import { Modal } from '../common/Modal';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import { DataTable, Column } from '../common/DataTable';
 import {
   BASTDocumentSheet,
@@ -2684,12 +2685,12 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Waktu Pemeriksaan</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={prepForm.time}
-                  onChange={e => setPrepForm(f => ({ ...f, time: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setPrepForm(f => ({ ...f, time: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
@@ -2970,12 +2971,12 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">Waktu Pemeriksaan</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={cookingForm.time}
-                  onChange={e => setCookingForm(f => ({ ...f, time: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setCookingForm(f => ({ ...f, time: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
@@ -3272,22 +3273,22 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block font-bold mb-1">Waktu Pemeriksaan</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={portioningForm.time}
-                  onChange={e => setPortioningForm(f => ({ ...f, time: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  onChange={val => setPortioningForm(f => ({ ...f, time: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Waktu Pemorsian</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={portioningForm.portioningTime}
-                  onChange={e => setPortioningForm(f => ({ ...f, portioningTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800"
+                  onChange={val => setPortioningForm(f => ({ ...f, portioningTime: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
@@ -3341,7 +3342,7 @@ export const ProductionModule: React.FC = () => {
                   Upload Foto Ompreng Porsi Kecil &amp; Porsi Besar (Sinkron Flyer Menu)
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  Live Camera Panduan Ompreng Landscape
+                  Live Camera 0.6x Panduan Ompreng + Flash
                 </span>
               </div>
 
@@ -3361,7 +3362,7 @@ export const ProductionModule: React.FC = () => {
                     className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-xs transition"
                   >
                     <Camera className="w-4 h-4" />
-                    <span>Buka Live Camera Ompreng (Landscape)</span>
+                    <span>Buka Live Camera 0.6x (Porsi Kecil)</span>
                   </button>
 
                   <div className="flex items-center gap-2.5 pt-1">
@@ -3412,7 +3413,7 @@ export const ProductionModule: React.FC = () => {
                     className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-blue-800 to-indigo-700 hover:from-blue-900 hover:to-indigo-800 text-white text-xs font-bold shadow-xs transition"
                   >
                     <Camera className="w-4 h-4" />
-                    <span>Buka Live Camera Ompreng (Landscape)</span>
+                    <span>Buka Live Camera 0.6x (Porsi Besar)</span>
                   </button>
 
                   <div className="flex items-center gap-2.5 pt-1">
@@ -3655,22 +3656,22 @@ export const ProductionModule: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold mb-1">Waktu Keberangkatan</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={deliveryForm.departureTime}
-                  onChange={e => setDeliveryForm(f => ({ ...f, departureTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setDeliveryForm(f => ({ ...f, departureTime: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Waktu Tiba / Serah Terima</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={deliveryForm.arrivalTime}
-                  onChange={e => setDeliveryForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setDeliveryForm(f => ({ ...f, arrivalTime: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
@@ -3952,22 +3953,22 @@ export const ProductionModule: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className="block font-bold mb-1">Waktu Keberangkatan Jemput</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={returnForm.departureTime}
-                  onChange={e => setReturnForm(f => ({ ...f, departureTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setReturnForm(f => ({ ...f, departureTime: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Waktu Penerimaan di SPPG</label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   required
                   value={returnForm.arrivalTime}
-                  onChange={e => setReturnForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                  onChange={val => setReturnForm(f => ({ ...f, arrivalTime: val }))}
+                  format="HH:mm WIB"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
                 />
               </div>
               <div>

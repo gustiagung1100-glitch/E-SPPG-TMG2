@@ -356,6 +356,70 @@ export interface MaternalHealthRecord {
   updatedAt: string;
 }
 
+export type LactationPhase =
+  | '0–6 Bulan (ASI Eksklusif)'
+  | '> 6–12 Bulan (ASI + MP-ASI)'
+  | '> 12–24 Bulan (ASI Lanjutan)';
+export type LactatingBmiCategory = 'Kurus (Underweight)' | 'Normal (Ideal)' | 'Gemuk (Overweight)' | 'Obesitas';
+export type LactatingAnemiaStatus = 'Normal' | 'Anemia Ringan' | 'Anemia Sedang' | 'Anemia Berat';
+export type LactatingBpStatus = 'Normal' | 'Pra-Hipertensi / Waspada' | 'Hipertensi Pasca Persalinan';
+export type LactationFeedingPattern =
+  | 'ASI Eksklusif'
+  | 'ASI + MP-ASI'
+  | 'ASI Parsial (Campur Sufor)'
+  | 'Kesulitan Menyusui';
+export type BreastHealthStatus =
+  | 'Normal & ASI Lancar'
+  | 'Produksi ASI Kurang'
+  | 'Bendungan ASI (Bengkak)'
+  | 'Mastitis / Puting Lecet';
+export type LactatingRiskLevel = 'Normal / Risiko Rendah' | 'Risiko Sedang' | 'Risiko Tinggi';
+
+export interface LactatingHealthRecord {
+  id: string;
+  nik: string;
+  fullName: string;
+  ageYears: number;
+  phone?: string;
+  institutionId: string;
+  institutionName: string;
+  villageOrPosyandu: string;
+  babyName: string;
+  deliveryDate: string;
+  babyAgeDays: number;
+  lactationWeeks: number;
+  babyAgeMonths: number;
+  lactationPhase: LactationPhase;
+  feedingPattern: LactationFeedingPattern;
+  breastStatus: BreastHealthStatus;
+  weightKg: number;
+  heightCm: number;
+  bmi: number;
+  bmiCategory: LactatingBmiCategory;
+  lilaCm: number;
+  isKek: boolean;
+  lilaCategory: string;
+  hemoglobinGdL: number;
+  anemiaStatus: LactatingAnemiaStatus;
+  systolicBp: number;
+  diastolicBp: number;
+  bpStatus: LactatingBpStatus;
+  fluidIntakeMl: number;
+  targetFluidMl: number;
+  isHydrationLow: boolean;
+  vitaminAPostpartum: boolean;
+  ttdOrMultivitaminCompliant: boolean;
+  recommendedKcal: number;
+  recommendedProteinG: number;
+  measurementDate: string;
+  riskFlags: string[];
+  riskLevel: LactatingRiskLevel;
+  recommendation: string;
+  notes?: string;
+  recordedBy: string;
+  updatedAt: string;
+}
+
 export interface MenuItemGrammage {
   id: string;
   categoryKey:
@@ -1114,7 +1178,7 @@ export interface TemplateFieldConfig {
   label: string;
   placeholder: string;
   defaultValue?: string;
-  type?: 'text' | 'date' | 'number' | 'textarea';
+  type?: 'text' | 'date' | 'number' | 'textarea' | 'time';
 }
 
 export interface DocumentTemplate {
@@ -1216,6 +1280,7 @@ export type DynamicFieldType =
   | 'text'
   | 'number'
   | 'date'
+  | 'time'
   | 'select'
   | 'checkbox'
   | 'radio'

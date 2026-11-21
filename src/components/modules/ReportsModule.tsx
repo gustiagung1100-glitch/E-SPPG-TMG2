@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp, isMatchingMaterialName } from '../../lib/store';
 import { PrintHeader } from '../common/PrintHeader';
 import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -4242,12 +4243,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     <label className="block font-semibold text-slate-600 mb-1">
                       Jam Penerimaan Paket Makanan (Opsional)
                     </label>
-                    <input
-                      type="text"
+                    <ClassicTimeInput
                       value={bastReceiveTimeOverride}
-                      onChange={e => setBastReceiveTimeOverride(e.target.value)}
+                      onChange={setBastReceiveTimeOverride}
+                      format="HH:mm"
+                      allowClear
                       placeholder="Otomatis dari Log Pengiriman (mis. 09:05)"
-                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs"
                     />
                   </div>
 
@@ -4255,12 +4257,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     <label className="block font-semibold text-slate-600 mb-1">
                       Jam Penyerahan Alat Makan (Opsional)
                     </label>
-                    <input
-                      type="text"
+                    <ClassicTimeInput
                       value={bastReturnTimeOverride}
-                      onChange={e => setBastReturnTimeOverride(e.target.value)}
+                      onChange={setBastReturnTimeOverride}
+                      format="HH:mm"
+                      allowClear
                       placeholder="Kosongkan untuk ........ WIB"
-                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs"
                     />
                   </div>
                 </div>
@@ -4450,11 +4453,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-600 mb-1">Waktu Pelaksanaan</label>
-                      <input
-                        type="text"
+                      <ClassicTimeInput
+                        mode="range"
+                        format="HH.mm WIB"
+                        rangeSeparator="–"
                         value={stOverrides.waktuPelaksanaan ?? suratTugasData.waktuPelaksanaan}
-                        onChange={e => setStOverrides(prev => ({ ...prev, waktuPelaksanaan: e.target.value }))}
-                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg"
+                        onChange={val => setStOverrides(prev => ({ ...prev, waktuPelaksanaan: val }))}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs"
                       />
                     </div>
                     <div>
@@ -4566,12 +4571,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     <label className="block font-semibold text-slate-600 mb-1">
                       Waktu Pemeriksaan
                     </label>
-                    <input
-                      type="text"
+                    <ClassicTimeInput
                       value={orgaTimeOverride || organolepticData.waktuPemeriksaan}
-                      onChange={e => setOrgaTimeOverride(e.target.value)}
+                      onChange={setOrgaTimeOverride}
+                      format="HH:mm WIB"
+                      allowClear
                       placeholder="09:15 WIB"
-                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs"
                     />
                   </div>
 

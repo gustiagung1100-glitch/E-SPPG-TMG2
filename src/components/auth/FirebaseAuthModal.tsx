@@ -8,11 +8,11 @@ import {
   sendPasswordResetEmail,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../../lib/firebase';
 import { useApp } from '../../lib/store';
-import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
-import { saveDocument, CURRENT_SPPG_ID } from '../../lib/databaseService';
+import { isProtectedSuperAdminEmail, getWebAccessEmailDocId } from '../../lib/authCrypto';
+import { CURRENT_SPPG_ID } from '../../lib/databaseService';
 import { Modal } from '../common/Modal';
 import {
   ShieldCheck,
@@ -67,42 +67,82 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
       const cred = await signInWithPopup(auth, provider);
       const user = cred.user;
       const emailLower = (user.email || '').trim().toLowerCase();
-      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
-      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+      const emailDocId = emailLower ? getWebAccessEmailDocId(emailLower) : '';
+      const [uidSnap, emailSnap, policySnap] = await Promise.all([
+        getDoc(doc(db, 'users', user.uid)).catch(() => null),
+        emailDocId ? getDoc(doc(db, 'users', emailDocId)).catch(() => null) : Promise.resolve(null),
+        getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
+      ]);
+      const cloudEmailData = emailSnap && emailSnap.exists() ? emailSnap.data() : null;
+      const cloudUidData = uidSnap && uidSnap.exists() ? uidSnap.data() : null;
+      const cloudUserData = cloudEmailData || cloudUidData;
 
-      if (webEntry && (!webEntry.isActive || !webEntry.allowGoogleLogin)) {
+      const webEntry = webAccessUsers.find(u => u.email.trim().toLowerCase() === emailLower);
+      const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
+      const effectiveStrict =
+        policySnap && policySnap.exists() && typeof policySnap.data()?.strictWhitelistOnly === 'boolean'
+          ? (policySnap.data()?.strictWhitelistOnly as boolean)
+          : webAccessPolicy.strictWhitelistOnly;
+
+      const effectiveActive =
+        (typeof cloudEmailData?.isActive === 'boolean' ? cloudEmailData.isActive : undefined) ??
+        webEntry?.isActive ??
+        (typeof cloudUidData?.isActive === 'boolean' ? cloudUidData.isActive : true);
+      const effectiveAllowGoogle =
+        (typeof cloudEmailData?.allowGoogleLogin === 'boolean'
+          ? cloudEmailData.allowGoogleLogin
+          : undefined) ??
+        webEntry?.allowGoogleLogin ??
+        (typeof cloudUidData?.allowGoogleLogin === 'boolean' ? cloudUidData.allowGoogleLogin : true);
+      const hasRegisteredEntry = Boolean(webEntry || cloudUserData);
+
+      if (hasRegisteredEntry && (!effectiveActive || !effectiveAllowGoogle) && !isSuperAdmin) {
         setAuthError('Akses login Google untuk akun ini dinonaktifkan oleh Admin Utama.');
         await logout();
         return;
       }
 
-      if (!webEntry && webAccessPolicy.strictWhitelistOnly && !isSuperAdmin) {
+      if (!hasRegisteredEntry && effectiveStrict && !isSuperAdmin) {
         setAuthError(`Akun ${user.email} belum didaftarkan untuk akses login oleh Admin Utama.`);
         await logout();
         return;
       }
 
-      const assignedRole = isSuperAdmin ? 'Admin Utama' : (webEntry?.role || currentUser.role);
+      const assignedRole = isSuperAdmin
+        ? 'Admin Utama'
+        : cloudEmailData?.roleName || webEntry?.role || cloudUidData?.roleName || currentUser.role;
 
-      // Sync user profile to Firestore 'users' collection
-      await saveDocument(
-        'users',
-        user.uid,
-        {
-          uid: user.uid,
-          name: webEntry?.name || user.displayName || 'Petugas SPPG',
-          email: user.email || '',
-          roleName: assignedRole,
-          roleId: assignedRole === 'Admin Utama' ? 'role-admin' : 'role-staff',
-          division: webEntry?.division || currentUser.division,
-          sppgId: CURRENT_SPPG_ID,
-          isActive: true,
-          status: 'Terverifikasi',
-          lastLoginAt: new Date().toISOString(),
-        },
-        user.uid,
-        user.displayName || 'Google User'
-      );
+      const now = new Date().toISOString();
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        if (!cloudUidData) {
+          await setDoc(userDocRef, {
+            id: user.uid,
+            uid: user.uid,
+            name: cloudUserData?.name || webEntry?.name || user.displayName || 'Petugas SPPG',
+            email: emailLower,
+            roleName: assignedRole,
+            roleId: assignedRole === 'Admin Utama' ? 'role-admin' : 'role-staff',
+            division: cloudEmailData?.division || webEntry?.division || currentUser.division || '',
+            sppgId: CURRENT_SPPG_ID,
+            isActive: true,
+            status: 'Terverifikasi',
+            ...(cloudEmailData ? { webAccessEmailDocId: emailDocId } : {}),
+            createdAt: now,
+            updatedAt: now,
+            lastLoginAt: now,
+          });
+        } else {
+          await updateDoc(userDocRef, {
+            name: cloudUserData?.name || webEntry?.name || user.displayName || 'Petugas SPPG',
+            status: 'Terverifikasi',
+            updatedAt: now,
+            lastLoginAt: now,
+          });
+        }
+      } catch {
+        // Non-blocking fallback
+      }
 
       if (isSuperAdmin) {
         switchRole('Admin Utama');
@@ -125,7 +165,7 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
 
     try {
       const emailLower = email.trim().toLowerCase();
-      const webEntry = webAccessUsers.find(u => u.email.toLowerCase() === emailLower);
+      const webEntry = webAccessUsers.find(u => u.email.trim().toLowerCase() === emailLower);
       const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
 
       if (authMode === 'login') {
@@ -134,8 +174,14 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
         }
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const user = cred.user;
-        const cloudSnap = await getDoc(doc(db, 'users', user.uid)).catch(() => null);
-        const cloudData = cloudSnap && cloudSnap.exists() ? cloudSnap.data() : null;
+        const emailDocId = emailLower ? getWebAccessEmailDocId(emailLower) : '';
+        const [cloudSnap, emailSnap] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid)).catch(() => null),
+          emailDocId ? getDoc(doc(db, 'users', emailDocId)).catch(() => null) : Promise.resolve(null),
+        ]);
+        const cloudData =
+          (emailSnap && emailSnap.exists() ? emailSnap.data() : null) ||
+          (cloudSnap && cloudSnap.exists() ? cloudSnap.data() : null);
         if (cloudData && cloudData.isActive === false && !isSuperAdmin) {
           await logout();
           throw new Error('Akun ini dinonaktifkan oleh Admin Utama SPPG.');
@@ -145,18 +191,14 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
           throw new Error(`Email ${email} belum didaftarkan pada whitelist akses login oleh Admin Utama.`);
         }
 
-        await saveDocument(
-          'users',
-          user.uid,
-          {
-            uid: user.uid,
-            email: user.email || '',
-            lastLoginAt: new Date().toISOString(),
+        const now = new Date().toISOString();
+        if (cloudSnap && cloudSnap.exists()) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            lastLoginAt: now,
+            updatedAt: now,
             status: 'Aktif',
-          },
-          user.uid,
-          user.email || 'Staff'
-        );
+          }).catch(() => {});
+        }
 
         addToast('success', 'Login Berhasil', `Selamat datang kembali, ${user.email}`);
         onClose();
@@ -177,24 +219,21 @@ export const FirebaseAuthModal: React.FC<FirebaseAuthModalProps> = ({ isOpen, on
           firebaseUid: user.uid,
         });
 
-        // Save User Document to 'users' collection with SPPG ID
-        await saveDocument(
-          'users',
-          user.uid,
-          {
-            uid: user.uid,
-            name: displayName || email.split('@')[0],
-            email: user.email || '',
-            roleName: 'Kepala SPPG',
-            roleId: 'role-staff',
-            sppgId: CURRENT_SPPG_ID,
-            isActive: true,
-            status: 'Aktif',
-            lastLoginAt: new Date().toISOString(),
-          },
-          user.uid,
-          displayName || email
-        );
+        const now = new Date().toISOString();
+        await setDoc(doc(db, 'users', user.uid), {
+          id: user.uid,
+          uid: user.uid,
+          name: displayName || email.split('@')[0],
+          email: (user.email || email).trim().toLowerCase(),
+          roleName: 'Kepala SPPG',
+          roleId: 'role-staff',
+          sppgId: CURRENT_SPPG_ID,
+          isActive: true,
+          status: 'Aktif',
+          createdAt: now,
+          updatedAt: now,
+          lastLoginAt: now,
+        }).catch(() => {});
 
         addToast('success', 'Akun Terdaftar', 'Akun Firebase Auth berhasil dibuat.');
         onClose();

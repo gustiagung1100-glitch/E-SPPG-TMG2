@@ -10,11 +10,15 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../../lib/firebase';
 import { useApp, initialUsers, resolveUserByIdentifier } from '../../lib/store';
-import { verifyLoginPassword, isProtectedSuperAdminEmail } from '../../lib/authCrypto';
-import { saveDocument, CURRENT_SPPG_ID } from '../../lib/databaseService';
+import {
+  verifyLoginPassword,
+  isProtectedSuperAdminEmail,
+  getWebAccessEmailDocId,
+} from '../../lib/authCrypto';
+import { CURRENT_SPPG_ID } from '../../lib/databaseService';
 import { RoleType, UserProfile } from '../../types';
 import {
   Mail,
@@ -76,7 +80,7 @@ function mapFirebaseAuthError(err: any): string {
     case 'auth/cancelled-popup-request':
       return 'Permintaan login Google sebelumnya masih berjalan.';
     case 'auth/operation-not-allowed':
-      return 'Akun belum terdaftar pada daftar akses login Admin Utama.';
+      return 'Login Email/Sandi lintas perangkat belum aktif di Firebase Console atau akun hanya tersimpan di browser Admin. Coba tombol "Masuk dengan Akun Google" atau hubungi Admin Utama.';
     default:
       return err?.message || 'Autentikasi gagal. Periksa email dan kata sandi Anda.';
   }
@@ -177,28 +181,44 @@ export const LoginPage: React.FC = () => {
     };
   };
 
-  const syncUserFirestoreSafely = async (profile: UserProfile, targetDocId?: string) => {
+  const syncUserFirestoreSafely = async (
+    profile: UserProfile,
+    targetDocId?: string,
+    emailDocId?: string
+  ) => {
     if (!auth.currentUser) return;
     const docUid = targetDocId || auth.currentUser.uid;
+    const now = new Date().toISOString();
     try {
-      await saveDocument(
-        'users',
-        docUid,
-        {
+      const docRef = doc(db, 'users', docUid);
+      const existingSnap = await getDoc(docRef).catch(() => null);
+      if (!existingSnap || !existingSnap.exists()) {
+        await setDoc(docRef, {
+          id: docUid,
           uid: docUid,
+          sppgId: CURRENT_SPPG_ID,
           name: profile.name,
-          email: profile.email,
+          email: profile.email.trim().toLowerCase(),
           roleName: profile.role,
           roleId: profile.role === 'Admin Utama' ? 'role-admin' : 'role-staff',
           division: profile.division || '',
-          sppgId: CURRENT_SPPG_ID,
+          supplierId: profile.supplierId || '',
+          supplierName: profile.supplierName || '',
           isActive: true,
           status: 'Terverifikasi',
-          lastLoginAt: new Date().toISOString(),
-        },
-        auth.currentUser.uid,
-        profile.name
-      );
+          ...(emailDocId ? { webAccessEmailDocId: emailDocId } : {}),
+          createdAt: now,
+          updatedAt: now,
+          lastLoginAt: now,
+        });
+      } else {
+        await updateDoc(docRef, {
+          name: profile.name,
+          status: 'Terverifikasi',
+          updatedAt: now,
+          lastLoginAt: now,
+        });
+      }
     } catch {
       // Non-blocking fallback
     }
@@ -318,11 +338,14 @@ export const LoginPage: React.FC = () => {
           return;
         }
 
-        const isPasswordMatch = verifyLoginPassword(
-          registeredWebUser.email,
-          password,
-          registeredWebUser.passwordHash
-        );
+        const isPasswordMatch =
+          verifyLoginPassword(registeredWebUser.email, password, registeredWebUser.passwordHash) ||
+          (password !== password.trim() &&
+            verifyLoginPassword(
+              registeredWebUser.email,
+              password.trim(),
+              registeredWebUser.passwordHash
+            ));
 
         if (!isPasswordMatch) {
           const wrongPassMsg =
@@ -474,22 +497,30 @@ export const LoginPage: React.FC = () => {
       const webEntry = webAccessUsers.find(u => u.email.trim().toLowerCase() === emailLower);
       const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
 
-      const [cloudUserSnap, cloudPolicySnap] = await Promise.all([
+      const emailDocId = emailLower ? getWebAccessEmailDocId(emailLower) : '';
+      const [cloudUserSnap, cloudEmailSnap, cloudPolicySnap] = await Promise.all([
         getDoc(doc(db, 'users', fbUser.uid)).catch(() => null),
+        emailDocId ? getDoc(doc(db, 'users', emailDocId)).catch(() => null) : Promise.resolve(null),
         getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
       ]);
-      const cloudUserData = cloudUserSnap && cloudUserSnap.exists() ? cloudUserSnap.data() : null;
+      const cloudUidData = cloudUserSnap && cloudUserSnap.exists() ? cloudUserSnap.data() : null;
+      const cloudEmailData = cloudEmailSnap && cloudEmailSnap.exists() ? cloudEmailSnap.data() : null;
+      const cloudUserData = cloudEmailData || cloudUidData;
       const effectiveStrict =
         cloudPolicySnap && cloudPolicySnap.exists() && typeof cloudPolicySnap.data()?.strictWhitelistOnly === 'boolean'
           ? (cloudPolicySnap.data()?.strictWhitelistOnly as boolean)
           : webAccessPolicy.strictWhitelistOnly;
 
       const effectiveActive =
+        (typeof cloudEmailData?.isActive === 'boolean' ? cloudEmailData.isActive : undefined) ??
         webEntry?.isActive ??
-        (typeof cloudUserData?.isActive === 'boolean' ? cloudUserData.isActive : true);
+        (typeof cloudUidData?.isActive === 'boolean' ? cloudUidData.isActive : true);
       const effectiveAllowGoogle =
+        (typeof cloudEmailData?.allowGoogleLogin === 'boolean'
+          ? cloudEmailData.allowGoogleLogin
+          : undefined) ??
         webEntry?.allowGoogleLogin ??
-        (typeof cloudUserData?.allowGoogleLogin === 'boolean' ? cloudUserData.allowGoogleLogin : true);
+        (typeof cloudUidData?.allowGoogleLogin === 'boolean' ? cloudUidData.allowGoogleLogin : true);
       const hasRegisteredEntry = Boolean(webEntry || cloudUserData);
 
       if (hasRegisteredEntry) {
@@ -510,7 +541,7 @@ export const LoginPage: React.FC = () => {
         }
       } else if (effectiveStrict && !isSuperAdmin) {
         await signOut(auth);
-        const msg = `Akun Google ${fbUser.email} belum didaftarkan untuk akses login oleh Admin Utama.`;
+        const msg = `Akun Google ${fbUser.email} belum didaftarkan untuk akses login oleh Admin Utama (atau Admin belum menyinkronkan ke Cloud).`;
         setAuthError(msg);
         addToast('error', 'Akses Belum Terdaftar', msg);
         return;
@@ -526,10 +557,18 @@ export const LoginPage: React.FC = () => {
             uid: fbUser.uid,
             name: cloudUserData.name || fallbackProfile.name,
             email: fbUser.email || fallbackProfile.email,
-            role: (isSuperAdmin ? 'Admin Utama' : cloudUserData.roleName || fallbackProfile.role) as RoleType,
-            division: cloudUserData.division || fallbackProfile.division,
-            supplierId: cloudUserData.supplierId || fallbackProfile.supplierId,
-            supplierName: cloudUserData.supplierName || fallbackProfile.supplierName,
+            role: (isSuperAdmin
+              ? 'Admin Utama'
+              : cloudEmailData?.roleName || webEntry?.role || cloudUidData?.roleName || fallbackProfile.role) as RoleType,
+            division:
+              cloudEmailData?.division || webEntry?.division || cloudUidData?.division || fallbackProfile.division,
+            supplierId:
+              cloudEmailData?.supplierId || webEntry?.supplierId || cloudUidData?.supplierId || fallbackProfile.supplierId,
+            supplierName:
+              cloudEmailData?.supplierName ||
+              webEntry?.supplierName ||
+              cloudUidData?.supplierName ||
+              fallbackProfile.supplierName,
             isActive: true,
           }
         : { ...fallbackProfile, uid: fbUser.uid };
@@ -537,7 +576,11 @@ export const LoginPage: React.FC = () => {
       if (webEntry) {
         recordWebLoginTimestamp(webEntry.email);
       }
-      await syncUserFirestoreSafely(profile, fbUser.uid);
+      await syncUserFirestoreSafely(
+        profile,
+        fbUser.uid,
+        cloudEmailData ? emailDocId : undefined
+      );
 
       setAuthSuccess(`Terhubung sebagai ${profile.email}. Mengalihkan ke sistem...`);
       addToast('success', 'Login Google Berhasil', `Selamat datang, ${profile.name}`);

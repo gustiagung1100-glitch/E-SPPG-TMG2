@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import {
   BASTDocumentSheet,
   resolveBastAutoFields,
@@ -1713,12 +1714,13 @@ export const DistributionModule: React.FC = () => {
                     <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                       Jam Penyerahan Alat Makan (Opsional)
                     </label>
-                    <input
-                      type="text"
+                    <ClassicTimeInput
                       placeholder="Kosongkan untuk ........ WIB"
                       value={bastReturnTimeInput}
-                      onChange={e => setBastReturnTimeInput(e.target.value)}
-                      className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                      onChange={setBastReturnTimeInput}
+                      format="HH:mm"
+                      allowClear
+                      className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                     />
                   </div>
                 </div>
@@ -1862,22 +1864,22 @@ export const DistributionModule: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold mb-1">Waktu Berangkat</label>
-              <input
-                type="text"
+              <ClassicTimeInput
                 required
                 value={deliveryForm.departureTime}
-                onChange={e => setDeliveryForm(f => ({ ...f, departureTime: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                onChange={val => setDeliveryForm(f => ({ ...f, departureTime: val }))}
+                format="HH:mm WIB"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
               />
             </div>
             <div>
               <label className="block font-bold mb-1">Waktu Tiba / Serah Terima</label>
-              <input
-                type="text"
+              <ClassicTimeInput
                 required
                 value={deliveryForm.arrivalTime}
-                onChange={e => setDeliveryForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                onChange={val => setDeliveryForm(f => ({ ...f, arrivalTime: val }))}
+                format="HH:mm WIB"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
               />
             </div>
             <div>
@@ -2146,22 +2148,22 @@ export const DistributionModule: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block font-bold mb-1">Waktu Jemput</label>
-              <input
-                type="text"
+              <ClassicTimeInput
                 required
                 value={returnForm.departureTime}
-                onChange={e => setReturnForm(f => ({ ...f, departureTime: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                onChange={val => setReturnForm(f => ({ ...f, departureTime: val }))}
+                format="HH:mm WIB"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
               />
             </div>
             <div>
               <label className="block font-bold mb-1">Waktu Tiba di SPPG</label>
-              <input
-                type="text"
+              <ClassicTimeInput
                 required
                 value={returnForm.arrivalTime}
-                onChange={e => setReturnForm(f => ({ ...f, arrivalTime: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                onChange={val => setReturnForm(f => ({ ...f, arrivalTime: val }))}
+                format="HH:mm WIB"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 dark:border-slate-700 text-xs"
               />
             </div>
             <div>

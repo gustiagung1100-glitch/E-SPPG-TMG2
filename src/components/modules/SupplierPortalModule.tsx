@@ -3,6 +3,7 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { PrintHeader } from '../common/PrintHeader';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate, formatRupiah, formatNumber } from '../../lib/exportUtils';
 import { PurchaseOrder, SupplierDocument, MasterSupplier } from '../../types';
 import {
@@ -797,11 +798,11 @@ export const SupplierPortalModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Estimasi Jam Tiba di SPPG
                 </label>
-                <input
-                  type="text"
+                <ClassicTimeInput
                   placeholder="Contoh: 03:30 WIB"
                   value={confirmForm.estimatedDeliveryTime}
-                  onChange={(e) => setConfirmForm({ ...confirmForm, estimatedDeliveryTime: e.target.value })}
+                  onChange={val => setConfirmForm({ ...confirmForm, estimatedDeliveryTime: val })}
+                  format="HH:mm WIB"
                   required
                   className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 />

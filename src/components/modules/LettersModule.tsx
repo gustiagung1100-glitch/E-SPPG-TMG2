@@ -4,6 +4,7 @@ import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import {
   BASTDocumentSheet,
   resolveBastAutoFields,
@@ -1570,6 +1571,37 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
                       placeholder={field.placeholder}
                       onChange={(e) => {
                         const val = e.target.value;
+                        setOutgoingForm(prev => ({
+                          ...prev,
+                          fieldsData: { ...prev.fieldsData, [field.key]: val },
+                        }));
+                      }}
+                      className="w-full py-1.5 px-2.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                  ) : field.type === 'time' ||
+                    field.key === 'JAM_TERIMA' ||
+                    field.key === 'JAM_KEMBALI' ||
+                    field.key === 'WAKTU_PELAKSANAAN' ||
+                    field.key === 'WAKTU_ACARA' ? (
+                    <ClassicTimeInput
+                      value={outgoingForm.fieldsData[field.key] || ''}
+                      placeholder={field.placeholder}
+                      mode={
+                        field.key === 'WAKTU_PELAKSANAAN' || field.key === 'WAKTU_ACARA'
+                          ? 'range'
+                          : 'single'
+                      }
+                      format={
+                        field.key === 'WAKTU_PELAKSANAAN'
+                          ? 'HH.mm WIB'
+                          : field.key === 'WAKTU_ACARA'
+                          ? 'HH:mm WIB'
+                          : 'HH:mm'
+                      }
+                      rangeSeparator={field.key === 'WAKTU_ACARA' ? ' - ' : '–'}
+                      allowClear={field.key === 'JAM_KEMBALI'}
+                      clearValue={field.key === 'JAM_KEMBALI' ? '........' : ''}
+                      onChange={(val) => {
                         setOutgoingForm(prev => ({
                           ...prev,
                           fieldsData: { ...prev.fieldsData, [field.key]: val },

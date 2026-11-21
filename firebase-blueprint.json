@@ -149,6 +149,29 @@
       },
       "required": ["id", "sppgId", "nik", "fullName", "ageYears", "trimester", "lilaCm", "hemoglobinGdL", "riskLevel"]
     },
+    "LactatingHealthRecord": {
+      "title": "LactatingHealthRecord",
+      "description": "Lactating beneficiary health screening, postpartum duration, LILA KEK, hemoglobin anemia, blood pressure, hydration, breast health, and MBG nutrition recommendation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "sppgId": { "type": "string", "maxLength": 64 },
+        "nik": { "type": "string", "maxLength": 16 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "ageYears": { "type": "number" },
+        "institutionId": { "type": "string", "maxLength": 64 },
+        "lactationPhase": { "type": "string", "maxLength": 40 },
+        "babyAgeMonths": { "type": "number" },
+        "lilaCm": { "type": "number" },
+        "hemoglobinGdL": { "type": "number" },
+        "systolicBp": { "type": "number" },
+        "diastolicBp": { "type": "number" },
+        "fluidIntakeMl": { "type": "number" },
+        "riskLevel": { "type": "string", "maxLength": 40 },
+        "measurementDate": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["id", "sppgId", "nik", "fullName", "ageYears", "lactationPhase", "lilaCm", "hemoglobinGdL", "fluidIntakeMl", "riskLevel"]
+    },
     "Volunteer": {
       "title": "Volunteer",
       "description": "Kitchen and field volunteer personnel",

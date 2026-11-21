@@ -25,6 +25,9 @@ import {
   BeneficiaryQuotaHistory,
   BeneficiaryNutritionRecord,
   MaternalHealthRecord,
+  LactatingHealthRecord,
+  BreastHealthStatus,
+  LactationFeedingPattern,
   PreparationInspectionRecord,
   CookingInspectionRecord,
   PortioningInspectionRecord,
@@ -61,6 +64,7 @@ import {
 } from './dynamicFormSchemas';
 import {
   hashLoginPassword,
+  getWebAccessEmailDocId,
   isProtectedSuperAdminEmail,
   createSignedAuthSession,
   verifyStoredAuthSession,
@@ -118,6 +122,11 @@ import {
   calculateGestationFromHPHT,
   calculateMaternalHealthAssessment,
 } from './maternalHealth';
+import { initialLactatingHealthRecords } from './lactatingHealthData';
+import {
+  calculateLactationDuration,
+  calculateLactatingHealthAssessment,
+} from './lactatingHealth';
 import {
   isMatchingMaterialNameShared,
   normalizeMaterialSyncName,
@@ -129,7 +138,14 @@ import {
 } from './supplyChainSync';
 import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType } from './firebase';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+} from 'firebase/auth';
 
 export interface ToastMessage {
   id: string;
@@ -188,6 +204,9 @@ interface AppContextType {
   updateWebAccessPolicy: (policy: Partial<WebAccessPolicy>) => Promise<void>;
   recordWebLoginTimestamp: (email: string) => void;
   findWebAccessUser: (identifier: string) => WebAccessUser | undefined;
+  firebaseAuthEmail: string | null;
+  syncAllWebAccessToCloud: () => Promise<{ synced: number; failed: number }>;
+  connectFirebaseAdminSync: () => Promise<{ ok: boolean; message: string }>;
 
   sppgConfig: SPPGConfig;
   updateSPPGConfig: (config: Partial<SPPGConfig>) => Promise<void>;
@@ -328,6 +347,62 @@ interface AppContextType {
     }>
   ) => Promise<{ ok: boolean; error?: string; record?: MaternalHealthRecord }>;
   deleteMaternalHealthRecord: (id: string) => Promise<void>;
+
+  // 9. Kesehatan & Gizi Ibu Menyusui (3B)
+  lactatingHealthRecords: LactatingHealthRecord[];
+  checkDuplicateLactatingNik: (nik: string, excludeId?: string) => LactatingHealthRecord | undefined;
+  addLactatingHealthRecord: (input: {
+    nik: string;
+    fullName: string;
+    ageYears: number;
+    phone?: string;
+    institutionId: string;
+    institutionNameOverride?: string;
+    villageOrPosyandu: string;
+    babyName: string;
+    deliveryDate: string;
+    feedingPattern: LactationFeedingPattern;
+    breastStatus: BreastHealthStatus;
+    weightKg: number;
+    heightCm: number;
+    lilaCm: number;
+    hemoglobinGdL: number;
+    systolicBp: number;
+    diastolicBp: number;
+    fluidIntakeMl: number;
+    vitaminAPostpartum: boolean;
+    ttdOrMultivitaminCompliant: boolean;
+    measurementDate: string;
+    notes?: string;
+  }) => Promise<{ ok: boolean; error?: string; record?: LactatingHealthRecord }>;
+  updateLactatingHealthRecord: (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      ageYears: number;
+      phone: string;
+      institutionId: string;
+      institutionNameOverride: string;
+      villageOrPosyandu: string;
+      babyName: string;
+      deliveryDate: string;
+      feedingPattern: LactationFeedingPattern;
+      breastStatus: BreastHealthStatus;
+      weightKg: number;
+      heightCm: number;
+      lilaCm: number;
+      hemoglobinGdL: number;
+      systolicBp: number;
+      diastolicBp: number;
+      fluidIntakeMl: number;
+      vitaminAPostpartum: boolean;
+      ttdOrMultivitaminCompliant: boolean;
+      measurementDate: string;
+      notes: string;
+    }>
+  ) => Promise<{ ok: boolean; error?: string; record?: LactatingHealthRecord }>;
+  deleteLactatingHealthRecord: (id: string) => Promise<void>;
 
   // Operasional Lainnya
   menuItems: MenuItem[];
@@ -2080,6 +2155,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     Boolean(initialVerifiedState?.isOriginAdmin)
   );
   const [authReady, setAuthReady] = useState<boolean>(false);
+  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string | null>(() => auth.currentUser?.email || null);
   const explicitLogoutRef = React.useRef<boolean>(false);
   const webAccessUsersRef = React.useRef<WebAccessUser[]>(webAccessUsers);
   const webAccessPolicyRef = React.useRef<WebAccessPolicy>(webAccessPolicy);
@@ -2211,6 +2287,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return initialMaternalHealthRecords;
     } catch {
       return initialMaternalHealthRecords;
+    }
+  });
+  const [lactatingHealthRecords, setLactatingHealthRecords] = useState<LactatingHealthRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_lactating_health_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+      return initialLactatingHealthRecords;
+    } catch {
+      return initialLactatingHealthRecords;
     }
   });
   const [isDataHydrating, setIsDataHydrating] = useState<boolean>(true);
@@ -2778,6 +2866,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [maternalHealthRecords, safeWriteLocalStorage]);
 
   useEffect(() => {
+    safeWriteLocalStorage('esppg_lactating_health_v1', JSON.stringify(lactatingHealthRecords));
+  }, [lactatingHealthRecords, safeWriteLocalStorage]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => setIsDataHydrating(false), 320);
     return () => window.clearTimeout(timer);
   }, []);
@@ -2970,6 +3062,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 1500);
 
     const unsubscribe = onAuthStateChanged(auth, async fbUser => {
+      setFirebaseAuthEmail(fbUser?.email || null);
       let latestUsers = [...webAccessUsersRef.current];
       let latestPolicy = { ...webAccessPolicyRef.current };
 
@@ -2977,11 +3070,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const emailLower = (fbUser.email || '').trim().toLowerCase();
         const isSuperAdmin = isProtectedSuperAdminEmail(emailLower);
 
-        // 1. Hydrate web_access_policy & user profile from Firestore before evaluating whitelist/block status
+        // 1. Hydrate web_access_policy & user profile (both UID doc and deterministic email-hash doc) from Firestore
         try {
-          const [policySnap, selfUserSnap] = await Promise.all([
+          const emailDocId = emailLower ? getWebAccessEmailDocId(emailLower) : '';
+          const [policySnap, selfUserSnap, emailUserSnap] = await Promise.all([
             getDoc(doc(db, 'app_settings', 'web_access_policy')).catch(() => null),
             getDoc(doc(db, 'users', fbUser.uid)).catch(() => null),
+            emailDocId ? getDoc(doc(db, 'users', emailDocId)).catch(() => null) : Promise.resolve(null),
           ]);
 
           if (policySnap && policySnap.exists()) {
@@ -3006,44 +3101,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
 
           let isCloudAdmin = isSuperAdmin;
-          if (selfUserSnap && selfUserSnap.exists()) {
-            const uData = selfUserSnap.data();
-            const docEmail = (uData.email || fbUser.email || '').trim().toLowerCase();
-            if (docEmail && uData.roleName) {
-              if (uData.roleName === 'Admin Utama' || uData.roleName === 'Kepala SPPG') {
-                isCloudAdmin = true;
-              }
-              const hydratedEntry: WebAccessUser = {
-                id: uData.webAccessId || `wau-${fbUser.uid}`,
-                firebaseUid: fbUser.uid,
-                name: uData.name || fbUser.displayName || docEmail.split('@')[0],
-                email: docEmail,
-                role: (isProtectedSuperAdminEmail(docEmail) ? 'Admin Utama' : uData.roleName) as RoleType,
-                division: uData.division || undefined,
-                supplierId: uData.supplierId || undefined,
-                supplierName: uData.supplierName || undefined,
-                passwordHash:
-                  typeof uData.passwordHash === 'string' ? uData.passwordHash : '',
-                isActive: typeof uData.isActive === 'boolean' ? uData.isActive : true,
-                allowGoogleLogin:
-                  typeof uData.allowGoogleLogin === 'boolean' ? uData.allowGoogleLogin : true,
-                isProtectedAdmin: isProtectedSuperAdminEmail(docEmail),
-                createdAt: uData.createdAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
-                createdBy: uData.createdBy || 'Firestore Sync',
-                updatedAt: uData.updatedAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
-                updatedBy: uData.updatedBy || 'Firestore Sync',
-                lastLoginAt: uData.lastLoginAt || undefined,
-                notes: uData.notes || undefined,
-              };
-              const idx = latestUsers.findIndex(u => u.email.trim().toLowerCase() === docEmail);
-              if (idx >= 0) {
-                latestUsers[idx] = {
-                  ...latestUsers[idx],
-                  ...hydratedEntry,
-                  passwordHash: hydratedEntry.passwordHash || latestUsers[idx].passwordHash,
+          const profileSnaps = [selfUserSnap, emailUserSnap];
+          for (const snap of profileSnaps) {
+            if (snap && snap.exists()) {
+              const uData = snap.data();
+              const docEmail = (uData.email || fbUser.email || '').trim().toLowerCase();
+              if (docEmail && uData.roleName) {
+                if (uData.roleName === 'Admin Utama' || uData.roleName === 'Kepala SPPG') {
+                  isCloudAdmin = true;
+                }
+                const existingLocal = latestUsers.find(u => u.email.trim().toLowerCase() === docEmail);
+                const hydratedEntry: WebAccessUser = {
+                  id: uData.webAccessId || existingLocal?.id || `wau-${fbUser.uid}`,
+                  firebaseUid: fbUser.uid,
+                  name: uData.name || existingLocal?.name || fbUser.displayName || docEmail.split('@')[0],
+                  email: docEmail,
+                  role: (isProtectedSuperAdminEmail(docEmail) ? 'Admin Utama' : uData.roleName) as RoleType,
+                  division: uData.division || existingLocal?.division || undefined,
+                  supplierId: uData.supplierId || existingLocal?.supplierId || undefined,
+                  supplierName: uData.supplierName || existingLocal?.supplierName || undefined,
+                  passwordHash:
+                    typeof uData.passwordHash === 'string' && uData.passwordHash
+                      ? uData.passwordHash
+                      : existingLocal?.passwordHash || '',
+                  isActive:
+                    typeof uData.isActive === 'boolean'
+                      ? uData.isActive
+                      : existingLocal?.isActive ?? true,
+                  allowGoogleLogin:
+                    typeof uData.allowGoogleLogin === 'boolean'
+                      ? uData.allowGoogleLogin
+                      : existingLocal?.allowGoogleLogin ?? true,
+                  isProtectedAdmin: isProtectedSuperAdminEmail(docEmail),
+                  createdAt:
+                    uData.createdAt || existingLocal?.createdAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
+                  createdBy: uData.createdBy || existingLocal?.createdBy || 'Firestore Sync',
+                  updatedAt:
+                    uData.updatedAt || existingLocal?.updatedAt || new Date().toISOString().replace('T', ' ').slice(0, 19),
+                  updatedBy: uData.updatedBy || existingLocal?.updatedBy || 'Firestore Sync',
+                  lastLoginAt: uData.lastLoginAt || existingLocal?.lastLoginAt || undefined,
+                  notes: uData.notes || existingLocal?.notes || undefined,
                 };
-              } else {
-                latestUsers = mergeProtectedAdmins([...latestUsers, hydratedEntry]);
+                const idx = latestUsers.findIndex(u => u.email.trim().toLowerCase() === docEmail);
+                if (idx >= 0) {
+                  latestUsers[idx] = hydratedEntry;
+                } else {
+                  latestUsers = mergeProtectedAdmins([...latestUsers, hydratedEntry]);
+                }
               }
             }
           }
@@ -3055,16 +3159,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (usersSnap && !usersSnap.empty) {
               const nextMap = new Map<string, WebAccessUser>();
               latestUsers.forEach(u => nextMap.set(u.email.trim().toLowerCase(), u));
-              usersSnap.forEach(docSnap => {
+              const orderedDocs = [...usersSnap.docs].sort((a, b) => {
+                const rank = (id: string) => (id.startsWith('wau_e_') ? 2 : id.startsWith('wau_') ? 1 : 0);
+                return rank(a.id) - rank(b.id);
+              });
+              orderedDocs.forEach(docSnap => {
                 const uData = docSnap.data();
                 const docEmail = typeof uData.email === 'string' ? uData.email.trim().toLowerCase() : '';
                 if (!docEmail || !uData.roleName) return;
                 const existing = nextMap.get(docEmail);
+                const isAdminIndexDoc = docSnap.id.startsWith('wau_');
                 const mergedUser: WebAccessUser = {
-                  id: docSnap.id.startsWith('wau_')
-                    ? docSnap.id.replace(/^wau_/, '')
-                    : uData.webAccessId || existing?.id || docSnap.id,
-                  firebaseUid: uData.firebaseUid || (!docSnap.id.startsWith('wau_') ? docSnap.id : existing?.firebaseUid),
+                  id: isAdminIndexDoc
+                    ? (uData.webAccessId || docSnap.id.replace(/^wau_/, ''))
+                    : (uData.webAccessId || existing?.id || docSnap.id),
+                  firebaseUid:
+                    uData.firebaseUid ||
+                    (!isAdminIndexDoc ? docSnap.id : existing?.firebaseUid),
                   name: uData.name || existing?.name || docEmail.split('@')[0],
                   email: docEmail,
                   role: (isProtectedSuperAdminEmail(docEmail) ? 'Admin Utama' : uData.roleName) as RoleType,
@@ -3106,9 +3217,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const webEntry = latestUsers.find(u => u.email.trim().toLowerCase() === emailLower);
         const matched = fbUser.email ? resolveUserByIdentifier(fbUser.email) : undefined;
+        const isGoogleProvider = fbUser.providerData?.some(p => p.providerId === 'google.com');
 
         const isBlocked =
           (webEntry && !webEntry.isActive && !isSuperAdmin) ||
+          (webEntry && isGoogleProvider && !webEntry.allowGoogleLogin && !isSuperAdmin) ||
           (!webEntry && latestPolicy.strictWhitelistOnly && !isSuperAdmin);
 
         if (isBlocked) {
@@ -3594,6 +3707,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubMaternal();
   }, [authReady, isAuthenticated]);
 
+  // Real-time Firestore listener for Lactating Health Records (lactating_health_records)
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !auth.currentUser) return;
+    const lactatingQuery = query(
+      collection(db, 'lactating_health_records'),
+      where('sppgId', '==', 'GFBQSYXD')
+    );
+    const unsubLactating = onSnapshot(
+      lactatingQuery,
+      snapshot => {
+        if (snapshot.empty) return;
+        const cloudRecords: LactatingHealthRecord[] = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as LactatingHealthRecord & { sppgId?: string };
+          if (data && data.nik && data.fullName) {
+            cloudRecords.push({
+              ...data,
+              id: data.id || docSnap.id,
+            });
+          }
+        });
+        if (cloudRecords.length === 0) return;
+        setLactatingHealthRecords(prev => {
+          const byId = new Map<string, LactatingHealthRecord>();
+          prev.forEach(item => byId.set(item.id, item));
+          cloudRecords.forEach(cloud => byId.set(cloud.id, cloud));
+          return Array.from(byId.values());
+        });
+      },
+      err => {
+        console.warn('Firestore lactating health listener running in local fallback:', err?.message || err);
+      }
+    );
+    return () => unsubLactating();
+  }, [authReady, isAuthenticated]);
+
   // Re-validate session periodically or when whitelist/policy updates
   useEffect(() => {
     if (!authReady || !isAuthenticated) return;
@@ -3737,29 +3886,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const provisionSecondaryFirebaseAccount = async (
     email: string,
     password: string
-  ): Promise<string | undefined> => {
-    if (!password || password.length < 6) return undefined;
+  ): Promise<{
+    uid?: string;
+    status: 'created' | 'linked' | 'provider-disabled' | 'weak-password' | 'skipped-short' | 'error';
+    errorCode?: string;
+  }> => {
+    if (!password || password.length < 6) {
+      return { status: 'skipped-short' };
+    }
     try {
       const secAuth = getSecondaryAuth();
       const cred = await createUserWithEmailAndPassword(secAuth, email, password);
       const uid = cred.user.uid;
       await signOut(secAuth).catch(() => {});
-      return uid;
-    } catch {
-      return undefined;
+      return { uid, status: 'created' };
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        try {
+          const secAuth = getSecondaryAuth();
+          const cred = await signInWithEmailAndPassword(secAuth, email, password);
+          const uid = cred.user.uid;
+          await signOut(secAuth).catch(() => {});
+          return { uid, status: 'linked' };
+        } catch {
+          return { status: 'error', errorCode: code };
+        }
+      }
+      if (code === 'auth/operation-not-allowed') {
+        return { status: 'provider-disabled', errorCode: code };
+      }
+      if (code === 'auth/weak-password') {
+        return { status: 'weak-password', errorCode: code };
+      }
+      return { status: 'error', errorCode: code };
     }
   };
 
-  const syncWebAccessToFirestoreSafely = async (userRecord: WebAccessUser) => {
-    if (!auth.currentUser) return;
+  const syncWebAccessToFirestoreSafely = async (userRecord: WebAccessUser): Promise<boolean> => {
+    if (!auth.currentUser) return false;
     try {
+      const normalizedEmail = userRecord.email.trim().toLowerCase();
       const safeDocId = `wau_${userRecord.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const emailDocId = getWebAccessEmailDocId(normalizedEmail);
       const basePayload = {
         sppgId: 'GFBQSYXD',
         webAccessId: userRecord.id,
         firebaseUid: userRecord.firebaseUid || '',
         name: userRecord.name,
-        email: userRecord.email,
+        email: normalizedEmail,
         roleId: userRecord.role === 'Admin Utama' ? 'role-admin' : 'role-staff',
         roleName: userRecord.role,
         division: userRecord.division || '',
@@ -3778,30 +3953,130 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastLoginAt: userRecord.lastLoginAt || '',
       };
 
-      await setDoc(
-        doc(db, 'users', safeDocId),
-        {
-          id: safeDocId,
-          uid: safeDocId,
-          ...basePayload,
-        },
-        { merge: true }
-      );
-
-      if (userRecord.firebaseUid) {
-        const cleanFbUid = userRecord.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_');
-        await setDoc(
-          doc(db, 'users', cleanFbUid),
+      const writes: Promise<void>[] = [
+        setDoc(
+          doc(db, 'users', safeDocId),
           {
-            id: cleanFbUid,
-            uid: cleanFbUid,
+            id: safeDocId,
+            uid: safeDocId,
             ...basePayload,
           },
           { merge: true }
+        ),
+        setDoc(
+          doc(db, 'users', emailDocId),
+          {
+            id: emailDocId,
+            uid: emailDocId,
+            ...basePayload,
+          },
+          { merge: true }
+        ),
+      ];
+
+      if (userRecord.firebaseUid) {
+        const cleanFbUid = userRecord.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_');
+        writes.push(
+          setDoc(
+            doc(db, 'users', cleanFbUid),
+            {
+              id: cleanFbUid,
+              uid: cleanFbUid,
+              ...basePayload,
+            },
+            { merge: true }
+          )
         );
       }
+
+      await Promise.all(writes);
+      return true;
     } catch {
-      // Non-blocking fallback when offline or guest Firebase session
+      return false;
+    }
+  };
+
+  const syncAllWebAccessToCloud = async (): Promise<{ synced: number; failed: number }> => {
+    if (!auth.currentUser) {
+      return { synced: 0, failed: webAccessUsersRef.current.length };
+    }
+    let synced = 0;
+    let failed = 0;
+    for (const u of webAccessUsersRef.current) {
+      const ok = await syncWebAccessToFirestoreSafely(u);
+      if (ok) synced++;
+      else failed++;
+    }
+    try {
+      await Promise.all([
+        setDoc(
+          doc(db, 'app_settings', 'web_access_policy'),
+          {
+            id: 'web_access_policy',
+            sppgId: 'GFBQSYXD',
+            ...webAccessPolicyRef.current,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        ),
+        setDoc(
+          doc(db, 'app_settings', 'role_module_access'),
+          {
+            id: 'role_module_access',
+            sppgId: 'GFBQSYXD',
+            accessMap: roleModuleAccess,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        ),
+      ]);
+    } catch {
+      // Policy sync best-effort
+    }
+    return { synced, failed };
+  };
+
+  const connectFirebaseAdminSync = async (): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const cred = await signInWithPopup(auth, provider);
+      const fbUser = cred.user;
+      const emailLower = (fbUser.email || '').trim().toLowerCase();
+      setFirebaseAuthEmail(fbUser.email || null);
+
+      const matchedLocal = webAccessUsersRef.current.find(
+        u => u.email.trim().toLowerCase() === emailLower
+      );
+      const isAdminEmail =
+        isProtectedSuperAdminEmail(emailLower) ||
+        matchedLocal?.role === 'Admin Utama' ||
+        matchedLocal?.role === 'Kepala SPPG';
+
+      if (!isAdminEmail) {
+        await signOut(auth).catch(() => {});
+        setFirebaseAuthEmail(null);
+        const deniedMsg = `Akun Google ${fbUser.email} bukan Admin Utama SPPG. Gunakan akun Google Admin Utama (sppgkrejengantemenggungan2@gmail.com atau gustiagung1100@gmail.com).`;
+        addToast('error', 'Bukan Akun Admin', deniedMsg);
+        return { ok: false, message: deniedMsg };
+      }
+
+      const { synced, failed } = await syncAllWebAccessToCloud();
+      const msg =
+        failed === 0
+          ? `Sinkronisasi Cloud aktif via ${fbUser.email}. ${synced} akun login & kebijakan berhasil diunggah ke Firestore.`
+          : `Terhubung sebagai ${fbUser.email}, ${synced} akun tersinkron (${failed} gagal).`;
+      addToast(failed === 0 ? 'success' : 'warning', 'Sinkronisasi Cloud Aktif', msg);
+      return { ok: true, message: msg };
+    } catch (err: any) {
+      const msg =
+        err?.code === 'auth/popup-closed-by-user'
+          ? 'Jendela Google ditutup sebelum koneksi selesai.'
+          : err?.message || 'Gagal menghubungkan akun Google Admin.';
+      addToast('error', 'Koneksi Cloud Gagal', msg);
+      return { ok: false, message: msg };
     }
   };
 
@@ -3866,13 +4141,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
-    const cleanPassword = payload.password;
+    const cleanPassword = payload.password.trim();
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const firebaseUid = await provisionSecondaryFirebaseAccount(cleanEmail, cleanPassword);
+    const prov = await provisionSecondaryFirebaseAccount(cleanEmail, cleanPassword);
 
     const newUser: WebAccessUser = {
       id: `wau-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      firebaseUid,
+      firebaseUid: prov.uid,
       name: payload.name.trim() || cleanEmail.split('@')[0],
       email: cleanEmail,
       role: payload.role,
@@ -3892,13 +4167,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nextUsers = [newUser, ...webAccessUsersRef.current];
     const savedLocally = persistWebAccessUsers(nextUsers);
-    await syncWebAccessToFirestoreSafely(newUser);
+    const syncedCloud = await syncWebAccessToFirestoreSafely(newUser);
 
-    if (!savedLocally && !auth.currentUser) {
+    if (!savedLocally && !syncedCloud) {
       addToast(
         'error',
-        'Penyimpanan Lokal Penuh',
-        'Kapasitas penyimpanan browser penuh sehingga data akun gagal disimpan. Hapus data cache lama lalu coba lagi.'
+        'Penyimpanan Penuh',
+        'Kapasitas penyimpanan browser penuh dan koneksi cloud belum aktif. Hapus data cache lama lalu coba lagi.'
       );
       return false;
     }
@@ -3906,9 +4181,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit(
       'CREATE',
       'settings',
-      `Mendaftarkan akses login web manual untuk ${newUser.email} (${newUser.role}) — Status: ${newUser.isActive ? 'Diizinkan' : 'Dinonaktifkan'}`
+      `Mendaftarkan akses login web untuk ${newUser.email} (${newUser.role}) — Status: ${newUser.isActive ? 'Diizinkan' : 'Dinonaktifkan'}${syncedCloud ? ' [Tersinkron Cloud]' : ' [Lokal Browser]'}`
     );
-    addToast('success', 'Akses Login Disimpan', `Akun ${newUser.email} berhasil didaftarkan dan siap digunakan.`);
+
+    if (!syncedCloud) {
+      addToast(
+        'warning',
+        'Tersimpan Lokal (Belum Sinkron Cloud)',
+        `Akun ${newUser.email} siap dipakai login Sandi di browser ini. Untuk login dari HP/perangkat/URL lain, klik "Hubungkan Google Admin" agar tersinkron ke Cloud.`
+      );
+    } else if (prov.status === 'provider-disabled' || prov.status === 'skipped-short') {
+      addToast(
+        'success',
+        'Akun Disimpan & Tersinkron Cloud',
+        `Akun ${newUser.email} dapat login dengan Sandi di perangkat ini atau tombol "Masuk dengan Akun Google" di semua perangkat.`
+      );
+    } else {
+      addToast('success', 'Akses Login Disimpan', `Akun ${newUser.email} berhasil didaftarkan dan siap digunakan.`);
+    }
     return true;
   };
 
@@ -3955,7 +4245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       name: payload.name.trim() || cleanEmail.split('@')[0],
       email: cleanEmail,
       role: isSuperAdmin ? 'Admin Utama' : 'Kepala SPPG',
-      passwordHash: hashLoginPassword(cleanEmail, payload.password),
+      passwordHash: hashLoginPassword(cleanEmail, payload.password.trim()),
       isActive: true,
       allowGoogleLogin: true,
       isProtectedAdmin: isSuperAdmin,
@@ -4029,8 +4319,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     let nextFirebaseUid = target.firebaseUid;
-    if (!nextFirebaseUid && trimmedNewPass.length >= 6) {
-      nextFirebaseUid = await provisionSecondaryFirebaseAccount(nextEmail, trimmedNewPass);
+    if ((!nextFirebaseUid || isEmailChanged) && trimmedNewPass.length >= 6) {
+      const prov = await provisionSecondaryFirebaseAccount(nextEmail, trimmedNewPass);
+      if (prov.uid) {
+        nextFirebaseUid = prov.uid;
+      }
     }
 
     const nextRole = isProtected ? 'Admin Utama' : (updates.role ?? target.role);
@@ -4057,7 +4350,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isActive: isProtected ? true : (updates.isActive ?? target.isActive),
       passwordHash:
         trimmedNewPass.length > 0
-          ? hashLoginPassword(nextEmail, updates.newPassword!)
+          ? hashLoginPassword(nextEmail, trimmedNewPass)
           : target.passwordHash,
       updatedAt: now,
       updatedBy: currentUser.name,
@@ -4065,9 +4358,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nextUsers = webAccessUsersRef.current.map(u => (u.id === id ? updatedUser : u));
     const savedLocally = persistWebAccessUsers(nextUsers);
-    await syncWebAccessToFirestoreSafely(updatedUser);
 
-    if (!savedLocally && !auth.currentUser) {
+    if (isEmailChanged && auth.currentUser) {
+      await deleteDoc(doc(db, 'users', getWebAccessEmailDocId(target.email))).catch(() => {});
+    }
+    const syncedCloud = await syncWebAccessToFirestoreSafely(updatedUser);
+
+    if (!savedLocally && !syncedCloud) {
       addToast('error', 'Gagal Menyimpan Lokal', 'Penyimpanan browser penuh. Perubahan gagal disimpan.');
       return false;
     }
@@ -4077,7 +4374,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'settings',
       `Memperbarui akses login web ${updatedUser.email} (${updatedUser.role}${trimmedNewPass ? ', reset sandi' : ''})`
     );
-    addToast('success', 'Akses Login Diperbarui', `Pengaturan akun ${updatedUser.email} disimpan.`);
+    addToast(
+      syncedCloud ? 'success' : 'warning',
+      syncedCloud ? 'Akses Login Diperbarui' : 'Diperbarui Lokal (Belum Sinkron Cloud)',
+      syncedCloud
+        ? `Pengaturan akun ${updatedUser.email} disimpan dan tersinkron ke Cloud.`
+        : `Perubahan ${updatedUser.email} tersimpan di browser ini. Hubungkan Google Admin untuk menyinkronkan ke perangkat lain.`
+    );
     return true;
   };
 
@@ -4132,10 +4435,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (auth.currentUser) {
       try {
         const safeDocId = `wau_${target.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-        await deleteDoc(doc(db, 'users', safeDocId));
+        const emailDocId = getWebAccessEmailDocId(target.email);
+        const deletions: Promise<void>[] = [
+          deleteDoc(doc(db, 'users', safeDocId)),
+          deleteDoc(doc(db, 'users', emailDocId)),
+        ];
         if (target.firebaseUid) {
-          await deleteDoc(doc(db, 'users', target.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_')));
+          deletions.push(
+            deleteDoc(doc(db, 'users', target.firebaseUid.replace(/[^a-zA-Z0-9_-]/g, '_')))
+          );
         }
+        await Promise.all(deletions);
       } catch {
         // Non-blocking
       }
@@ -5746,6 +6056,318 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     await logAudit('DELETE', 'institutions', `Menghapus data kesehatan ibu hamil: ${target?.fullName || id}`);
     addToast('info', 'Data Dihapus', `Data pemeriksaan ibu hamil ${target?.fullName || ''} telah dihapus.`);
+  };
+
+  // 9. Kesehatan & Gizi Ibu Menyusui (3B) — Anti-Duplikasi NIK
+  const checkDuplicateLactatingNik = (nik: string, excludeId?: string): LactatingHealthRecord | undefined => {
+    const clean = normalizeNik(nik);
+    if (!clean) return undefined;
+    return lactatingHealthRecords.find(r => r.nik === clean && r.id !== excludeId);
+  };
+
+  const addLactatingHealthRecord = async (input: {
+    nik: string;
+    fullName: string;
+    ageYears: number;
+    phone?: string;
+    institutionId: string;
+    institutionNameOverride?: string;
+    villageOrPosyandu: string;
+    babyName: string;
+    deliveryDate: string;
+    feedingPattern: LactationFeedingPattern;
+    breastStatus: BreastHealthStatus;
+    weightKg: number;
+    heightCm: number;
+    lilaCm: number;
+    hemoglobinGdL: number;
+    systolicBp: number;
+    diastolicBp: number;
+    fluidIntakeMl: number;
+    vitaminAPostpartum: boolean;
+    ttdOrMultivitaminCompliant: boolean;
+    measurementDate: string;
+    notes?: string;
+  }): Promise<{ ok: boolean; error?: string; record?: LactatingHealthRecord }> => {
+    const nikCheck = validateNikFormat(input.nik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateLactatingNik(nikCheck.cleanNik);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah terdaftar atas nama Ibu ${duplicate.fullName} (${duplicate.institutionName}). Duplikasi NIK diblokir.`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const cleanName = input.fullName.trim();
+    if (!cleanName) {
+      const msg = 'Nama lengkap ibu menyusui wajib diisi.';
+      addToast('error', 'Validasi Gagal', msg);
+      return { ok: false, error: msg };
+    }
+
+    const duration = calculateLactationDuration(input.deliveryDate, input.measurementDate);
+    const assessment = calculateLactatingHealthAssessment({
+      ageYears: input.ageYears,
+      deliveryDate: input.deliveryDate,
+      measurementDate: input.measurementDate,
+      weightKg: input.weightKg,
+      heightCm: input.heightCm,
+      lilaCm: input.lilaCm,
+      hemoglobinGdL: input.hemoglobinGdL,
+      systolicBp: input.systolicBp,
+      diastolicBp: input.diastolicBp,
+      feedingPattern: input.feedingPattern,
+      breastStatus: input.breastStatus,
+      fluidIntakeMl: input.fluidIntakeMl,
+      vitaminAPostpartum: input.vitaminAPostpartum,
+      ttdOrMultivitaminCompliant: input.ttdOrMultivitaminCompliant,
+    });
+
+    const newRecord: LactatingHealthRecord = {
+      id: `lh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      nik: nikCheck.cleanNik,
+      fullName: cleanName,
+      ageYears: Number(input.ageYears) || 26,
+      phone: input.phone?.trim() || '',
+      institutionId: input.institutionId || 'posyandu-temenggungan',
+      institutionName: resolveMaternalInstitutionName(input.institutionId, input.institutionNameOverride),
+      villageOrPosyandu: input.villageOrPosyandu.trim() || 'Wilayah Binaan Krejengan',
+      babyName: input.babyName.trim() || 'By. Balita',
+      deliveryDate: input.deliveryDate,
+      babyAgeDays: duration.babyAgeDays,
+      lactationWeeks: duration.lactationWeeks,
+      babyAgeMonths: duration.babyAgeMonths,
+      lactationPhase: assessment.lactationPhase,
+      feedingPattern: input.feedingPattern,
+      breastStatus: input.breastStatus,
+      weightKg: Number(input.weightKg),
+      heightCm: Number(input.heightCm),
+      bmi: assessment.bmi,
+      bmiCategory: assessment.bmiCategory,
+      lilaCm: assessment.lilaCm,
+      isKek: assessment.isKek,
+      lilaCategory: assessment.lilaCategory,
+      hemoglobinGdL: assessment.hemoglobinGdL,
+      anemiaStatus: assessment.anemiaStatus,
+      systolicBp: assessment.systolicBp,
+      diastolicBp: assessment.diastolicBp,
+      bpStatus: assessment.bpStatus,
+      fluidIntakeMl: assessment.fluidIntakeMl,
+      targetFluidMl: assessment.targetFluidMl,
+      isHydrationLow: assessment.isHydrationLow,
+      vitaminAPostpartum: Boolean(input.vitaminAPostpartum),
+      ttdOrMultivitaminCompliant: Boolean(input.ttdOrMultivitaminCompliant),
+      recommendedKcal: assessment.recommendedKcal,
+      recommendedProteinG: assessment.recommendedProteinG,
+      measurementDate: input.measurementDate,
+      riskFlags: assessment.riskFlags,
+      riskLevel: assessment.riskLevel,
+      recommendation: assessment.recommendation,
+      notes: input.notes?.trim() || '',
+      recordedBy: currentUser.name,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setLactatingHealthRecords(prev => [newRecord, ...prev]);
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'lactating_health_records', newRecord.id), {
+          ...newRecord,
+          sppgId: 'GFBQSYXD',
+        });
+      } catch (err) {
+        console.warn('Firestore write fallback for lactating_health_records:', err);
+      }
+    }
+
+    await logAudit(
+      'CREATE',
+      'institutions',
+      `Pemeriksaan kesehatan Ibu Menyusui ${newRecord.fullName} (NIK: ${newRecord.nik}) • ${newRecord.lactationPhase} • Status: ${newRecord.riskLevel}`
+    );
+    addToast(
+      'success',
+      'Data Cek Kesehatan Ibu Menyusui Disimpan',
+      `${newRecord.fullName} (${newRecord.lactationPhase}) tercatat dengan status ${newRecord.riskLevel}.`
+    );
+    return { ok: true, record: newRecord };
+  };
+
+  const updateLactatingHealthRecord = async (
+    id: string,
+    updates: Partial<{
+      nik: string;
+      fullName: string;
+      ageYears: number;
+      phone: string;
+      institutionId: string;
+      institutionNameOverride: string;
+      villageOrPosyandu: string;
+      babyName: string;
+      deliveryDate: string;
+      feedingPattern: LactationFeedingPattern;
+      breastStatus: BreastHealthStatus;
+      weightKg: number;
+      heightCm: number;
+      lilaCm: number;
+      hemoglobinGdL: number;
+      systolicBp: number;
+      diastolicBp: number;
+      fluidIntakeMl: number;
+      vitaminAPostpartum: boolean;
+      ttdOrMultivitaminCompliant: boolean;
+      measurementDate: string;
+      notes: string;
+    }>
+  ): Promise<{ ok: boolean; error?: string; record?: LactatingHealthRecord }> => {
+    const existing = lactatingHealthRecords.find(r => r.id === id);
+    if (!existing) {
+      return { ok: false, error: 'Data kesehatan ibu menyusui tidak ditemukan.' };
+    }
+
+    const candidateNik = updates.nik !== undefined ? updates.nik : existing.nik;
+    const nikCheck = validateNikFormat(candidateNik);
+    if (!nikCheck.valid) {
+      addToast('error', 'NIK Tidak Valid', nikCheck.error || 'Format NIK harus 16 digit.');
+      return { ok: false, error: nikCheck.error };
+    }
+
+    const duplicate = checkDuplicateLactatingNik(nikCheck.cleanNik, id);
+    if (duplicate) {
+      const msg = `NIK ${nikCheck.cleanNik} sudah terdaftar atas nama ${duplicate.fullName}.`;
+      addToast('error', 'Duplikasi NIK Ditolak', msg);
+      return { ok: false, error: msg };
+    }
+
+    const nextMeasurementDate = updates.measurementDate ?? existing.measurementDate;
+    const nextDeliveryDate = updates.deliveryDate ?? existing.deliveryDate;
+    const duration = calculateLactationDuration(nextDeliveryDate, nextMeasurementDate);
+    const nextAge = updates.ageYears !== undefined ? Number(updates.ageYears) : existing.ageYears;
+    const nextFeeding = updates.feedingPattern ?? existing.feedingPattern;
+    const nextBreast = updates.breastStatus ?? existing.breastStatus;
+    const nextWeight = updates.weightKg !== undefined ? Number(updates.weightKg) : existing.weightKg;
+    const nextHeight = updates.heightCm !== undefined ? Number(updates.heightCm) : existing.heightCm;
+    const nextLila = updates.lilaCm !== undefined ? Number(updates.lilaCm) : existing.lilaCm;
+    const nextHb = updates.hemoglobinGdL !== undefined ? Number(updates.hemoglobinGdL) : existing.hemoglobinGdL;
+    const nextSys = updates.systolicBp !== undefined ? Number(updates.systolicBp) : existing.systolicBp;
+    const nextDia = updates.diastolicBp !== undefined ? Number(updates.diastolicBp) : existing.diastolicBp;
+    const nextFluid = updates.fluidIntakeMl !== undefined ? Number(updates.fluidIntakeMl) : existing.fluidIntakeMl;
+    const nextVitA = updates.vitaminAPostpartum !== undefined ? updates.vitaminAPostpartum : existing.vitaminAPostpartum;
+    const nextTtd =
+      updates.ttdOrMultivitaminCompliant !== undefined
+        ? updates.ttdOrMultivitaminCompliant
+        : existing.ttdOrMultivitaminCompliant;
+
+    const assessment = calculateLactatingHealthAssessment({
+      ageYears: nextAge,
+      deliveryDate: nextDeliveryDate,
+      measurementDate: nextMeasurementDate,
+      weightKg: nextWeight,
+      heightCm: nextHeight,
+      lilaCm: nextLila,
+      hemoglobinGdL: nextHb,
+      systolicBp: nextSys,
+      diastolicBp: nextDia,
+      feedingPattern: nextFeeding,
+      breastStatus: nextBreast,
+      fluidIntakeMl: nextFluid,
+      vitaminAPostpartum: nextVitA,
+      ttdOrMultivitaminCompliant: nextTtd,
+    });
+
+    const nextInstId = updates.institutionId ?? existing.institutionId;
+
+    const updatedRecord: LactatingHealthRecord = {
+      ...existing,
+      nik: nikCheck.cleanNik,
+      fullName: updates.fullName !== undefined ? updates.fullName.trim() : existing.fullName,
+      ageYears: nextAge,
+      phone: updates.phone !== undefined ? updates.phone.trim() : existing.phone,
+      institutionId: nextInstId,
+      institutionName: resolveMaternalInstitutionName(nextInstId, updates.institutionNameOverride),
+      villageOrPosyandu:
+        updates.villageOrPosyandu !== undefined ? updates.villageOrPosyandu.trim() : existing.villageOrPosyandu,
+      babyName: updates.babyName !== undefined ? updates.babyName.trim() : existing.babyName,
+      deliveryDate: nextDeliveryDate,
+      babyAgeDays: duration.babyAgeDays,
+      lactationWeeks: duration.lactationWeeks,
+      babyAgeMonths: duration.babyAgeMonths,
+      lactationPhase: assessment.lactationPhase,
+      feedingPattern: nextFeeding,
+      breastStatus: nextBreast,
+      weightKg: nextWeight,
+      heightCm: nextHeight,
+      bmi: assessment.bmi,
+      bmiCategory: assessment.bmiCategory,
+      lilaCm: assessment.lilaCm,
+      isKek: assessment.isKek,
+      lilaCategory: assessment.lilaCategory,
+      hemoglobinGdL: assessment.hemoglobinGdL,
+      anemiaStatus: assessment.anemiaStatus,
+      systolicBp: assessment.systolicBp,
+      diastolicBp: assessment.diastolicBp,
+      bpStatus: assessment.bpStatus,
+      fluidIntakeMl: assessment.fluidIntakeMl,
+      targetFluidMl: assessment.targetFluidMl,
+      isHydrationLow: assessment.isHydrationLow,
+      vitaminAPostpartum: nextVitA,
+      ttdOrMultivitaminCompliant: nextTtd,
+      recommendedKcal: assessment.recommendedKcal,
+      recommendedProteinG: assessment.recommendedProteinG,
+      measurementDate: nextMeasurementDate,
+      riskFlags: assessment.riskFlags,
+      riskLevel: assessment.riskLevel,
+      recommendation: assessment.recommendation,
+      notes: updates.notes !== undefined ? updates.notes.trim() : existing.notes,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    };
+
+    setLactatingHealthRecords(prev => prev.map(r => (r.id === id ? updatedRecord : r)));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'lactating_health_records', id),
+          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn('Firestore update fallback for lactating_health_records:', err);
+      }
+    }
+
+    await logAudit(
+      'UPDATE',
+      'institutions',
+      `Memperbarui data kesehatan Ibu Menyusui ${updatedRecord.fullName} (NIK: ${updatedRecord.nik}) -> ${updatedRecord.riskLevel}`
+    );
+    addToast(
+      'success',
+      'Data Ibu Menyusui Diperbarui',
+      `Status klinis ${updatedRecord.fullName} (${updatedRecord.riskLevel}) berhasil dihitung ulang.`
+    );
+    return { ok: true, record: updatedRecord };
+  };
+
+  const deleteLactatingHealthRecord = async (id: string) => {
+    const target = lactatingHealthRecords.find(r => r.id === id);
+    setLactatingHealthRecords(prev => prev.filter(r => r.id !== id));
+
+    if (auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, 'lactating_health_records', id));
+      } catch (err) {
+        console.warn('Firestore delete fallback for lactating_health_records:', err);
+      }
+    }
+
+    await logAudit('DELETE', 'institutions', `Menghapus data kesehatan ibu menyusui: ${target?.fullName || id}`);
+    addToast('info', 'Data Dihapus', `Data pemeriksaan ibu menyusui ${target?.fullName || ''} telah dihapus.`);
   };
 
   // Menu Items CRUD & Approval (auto-syncs linked Draft/Pending RAB items)
@@ -7659,6 +8281,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateWebAccessPolicy,
         recordWebLoginTimestamp,
         findWebAccessUser,
+        firebaseAuthEmail,
+        syncAllWebAccessToCloud,
+        connectFirebaseAdminSync,
         sppgConfig,
         updateSPPGConfig,
         institutions,
@@ -7701,6 +8326,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addMaternalHealthRecord,
         updateMaternalHealthRecord,
         deleteMaternalHealthRecord,
+        lactatingHealthRecords,
+        checkDuplicateLactatingNik,
+        addLactatingHealthRecord,
+        updateLactatingHealthRecord,
+        deleteLactatingHealthRecord,
         menuItems,
         addMenuItem,
         updateMenuItem,

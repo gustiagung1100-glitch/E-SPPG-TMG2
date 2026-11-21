@@ -223,3 +223,9 @@ export function verifyStoredAuthSession(candidate: unknown): StoredAuthSession |
   };
 }
 
+export function getWebAccessEmailDocId(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  return `wau_e_${sha256Hex(normalized).slice(0, 32)}`;
+}
+
+

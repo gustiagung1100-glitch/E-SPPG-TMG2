@@ -8,6 +8,7 @@ import {
 } from '../../types';
 import { useApp } from '../../lib/store';
 import { processFacilityImageUpload } from './FacilityTempUploadSection';
+import { ClassicTimeInput } from './ClassicTimeInput';
 import {
   SlidersHorizontal,
   Plus,
@@ -32,6 +33,7 @@ export const DYNAMIC_FIELD_TYPE_OPTIONS: { value: DynamicFieldType; label: strin
   { value: 'text', label: 'Text (Teks Singkat)' },
   { value: 'number', label: 'Number (Angka)' },
   { value: 'date', label: 'Date (Tanggal)' },
+  { value: 'time', label: 'Time / Waktu (Dual Wheel)' },
   { value: 'select', label: 'Dropdown / Select' },
   { value: 'checkbox', label: 'Checkbox (Centang Ya/Tidak)' },
   { value: 'radio', label: 'Radio Button (Pilihan Tunggal)' },
@@ -769,16 +771,37 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
                     </label>
                   )}
 
-                  {field.type === 'text' && (
-                    <input
-                      type="text"
-                      required={field.required}
-                      value={String(value)}
-                      onChange={e => onChange(field.key, e.target.value, field)}
-                      placeholder={field.placeholder || ''}
-                      className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                    />
-                  )}
+                  {(() => {
+                    const isAutoTimeField =
+                      field.type === 'time' ||
+                      (field.type === 'text' &&
+                        (field.key === 'departureTime' || field.key === 'arrivalTime' || field.key === 'time'));
+                    if (isAutoTimeField) {
+                      return (
+                        <ClassicTimeInput
+                          required={field.required}
+                          value={String(value)}
+                          onChange={val => onChange(field.key, val, field)}
+                          placeholder={field.placeholder || '08:30 WIB'}
+                          format="HH:mm WIB"
+                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 text-xs"
+                        />
+                      );
+                    }
+                    if (field.type === 'text') {
+                      return (
+                        <input
+                          type="text"
+                          required={field.required}
+                          value={String(value)}
+                          onChange={e => onChange(field.key, e.target.value, field)}
+                          placeholder={field.placeholder || ''}
+                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                        />
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {field.type === 'number' && (
                     <input

@@ -5,6 +5,8 @@ import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
 import { MaternalHealthTab } from './MaternalHealthTab';
+import { LactatingHealthTab } from './LactatingHealthTab';
+import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import {
   BASTDocumentSheet,
   resolveBastAutoFields,
@@ -77,7 +79,8 @@ type TabKey =
   | 'rekap_mingguan_bulanan'
   | 'rekap_lembaga'
   | 'data_gizi_anak'
-  | 'cek_kesehatan_ibu_hamil';
+  | 'cek_kesehatan_ibu_hamil'
+  | 'cek_kesehatan_ibu_menyusui';
 
 export const InstitutionsModule: React.FC = () => {
   const {
@@ -91,6 +94,7 @@ export const InstitutionsModule: React.FC = () => {
     beneficiaryQuotaHistory,
     beneficiaryRecords,
     maternalHealthRecords,
+    lactatingHealthRecords,
     masterVolunteers,
     distributionLogs,
     hasPermission,
@@ -124,6 +128,7 @@ export const InstitutionsModule: React.FC = () => {
       rekap_lembaga: '6. Rekap per Lembaga',
       data_gizi_anak: '7. Data Anak & Status Gizi WHO',
       cek_kesehatan_ibu_hamil: '8. Cek Kesehatan Ibu Hamil & Rekap',
+      cek_kesehatan_ibu_menyusui: '9. Cek Kesehatan Ibu Menyusui & Rekap',
     };
     window.dispatchEvent(
       new CustomEvent('sppg-subtab-change', {
@@ -899,6 +904,7 @@ export const InstitutionsModule: React.FC = () => {
             { key: 'rekap_lembaga' as TabKey, label: '6. Rekap per Lembaga', icon: <Building className="w-4 h-4 shrink-0" /> },
             { key: 'data_gizi_anak' as TabKey, label: '7. Data Anak & Status Gizi WHO', icon: <HeartPulse className="w-4 h-4 shrink-0" />, count: beneficiaryRecords.length },
             { key: 'cek_kesehatan_ibu_hamil' as TabKey, label: '8. Cek Kesehatan Ibu Hamil & Rekap', icon: <Baby className="w-4 h-4 shrink-0" />, count: maternalHealthRecords.length },
+            { key: 'cek_kesehatan_ibu_menyusui' as TabKey, label: '9. Cek Kesehatan Ibu Menyusui & Rekap', icon: <HeartPulse className="w-4 h-4 shrink-0" />, count: lactatingHealthRecords.length },
           ].map(tab => {
             const isActive = activeTab === tab.key;
             return (
@@ -1856,6 +1862,11 @@ export const InstitutionsModule: React.FC = () => {
       {activeTab === 'cek_kesehatan_ibu_hamil' && <MaternalHealthTab />}
 
       {/* ========================================================================= */}
+      {/* TAB 9: KALKULATOR CEK KESEHATAN IBU MENYUSUI (3B) & REKAPITULASI */}
+      {/* ========================================================================= */}
+      {activeTab === 'cek_kesehatan_ibu_menyusui' && <LactatingHealthTab />}
+
+      {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT LEMBAGA */}
       {/* ========================================================================= */}
       <Modal
@@ -2114,24 +2125,26 @@ export const InstitutionsModule: React.FC = () => {
                   <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                     Jam Penerimaan Paket (WIB)
                   </label>
-                  <input
-                    type="text"
+                  <ClassicTimeInput
                     placeholder="07:00"
                     value={bastPrintReceiveTime}
-                    onChange={e => setBastPrintReceiveTime(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    onChange={setBastPrintReceiveTime}
+                    format="HH:mm"
+                    allowClear
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                     Jam Penyerahan Alat Makan (Kosong = ........)
                   </label>
-                  <input
-                    type="text"
+                  <ClassicTimeInput
                     placeholder="Kosongkan untuk titik-titik manual"
                     value={bastPrintReturnTime}
-                    onChange={e => setBastPrintReturnTime(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                    onChange={setBastPrintReturnTime}
+                    format="HH:mm"
+                    allowClear
+                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                   />
                 </div>
               </div>

@@ -71,6 +71,9 @@ export const SettingsModule: React.FC = () => {
     deleteWebAccessUser,
     updateWebAccessPolicy,
     masterSuppliers,
+    firebaseAuthEmail,
+    syncAllWebAccessToCloud,
+    connectFirebaseAdminSync,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profil' | 'access' | 'rbac' | 'database' | 'audit'>('profil');
@@ -86,6 +89,7 @@ export const SettingsModule: React.FC = () => {
   const [addFormError, setAddFormError] = useState<string | null>(null);
   const [editFormError, setEditFormError] = useState<string | null>(null);
   const [isSubmittingAccess, setIsSubmittingAccess] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
 
   const [newUserForm, setNewUserForm] = useState<{
     name: string;
@@ -374,7 +378,7 @@ export const SettingsModule: React.FC = () => {
       const ok = await addWebAccessUser({
         name: cleanName,
         email: cleanEmail,
-        password: newUserForm.password,
+        password: newUserForm.password.trim(),
         role: newUserForm.role,
         division: deriveDivisionFromRole(newUserForm.role, newUserForm.division) || undefined,
         supplierId: selectedSupplier?.id,
@@ -932,6 +936,88 @@ export const SettingsModule: React.FC = () => {
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
                 <strong>Mode Baca Saja:</strong> Anda sedang masuk sebagai peran <strong>{currentUser.role}</strong>. Penambahan, perubahan kata sandi, dan pengaktifan/penonaktifan akses login hanya dapat dilakukan oleh <strong>Admin Utama</strong>.
+              </div>
+            </div>
+          )}
+
+          {isSuperAdminSession && (
+            <div
+              className={`p-4 rounded-2xl border text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                firebaseAuthEmail
+                  ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200'
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                {firebaseAuthEmail ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-1 leading-relaxed">
+                  {firebaseAuthEmail ? (
+                    <>
+                      <div className="font-bold">
+                        Sinkronisasi Cloud Lintas Perangkat Aktif ({firebaseAuthEmail})
+                      </div>
+                      <p className="text-[11px] opacity-90">
+                        Akun yang didaftarkan di sini tersimpan di Firestore. Pengguna dapat login di browser ini dengan <strong>Email & Kata Sandi</strong>, atau dari perangkat/HP/browser lain menggunakan tombol <strong>&quot;Masuk dengan Akun Google&quot;</strong> dengan email yang sama.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-bold">
+                        Akun Baru Hanya Tersimpan di Browser Ini (Sinkronisasi Cloud Belum Aktif)
+                      </div>
+                      <p className="text-[11px] opacity-90">
+                        Anda saat ini login secara manual (bukan via Google Admin). Akun baru hanya dapat login di browser ini saja. Klik tombol di samping untuk menghubungkan Google Admin agar akun dapat dipakai login di perangkat lain / URL bersama.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {firebaseAuthEmail ? (
+                  <button
+                    type="button"
+                    disabled={isSyncingCloud}
+                    onClick={async () => {
+                      setIsSyncingCloud(true);
+                      try {
+                        const res = await syncAllWebAccessToCloud();
+                        addToast(
+                          res.failed === 0 ? 'success' : 'warning',
+                          'Sinkronisasi Selesai',
+                          `${res.synced} akun login & kebijakan disinkronkan ke Cloud${res.failed > 0 ? ` (${res.failed} gagal)` : ''}.`
+                        );
+                      } finally {
+                        setIsSyncingCloud(false);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold inline-flex items-center gap-1.5 transition disabled:opacity-60 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan ke Cloud'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isSyncingCloud}
+                    onClick={async () => {
+                      setIsSyncingCloud(true);
+                      try {
+                        await connectFirebaseAdminSync();
+                      } finally {
+                        setIsSyncingCloud(false);
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-[#071D49] hover:bg-[#102D63] text-[#F2D58B] font-bold inline-flex items-center gap-1.5 shadow-xs transition disabled:opacity-60 cursor-pointer"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>{isSyncingCloud ? 'Menghubungkan...' : 'Hubungkan Google Admin'}</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
