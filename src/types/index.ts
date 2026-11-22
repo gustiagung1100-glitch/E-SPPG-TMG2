@@ -562,6 +562,9 @@ export interface DivisionJobdesk {
   id: string;
   menuId: string;
   menuName: string;
+  date?: string;
+  updatedAt?: string;
+  updatedBy?: string;
   divisionName: 'Relawan Div. Persiapan' | 'Relawan Div. Pengolahan' | 'Relawan Div. Pemorsian' | 'Relawan Div. Distribusi' | 'Relawan Div. Cuci Ompreng';
   ingredientsHandled: string;
   tasks: string;
@@ -1434,6 +1437,39 @@ export interface PettyCashTransaction {
   customFields?: Record<string, any>;
 }
 
+export type DashboardSectionId =
+  | 'welcome_banner'
+  | 'critical_alerts'
+  | 'beneficiary_kpi'
+  | 'today_menu'
+  | 'kitchen_progress'
+  | 'distribution_status'
+  | 'finance_petty_cash'
+  | 'inventory_admin_kpi'
+  | 'waste_rejected_charts'
+  | 'nutrition_who'
+  | 'plog_daily_sop';
 
+export type DashboardSectionWidth = 'full' | 'half' | 'third';
 
+export type DashboardDensity = 'compact' | 'comfortable' | 'spacious';
 
+export type DashboardKpiColumns = 'auto' | 2 | 3 | 4 | 5;
+
+export interface DashboardSectionConfig {
+  id: DashboardSectionId;
+  enabled: boolean;
+  width: DashboardSectionWidth;
+  allowedRoles: RoleType[];
+  allowedEmails: string[];
+  blockedEmails: string[];
+}
+
+export interface DashboardLayoutConfig {
+  sectionOrder: DashboardSectionId[];
+  density: DashboardDensity;
+  kpiColumns: DashboardKpiColumns;
+  sections: Record<DashboardSectionId, DashboardSectionConfig>;
+  updatedAt?: string;
+  updatedBy?: string;
+}

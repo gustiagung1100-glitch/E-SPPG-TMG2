@@ -235,7 +235,21 @@ export const NutritionMenuModule: React.FC = () => {
   const [isZScoreModalOpen, setIsZScoreModalOpen] = useState(false);
 
   // Active Sub-module Tab
-  const [activeTab, setActiveTab] = useState<SubModuleTab>('menu_bahan');
+  const [activeTab, setActiveTab] = useState<SubModuleTab>(() => {
+    try {
+      const target = sessionStorage.getItem('sppg_menu_target_tab') as SubModuleTab | null;
+      if (
+        target &&
+        ['menu_bahan', 'gramasi_item', 'kandungan_gizi', 'food_cost', 'jobdesk_divisi', 'daftar_rekap'].includes(target)
+      ) {
+        sessionStorage.removeItem('sppg_menu_target_tab');
+        return target;
+      }
+    } catch {
+      // ignore storage access issues
+    }
+    return 'menu_bahan';
+  });
 
   useEffect(() => {
     const labels: Record<SubModuleTab, string> = {
@@ -1616,24 +1630,103 @@ export const NutritionMenuModule: React.FC = () => {
     return job.photoUrl ? [job.photoUrl] : [];
   };
 
+  // Resolve daily SOP & Jobdesk list automatically per active menu & date
+  const currentMenuJobdesks = useMemo<DivisionJobdesk[]>(() => {
+    if (!currentMenu) return jobdesks;
+    const directMatches = jobdesks.filter(
+      j =>
+        j.menuId === currentMenu.id ||
+        (Boolean(j.date) && Boolean(currentMenu.date) && j.date === currentMenu.date)
+    );
+    if (directMatches.length > 0) {
+      return directMatches;
+    }
+
+    // Fallback template for newly created / other daily menus until customized by PLOG
+    const divisionOrder: DivisionJobdesk['divisionName'][] = [
+      'Relawan Div. Persiapan',
+      'Relawan Div. Pengolahan',
+      'Relawan Div. Pemorsian',
+      'Relawan Div. Distribusi',
+      'Relawan Div. Cuci Ompreng',
+    ];
+    const menuLabel = [currentMenu.animalProtein, currentMenu.stapleFood].filter(Boolean).join(' & ');
+    return divisionOrder.map((divName, idx) => {
+      const template = jobdesks.find(j => j.divisionName === divName);
+      return {
+        id: `job-${currentMenu.id}-${idx + 1}`,
+        menuId: currentMenu.id,
+        menuName: menuLabel || template?.menuName || currentMenu.menuCode,
+        date: currentMenu.date,
+        divisionName: divName,
+        ingredientsHandled: template?.ingredientsHandled || '',
+        tasks: template?.tasks || '',
+        photoUrl: template?.photoUrl || '',
+        photoUrls: template?.photoUrls || (template?.photoUrl ? [template.photoUrl] : []),
+        photoCaption: template?.photoCaption || '',
+        picName: template?.picName || '',
+        status: 'Belum Mulai',
+      };
+    });
+  }, [jobdesks, currentMenu]);
+
+  const upsertDailyJobdeskItem = (
+    jobdeskId: string,
+    updater: (target: DivisionJobdesk) => DivisionJobdesk
+  ) => {
+    const nowIso = new Date().toLocaleString('id-ID');
+    const menuLabel = currentMenu
+      ? [currentMenu.animalProtein, currentMenu.stapleFood].filter(Boolean).join(' & ')
+      : '';
+
+    setJobdesks(prev => {
+      const exists = prev.some(j => j.id === jobdeskId);
+      if (exists) {
+        return prev.map(j => {
+          if (j.id !== jobdeskId) return j;
+          const updated = updater(j);
+          return {
+            ...updated,
+            date: currentMenu?.date || updated.date || new Date().toISOString().slice(0, 10),
+            menuId: currentMenu?.id || updated.menuId,
+            menuName: menuLabel || updated.menuName,
+            updatedAt: nowIso,
+            updatedBy: currentUser.name,
+          };
+        });
+      }
+
+      // Materialize daily entries for this menu/date when editing from template
+      const materialized = currentMenuJobdesks.map(item => {
+        const stamped: DivisionJobdesk = {
+          ...item,
+          date: currentMenu?.date || item.date || new Date().toISOString().slice(0, 10),
+          menuId: currentMenu?.id || item.menuId,
+          menuName: menuLabel || item.menuName,
+          updatedAt: nowIso,
+          updatedBy: currentUser.name,
+        };
+        return item.id === jobdeskId ? updater(stamped) : stamped;
+      });
+      return [...prev, ...materialized];
+    });
+  };
+
   // Jobdesk Multi-Photo Upload
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, jobdeskId: string) => {
-    const targetJob = jobdesks.find(j => j.id === jobdeskId);
+    const targetJob = currentMenuJobdesks.find(j => j.id === jobdeskId);
     await processMultipleImageUploads(
       e,
       dataUrls => {
-        setJobdesks(prev =>
-          prev.map(j => {
-            if (j.id !== jobdeskId) return j;
-            const existing = getJobdeskPhotos(j);
-            const nextPhotos = [...existing, ...dataUrls];
-            return {
-              ...j,
-              photoUrls: nextPhotos,
-              photoUrl: nextPhotos[0] || '',
-            };
-          })
-        );
+        upsertDailyJobdeskItem(jobdeskId, j => {
+          const existing = getJobdeskPhotos(j);
+          const nextPhotos = [...existing, ...dataUrls];
+          return {
+            ...j,
+            photoUrls: nextPhotos,
+            photoUrl: nextPhotos[0] || '',
+          };
+        });
         const currentCount = targetJob ? getJobdeskPhotos(targetJob).length : 0;
         addToast(
           'success',
@@ -1646,36 +1739,30 @@ export const NutritionMenuModule: React.FC = () => {
   };
 
   const handleRemoveJobdeskPhoto = (jobdeskId: string, photoIndex: number) => {
-    setJobdesks(prev =>
-      prev.map(j => {
-        if (j.id !== jobdeskId) return j;
-        const existing = getJobdeskPhotos(j);
-        const nextPhotos = existing.filter((_, idx) => idx !== photoIndex);
-        return {
-          ...j,
-          photoUrls: nextPhotos,
-          photoUrl: nextPhotos[0] || '',
-        };
-      })
-    );
+    upsertDailyJobdeskItem(jobdeskId, j => {
+      const existing = getJobdeskPhotos(j);
+      const nextPhotos = existing.filter((_, idx) => idx !== photoIndex);
+      return {
+        ...j,
+        photoUrls: nextPhotos,
+        photoUrl: nextPhotos[0] || '',
+      };
+    });
     addToast('info', 'Foto Dihapus', 'Foto dokumentasi SOP berhasil dihapus dari galeri divisi.');
   };
 
   const handleSetPrimaryJobdeskPhoto = (jobdeskId: string, photoIndex: number) => {
-    setJobdesks(prev =>
-      prev.map(j => {
-        if (j.id !== jobdeskId) return j;
-        const existing = getJobdeskPhotos(j);
-        const chosen = existing[photoIndex];
-        if (!chosen) return j;
-        const nextPhotos = [chosen, ...existing.filter((_, idx) => idx !== photoIndex)];
-        return {
-          ...j,
-          photoUrls: nextPhotos,
-          photoUrl: chosen,
-        };
-      })
-    );
+    upsertDailyJobdeskItem(jobdeskId, j => {
+      const existing = getJobdeskPhotos(j);
+      const chosen = existing[photoIndex];
+      if (!chosen) return j;
+      const nextPhotos = [chosen, ...existing.filter((_, idx) => idx !== photoIndex)];
+      return {
+        ...j,
+        photoUrls: nextPhotos,
+        photoUrl: chosen,
+      };
+    });
     addToast('success', 'Foto Utama Diperbarui', 'Foto pilihan dijadikan sampul utama SOP divisi.');
   };
 
@@ -1716,27 +1803,21 @@ export const NutritionMenuModule: React.FC = () => {
     e.preventDefault();
     if (!selectedJobdesk) return;
     const cleanedPhotos = jobdeskEditForm.photoUrls.filter(Boolean);
-    setJobdesks(prev =>
-      prev.map(j =>
-        j.id === selectedJobdesk.id
-          ? {
-              ...j,
-              ingredientsHandled: jobdeskEditForm.ingredientsHandled.trim(),
-              tasks: jobdeskEditForm.tasks.trim(),
-              photoCaption: jobdeskEditForm.photoCaption.trim(),
-              picName: jobdeskEditForm.picName.trim(),
-              status: jobdeskEditForm.status,
-              photoUrls: cleanedPhotos,
-              photoUrl: cleanedPhotos[0] || '',
-            }
-          : j
-      )
-    );
+    upsertDailyJobdeskItem(selectedJobdesk.id, j => ({
+      ...j,
+      ingredientsHandled: jobdeskEditForm.ingredientsHandled.trim(),
+      tasks: jobdeskEditForm.tasks.trim(),
+      photoCaption: jobdeskEditForm.photoCaption.trim(),
+      picName: jobdeskEditForm.picName.trim(),
+      status: jobdeskEditForm.status,
+      photoUrls: cleanedPhotos,
+      photoUrl: cleanedPhotos[0] || '',
+    }));
     setIsJobdeskModalOpen(false);
     addToast(
       'success',
       'SOP & Galeri Foto Disimpan',
-      `Pembaruan SOP ${selectedJobdesk.divisionName} dengan ${cleanedPhotos.length} foto dokumentasi telah disimpan.`
+      `Pembaruan SOP ${selectedJobdesk.divisionName} (${currentMenu?.date || 'Harian'}) dengan ${cleanedPhotos.length} foto dokumentasi telah disimpan dan tersinkron otomatis ke Dashboard Terpadu.`
     );
   };
 
@@ -2173,7 +2254,7 @@ export const NutritionMenuModule: React.FC = () => {
             key: 'jobdesk_divisi' as SubModuleTab,
             label: 'E. Jobdesk Divisi & SOP',
             icon: <Layers className="w-3.5 h-3.5" />,
-            badge: `${jobdesks.length} Divisi`,
+            badge: `${currentMenuJobdesks.length} Divisi`,
           },
           {
             key: 'daftar_rekap' as SubModuleTab,
@@ -4069,14 +4150,14 @@ export const NutritionMenuModule: React.FC = () => {
                 <Layers className="w-4 h-4 text-blue-900 dark:text-sky-400" />
                 Standar Operasional Prosedur (SOP) & Jobdesk Divisi Dapur MBG
               </h3>
-              <p className="text-xs text-slate-500">
-                Instruksi kerja per divisi untuk menu {currentMenu?.menuCode} ({currentMenu?.animalProtein}), bahan yang ditangani, dan foto contoh standar
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Instruksi kerja harian tanggal <strong>{formatIndonesianDate(currentMenu?.date || '2026-11-08')}</strong> untuk menu {currentMenu?.menuCode} ({currentMenu?.animalProtein}) — otomatis tampil di Dashboard Terpadu
               </p>
             </div>
 
             <button
               onClick={triggerPrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>Cetak Lembar Jobdesk Dapur</span>
@@ -4085,7 +4166,7 @@ export const NutritionMenuModule: React.FC = () => {
 
           {/* Grid of Division Jobdesks with Multi-Photo Upload & SOP Edit */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {jobdesks.map(job => {
+            {currentMenuJobdesks.map(job => {
               const photos = getJobdeskPhotos(job);
               const coverPhoto = photos[0] || '';
               const isPersiapan = job.divisionName === 'Relawan Div. Persiapan';

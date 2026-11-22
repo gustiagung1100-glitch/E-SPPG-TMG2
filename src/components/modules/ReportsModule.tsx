@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useApp, isMatchingMaterialName } from '../../lib/store';
 import { PrintHeader } from '../common/PrintHeader';
 import { BGNLogo, SPPGLogo } from '../common/OfficialLogos';
@@ -5666,31 +5667,34 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       </div>
 
       {/* FULLSCREEN PREVIEW MODAL */}
-      {isPreviewModalOpen && (
+      {isPreviewModalOpen && typeof document !== 'undefined' && createPortal(
         <div
           data-print-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150 print:static print:inset-auto print:bg-white print:p-0 print:block print:overflow-visible"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Pratinjau Cetak: ${reportPayload.title}`}
+          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 lg:p-6 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden print:static print:inset-auto print:bg-white print:p-0 print:block print:overflow-visible"
         >
-          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200 print:max-w-full print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none print:block">
+          <div className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-5xl w-full max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] flex flex-col overflow-hidden border border-slate-200 print:max-w-full print:max-h-none print:overflow-visible print:shadow-none print:border-none print:rounded-none print:block">
             {/* Modal Header */}
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 print:hidden">
-              <div className="flex items-center gap-3">
-                <FileCheck className="w-5 h-5 text-amber-400" />
-                <div>
-                  <h3 className="text-base font-bold text-white">
+            <div className="shrink-0 px-3.5 py-3 sm:px-6 sm:py-4 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-800 print:hidden">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <FileCheck className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-bold text-white truncate">
                     Pratinjau Cetak: {reportPayload.title}
                   </h3>
-                  <span className="text-xs text-slate-400 font-mono">
+                  <span className="text-[11px] sm:text-xs text-slate-400 font-mono block truncate">
                     Nomor Register: {reportPayload.code} | {periodLabelString}
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <button
                   type="button"
                   onClick={handleExportPDF}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                  className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <FileText className="w-3.5 h-3.5" />
                   <span>Unduh PDF</span>
@@ -5698,7 +5702,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <button
                   type="button"
                   onClick={triggerPrint}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                  className="px-2.5 sm:px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Cetak</span>
@@ -5706,7 +5710,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <button
                   type="button"
                   onClick={() => setIsPreviewModalOpen(false)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition"
+                  className="px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition cursor-pointer"
                 >
                   Tutup
                 </button>
@@ -5716,7 +5720,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             {/* Modal Body: Scaled paper sheet */}
             <div
               data-print-modal-body="true"
-              className="p-6 overflow-y-auto bg-slate-100 flex justify-center print:p-0 print:overflow-visible print:bg-white print:block"
+              className="flex-1 min-h-0 p-3 sm:p-6 overflow-y-auto overscroll-contain bg-slate-100 flex justify-center print:p-0 print:overflow-visible print:bg-white print:block"
             >
               {activeReportKey === 'bast_distribusi' ? (
                 <div className="max-w-4xl w-full space-y-6">
@@ -5883,43 +5887,48 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* PHOTO ZOOM LIGHTBOX MODAL */}
-      {previewPhoto && (
+      {previewPhoto && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs print:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewPhoto.label}
+          className="fixed inset-0 z-[60] flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/80 backdrop-blur-xs print:hidden"
           onClick={() => setPreviewPhoto(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-xl w-full overflow-hidden border border-slate-200"
+            className="bg-white rounded-xl sm:rounded-2xl shadow-2xl max-w-xl w-full max-h-[calc(100dvh-1.25rem)] flex flex-col overflow-hidden border border-slate-200"
             onClick={e => e.stopPropagation()}
           >
-            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
-              <div>
-                <h4 className="text-sm font-bold">{previewPhoto.label}</h4>
+            <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-3.5 bg-slate-900 text-white flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold truncate">{previewPhoto.label}</h4>
                 {previewPhoto.caption && (
-                  <p className="text-[11px] text-slate-300 mt-0.5">{previewPhoto.caption}</p>
+                  <p className="text-[11px] text-slate-300 mt-0.5 truncate">{previewPhoto.caption}</p>
                 )}
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewPhoto(null)}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium shrink-0 cursor-pointer"
               >
                 Tutup
               </button>
             </div>
-            <div className="p-4 bg-slate-100 flex justify-center">
+            <div className="flex-1 min-h-0 p-3 sm:p-4 bg-slate-100 flex items-center justify-center overflow-y-auto overscroll-contain">
               <img
                 src={previewPhoto.url}
                 alt={previewPhoto.label}
-                className="max-h-[68vh] w-auto object-contain rounded-lg border border-slate-200 bg-white"
+                className="max-h-[70dvh] w-auto max-w-full object-contain rounded-lg border border-slate-200 bg-white"
               />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,14 +1,15 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useApp } from '../../lib/store';
 import { CheckCircle2, AlertTriangle, AlertCircle, Info, X } from 'lucide-react';
 
 export const ToastContainer: React.FC = () => {
   const { toasts, removeToast } = useApp();
 
-  if (toasts.length === 0) return null;
+  if (toasts.length === 0 || typeof document === 'undefined') return null;
 
-  return (
-    <div className="toast-container fixed bottom-5 right-5 z-50 flex flex-col space-y-2.5 max-w-sm sm:max-w-md w-full pointer-events-none px-3 sm:px-0">
+  return createPortal(
+    <div className="toast-container fixed inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-5 sm:right-5 z-[70] flex flex-col space-y-2.5 sm:max-w-md sm:w-full pointer-events-none">
       {toasts.map(toast => {
         const iconWrappers = {
           success: 'bg-[#0D9488]/10 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400',
@@ -51,6 +52,7 @@ export const ToastContainer: React.FC = () => {
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 };

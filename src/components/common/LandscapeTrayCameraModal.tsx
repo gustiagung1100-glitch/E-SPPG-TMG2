@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Camera,
   Check,
@@ -839,9 +840,11 @@ export const LandscapeTrayCameraModal: React.FC<LandscapeTrayCameraModalProps> =
     </button>
   );
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
-      className={`fixed inset-0 z-[80] bg-black text-white flex ${
+      className={`fixed inset-0 w-screen h-dvh z-[80] bg-black text-white flex ${
         isPortraitLayout ? 'flex-col' : 'flex-row'
       } overflow-hidden select-none`}
     >
@@ -1201,6 +1204,7 @@ export const LandscapeTrayCameraModal: React.FC<LandscapeTrayCameraModalProps> =
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };

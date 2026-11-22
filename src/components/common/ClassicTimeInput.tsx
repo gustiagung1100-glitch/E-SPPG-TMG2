@@ -174,26 +174,37 @@ export const ClassicTimeInput: React.FC<ClassicTimeInputProps> = ({
     const anchor = anchorRef.current;
     if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
-    const panelWidth = Math.min(312, Math.max(272, window.innerWidth - 24));
-    const panelHeight = mode === 'range' ? 364 : 320;
-    const margin = 12;
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    const vvLeft = vv ? vv.offsetLeft : 0;
+    const vvTop = vv ? vv.offsetTop : 0;
+    const vvWidth = vv ? vv.width : window.innerWidth;
+    const vvHeight = vv ? vv.height : window.innerHeight;
+    const margin = vvWidth < 480 ? 8 : 12;
 
-    let left = rect.left;
-    if (left + panelWidth > window.innerWidth - margin) {
-      left = Math.max(margin, window.innerWidth - panelWidth - margin);
+    const panelWidth = Math.min(312, Math.max(256, vvWidth - margin * 2));
+    const estimatedHeight = mode === 'range' ? 364 : 320;
+    const panelHeight = Math.min(estimatedHeight, Math.max(240, vvHeight - margin * 2));
+
+    // Pada layar smartphone sempit (< 520px), pusatkan horizontal otomatis agar pas di layar
+    let left = vvWidth < 520 ? vvLeft + (vvWidth - panelWidth) / 2 : rect.left;
+    if (left + panelWidth > vvLeft + vvWidth - margin) {
+      left = Math.max(vvLeft + margin, vvLeft + vvWidth - panelWidth - margin);
     }
-    if (left < margin) left = margin;
+    if (left < vvLeft + margin) left = vvLeft + margin;
 
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    const spaceBelow = vvTop + vvHeight - rect.bottom;
+    const spaceAbove = rect.top - vvTop;
     let top = rect.bottom + 6;
-    if (spaceBelow < panelHeight + 10 && spaceAbove > spaceBelow) {
-      top = Math.max(margin, rect.top - panelHeight - 6);
-    } else if (top + panelHeight > window.innerHeight - margin) {
-      top = Math.max(margin, window.innerHeight - panelHeight - margin);
+    if (vvHeight < estimatedHeight + 24) {
+      // Layar sangat pendek (mis. HP landscape): tampilkan terpusat vertikal di viewport
+      top = vvTop + Math.max(margin, (vvHeight - panelHeight) / 2);
+    } else if (spaceBelow < panelHeight + 10 && spaceAbove > spaceBelow) {
+      top = Math.max(vvTop + margin, rect.top - panelHeight - 6);
+    } else if (top + panelHeight > vvTop + vvHeight - margin) {
+      top = Math.max(vvTop + margin, vvTop + vvHeight - panelHeight - margin);
     }
 
-    setCoords({ top, left, width: panelWidth });
+    setCoords({ top: Math.round(top), left: Math.round(left), width: Math.round(panelWidth) });
   };
 
   const openPicker = () => {
@@ -252,14 +263,21 @@ export const ClassicTimeInput: React.FC<ClassicTimeInputProps> = ({
       }
     };
 
+    const vv = window.visualViewport;
     window.addEventListener('resize', handleWindowChange);
+    window.addEventListener('orientationchange', handleWindowChange);
     window.addEventListener('scroll', handleWindowChange, true);
+    vv?.addEventListener('resize', handleWindowChange);
+    vv?.addEventListener('scroll', handleWindowChange);
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('resize', handleWindowChange);
+      window.removeEventListener('orientationchange', handleWindowChange);
       window.removeEventListener('scroll', handleWindowChange, true);
+      vv?.removeEventListener('resize', handleWindowChange);
+      vv?.removeEventListener('scroll', handleWindowChange);
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
@@ -373,9 +391,10 @@ export const ClassicTimeInput: React.FC<ClassicTimeInputProps> = ({
               top: `${coords.top}px`,
               left: `${coords.left}px`,
               width: `${coords.width}px`,
+              maxHeight: 'calc(100dvh - 16px)',
               zIndex: 9999,
             }}
-            className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden select-none"
+            className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-y-auto overflow-x-hidden select-none"
           >
             {/* Header Readout */}
             <div className="px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">

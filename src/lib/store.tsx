@@ -56,7 +56,13 @@ import {
   MutationType,
   RecipeIngredient,
   DivisionJobdesk,
+  DashboardLayoutConfig,
 } from '../types';
+import {
+  DASHBOARD_LAYOUT_STORAGE_KEY,
+  buildDefaultDashboardLayoutConfig,
+  sanitizeDashboardLayoutConfig,
+} from './dashboardConfig';
 import {
   defaultDynamicFormSchemas,
   mergeDynamicFormSchemas,
@@ -173,6 +179,9 @@ interface AppContextType {
   roleModuleAccess: RoleModuleAccessMap;
   updateRoleModuleAccess: (accessMap: RoleModuleAccessMap) => Promise<void>;
   resetRoleModuleAccess: () => Promise<void>;
+  dashboardLayoutConfig: DashboardLayoutConfig;
+  updateDashboardLayoutConfig: (config: DashboardLayoutConfig) => Promise<void>;
+  resetDashboardLayoutConfig: () => Promise<void>;
 
   // Pengaturan Akses Login Web Manual (Admin Utama)
   webAccessUsers: WebAccessUser[];
@@ -2181,6 +2190,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  const [dashboardLayoutConfig, setDashboardLayoutConfig] = useState<DashboardLayoutConfig>(() => {
+    try {
+      const saved = localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY);
+      return saved ? sanitizeDashboardLayoutConfig(JSON.parse(saved)) : buildDefaultDashboardLayoutConfig();
+    } catch {
+      return buildDefaultDashboardLayoutConfig();
+    }
+  });
+
   const [sppgConfig, setSppgConfig] = useState<SPPGConfig>(() => {
     try {
       const saved = localStorage.getItem('esppg_config');
@@ -2822,6 +2840,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [roleModuleAccess, safeWriteLocalStorage]);
 
   useEffect(() => {
+    safeWriteLocalStorage(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(dashboardLayoutConfig));
+  }, [dashboardLayoutConfig, safeWriteLocalStorage]);
+
+  useEffect(() => {
     safeWriteLocalStorage('esppg_config', JSON.stringify(sppgConfig));
   }, [sppgConfig, safeWriteLocalStorage]);
 
@@ -3317,6 +3339,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .catch(() => {
             // Keep localStorage module access fallback if offline
           });
+
+        // Load persisted dashboard layout & visibility config from Firestore if available
+        getDoc(doc(db, 'app_settings', 'dashboard_layout_config'))
+          .then(snap => {
+            if (snap.exists()) {
+              const cloudLayout = snap.data()?.config;
+              if (cloudLayout && typeof cloudLayout === 'object') {
+                setDashboardLayoutConfig(sanitizeDashboardLayoutConfig(cloudLayout));
+              }
+            }
+          })
+          .catch(() => {
+            // Keep localStorage dashboard config fallback if offline
+          });
       } else {
         // Not signed into Firebase Auth: verify signed local/session storage token
         const verifiedManual = validateStoredSessionAgainstPolicy(latestUsers, latestPolicy);
@@ -3438,6 +3474,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setPettyCashTransactions(parsed);
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === DASHBOARD_LAYOUT_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            setDashboardLayoutConfig(sanitizeDashboardLayoutConfig(parsed));
+          }
         } catch {
           // Ignore
         }
@@ -4026,6 +4071,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id: 'role_module_access',
             sppgId: 'GFBQSYXD',
             accessMap: roleModuleAccess,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        ),
+        setDoc(
+          doc(db, 'app_settings', 'dashboard_layout_config'),
+          {
+            id: 'dashboard_layout_config',
+            sppgId: 'GFBQSYXD',
+            config: dashboardLayoutConfig,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
           },
@@ -4694,6 +4750,92 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     await logAudit('UPDATE', 'settings', 'Mereset matriks hak akses modul/menu ke pengaturan default sistem');
     addToast('info', 'Akses Modul Direset', 'Hak akses modul/menu seluruh peran dikembalikan ke konfigurasi default.');
+  };
+
+  const updateDashboardLayoutConfig = async (nextConfig: DashboardLayoutConfig) => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mengubah tata letak & hak akses Dashboard Terpadu.');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const sanitized = sanitizeDashboardLayoutConfig({
+      ...nextConfig,
+      updatedAt: nowIso,
+      updatedBy: currentUser.name,
+    });
+    setDashboardLayoutConfig(sanitized);
+    safeWriteLocalStorage(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(sanitized));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'dashboard_layout_config'),
+          {
+            id: 'dashboard_layout_config',
+            sppgId: 'GFBQSYXD',
+            settingKey: 'dashboard_layout_config',
+            settingCategory: 'dashboard',
+            status: 'Aktif',
+            config: sanitized,
+            updatedAt: nowIso,
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback to LocalStorage
+      }
+    }
+
+    await logAudit(
+      'UPDATE',
+      'settings',
+      'Memperbarui tata letak & hak akses visibilitas data Dashboard Terpadu'
+    );
+    addToast(
+      'success',
+      'Pengaturan Dashboard Disimpan',
+      'Tata letak dan aturan siapa yang boleh/dilarang melihat data Dashboard Terpadu telah diterapkan.'
+    );
+  };
+
+  const resetDashboardLayoutConfig = async () => {
+    if (currentUser.role !== 'Admin Utama') {
+      addToast('error', 'Akses Ditolak', 'Hanya Admin Utama yang dapat mereset tata letak Dashboard Terpadu.');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const defaults = sanitizeDashboardLayoutConfig({
+      ...buildDefaultDashboardLayoutConfig(),
+      updatedAt: nowIso,
+      updatedBy: currentUser.name,
+    });
+    setDashboardLayoutConfig(defaults);
+    safeWriteLocalStorage(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(defaults));
+
+    if (auth.currentUser) {
+      try {
+        await setDoc(
+          doc(db, 'app_settings', 'dashboard_layout_config'),
+          {
+            id: 'dashboard_layout_config',
+            sppgId: 'GFBQSYXD',
+            settingKey: 'dashboard_layout_config',
+            settingCategory: 'dashboard',
+            status: 'Aktif',
+            config: defaults,
+            updatedAt: nowIso,
+            updatedBy: currentUser.name,
+          },
+          { merge: true }
+        );
+      } catch {
+        // Non-blocking fallback to LocalStorage
+      }
+    }
+
+    await logAudit('UPDATE', 'settings', 'Mereset tata letak & hak lihat Dashboard Terpadu ke default');
+    addToast('info', 'Dashboard Direset', 'Tata letak dan visibilitas seluruh bagian Dashboard Terpadu dikembalikan ke bawaan.');
   };
 
   // Real-time cascade helper: recompute menus & RAB when beneficiary portions change
@@ -8271,6 +8413,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         roleModuleAccess,
         updateRoleModuleAccess,
         resetRoleModuleAccess,
+        dashboardLayoutConfig,
+        updateDashboardLayoutConfig,
+        resetDashboardLayoutConfig,
         webAccessUsers,
         webAccessPolicy,
         addWebAccessUser,

@@ -472,7 +472,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Search Results Dropdown */}
         {isSearchOpen && searchQuery.trim().length > 0 && (
-          <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 overflow-hidden z-50">
+          <div className="fixed left-3 right-3 top-14 sm:absolute sm:left-0 sm:right-0 sm:top-auto sm:mt-2 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 overflow-hidden z-50">
             {searchResults.length === 0 ? (
               <div className="px-4 py-6 text-center text-xs text-slate-600 dark:text-slate-400">
                 Tidak ditemukan hasil untuk "<strong className="text-slate-800 dark:text-slate-200">{searchQuery}</strong>"
@@ -566,7 +566,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notification Dropdown */}
           {showNotifications && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 p-4 z-50">
+            <div className="fixed left-3 right-3 top-14 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200/80 dark:border-slate-800 p-4 z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-[#D97706]" />

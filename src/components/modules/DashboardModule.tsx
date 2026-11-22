@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
 import { DashboardCard } from '../common/DashboardCard';
+import { Modal } from '../common/Modal';
 import { StackedDailyBarChart, StackedDailyBarItem } from '../common/Charts';
-import { formatNumber, formatRupiah } from '../../lib/exportUtils';
+import { formatIndonesianDate, formatNumber, formatRupiah } from '../../lib/exportUtils';
 import {
   Users,
   School,
@@ -25,8 +26,18 @@ import {
   Thermometer,
   HeartPulse,
   Activity,
+  ClipboardList,
+  CalendarDays,
+  Image as ImageIcon,
+  Eye,
+  Edit,
+  SlidersHorizontal,
+  Lock,
 } from 'lucide-react';
-import { ModuleKey } from '../../types';
+import { DashboardSectionId, DivisionJobdesk, ModuleKey, RoleType } from '../../types';
+import { ALL_ROLES_LIST } from '../../lib/routeGuard';
+import { canUserViewDashboardSection, DASHBOARD_SECTIONS_META } from '../../lib/dashboardConfig';
+import { DashboardSettingsPanel } from './DashboardSettingsPanel';
 
 interface DashboardModuleProps {
   onNavigate: (module: ModuleKey) => void;
@@ -40,6 +51,8 @@ const formatShortDate = (dateStr: string): string => {
 
 export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) => {
   const {
+    currentUser,
+    dashboardLayoutConfig,
     institutions,
     menuItems,
     inventory,
@@ -56,7 +69,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     masterUnits,
     materialConversions,
     beneficiaryRecords,
+    divisionJobdesks,
   } = useApp();
+
+  const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
+  const [simulatedRole, setSimulatedRole] = useState<RoleType | ''>('');
 
   const convertToKg = (qty: number, unit?: string, materialName?: string): number => {
     const safeQty = Number.isFinite(qty) ? qty : 0;
@@ -90,9 +107,19 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
   const totalLargePortions = institutions.reduce((acc, i) => acc + i.largePortions, 0);
   const totalInstitutions = institutions.length;
 
-  // Active Menu Today
+  // Active Menu Today (otomatis mendeteksi tanggal hari ini atau menu aktif terdekat)
+  const realTodayIso = useMemo(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
   const todayDateStr = '2026-11-08';
-  const menuToday = menuItems.find(m => m.date === todayDateStr) || menuItems[0];
+  const menuToday =
+    menuItems.find(m => m.date === realTodayIso) ||
+    menuItems.find(m => m.date === todayDateStr) ||
+    menuItems[0];
   const activeMenuCount = menuItems.length;
 
   // Financial Stats (Kas Petty Cash & Pengadaan)
@@ -396,172 +423,302 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
     );
   }, [rejectedDailyAnalytics, selectedPrepDate]);
 
-  return (
-    <div className="space-y-6">
-      {/* Compact Welcome Banner */}
-      <div className="bg-linear-to-r from-[#1E3A8A] via-[#1E3A8A] to-[#0D9488] rounded-xl px-5 py-4 text-white shadow-sm border border-white/10 relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3">
+  // ---------------------------------------------------------------------------
+  // 5. SOP & Jobdesk Divisi Dapur MBG Harian Otomatis (Sumber PLOG)
+  // ---------------------------------------------------------------------------
+  const [selectedSopDate, setSelectedSopDate] = useState<string>('');
+  const [selectedSopDivisionFilter, setSelectedSopDivisionFilter] = useState<string>('ALL');
+  const [activeSopModalJob, setActiveSopModalJob] = useState<DivisionJobdesk | null>(null);
+  const [activeSopModalPhotoIdx, setActiveSopModalPhotoIdx] = useState<number>(0);
+
+  const sopDailyState = useMemo(() => {
+    const divisionOrder: DivisionJobdesk['divisionName'][] = [
+      'Relawan Div. Persiapan',
+      'Relawan Div. Pengolahan',
+      'Relawan Div. Pemorsian',
+      'Relawan Div. Distribusi',
+      'Relawan Div. Cuci Ompreng',
+    ];
+
+    const dateSet = new Set<string>([realTodayIso]);
+    for (const m of menuItems) {
+      if (m.date) dateSet.add(m.date);
+    }
+    for (const j of divisionJobdesks) {
+      if (j.date) dateSet.add(j.date);
+      const linkedMenu = menuItems.find(m => m.id === j.menuId);
+      if (linkedMenu?.date) dateSet.add(linkedMenu.date);
+    }
+
+    const availableDates = Array.from(dateSet).filter(Boolean).sort((a, b) => b.localeCompare(a));
+
+    const hasTodayData =
+      divisionJobdesks.some(j => j.date === realTodayIso) ||
+      menuItems.some(m => m.date === realTodayIso);
+
+    const latestJobdeskDate = divisionJobdesks
+      .map(j => j.date || menuItems.find(m => m.id === j.menuId)?.date || '')
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0];
+
+    const defaultDate = hasTodayData
+      ? realTodayIso
+      : latestJobdeskDate || menuToday?.date || availableDates[0] || realTodayIso;
+
+    const activeDate = selectedSopDate && availableDates.includes(selectedSopDate) ? selectedSopDate : defaultDate;
+    const activeMenu = menuItems.find(m => m.date === activeDate) || menuToday || menuItems[0];
+
+    const directMatches = divisionJobdesks.filter(j => {
+      if (j.date && j.date === activeDate) return true;
+      if (activeMenu && j.menuId === activeMenu.id) return true;
+      return false;
+    });
+
+    const isUsingMenuSpecific = directMatches.length > 0;
+    const resolvedList: DivisionJobdesk[] = divisionOrder
+      .map(divName => {
+        const direct = directMatches.find(j => j.divisionName === divName);
+        if (direct) return direct;
+        return divisionJobdesks.find(j => j.divisionName === divName);
+      })
+      .filter((item): item is DivisionJobdesk => Boolean(item));
+
+    const filteredList =
+      selectedSopDivisionFilter === 'ALL'
+        ? resolvedList
+        : resolvedList.filter(j => j.divisionName === selectedSopDivisionFilter);
+
+    const doneCount = resolvedList.filter(j => j.status === 'Selesai Sesuai Standar').length;
+    const inProgressCount = resolvedList.filter(j => j.status === 'Sedang Berjalan').length;
+    const pendingCount = resolvedList.filter(j => j.status === 'Belum Mulai').length;
+    const totalPhotos = resolvedList.reduce((acc, j) => {
+      const count = Array.isArray(j.photoUrls) && j.photoUrls.length > 0 ? j.photoUrls.filter(Boolean).length : j.photoUrl ? 1 : 0;
+      return acc + count;
+    }, 0);
+
+    return {
+      availableDates,
+      activeDate,
+      activeMenu,
+      isUsingMenuSpecific,
+      resolvedList,
+      filteredList,
+      doneCount,
+      inProgressCount,
+      pendingCount,
+      totalPhotos,
+    };
+  }, [divisionJobdesks, menuItems, menuToday, realTodayIso, selectedSopDate, selectedSopDivisionFilter]);
+
+  const isAdmin = currentUser.role === 'Admin Utama';
+  const activeSimulatedRole = isAdmin && simulatedRole ? simulatedRole : null;
+
+  const gridGapClass =
+    dashboardLayoutConfig.density === 'compact'
+      ? 'gap-4'
+      : dashboardLayoutConfig.density === 'spacious'
+      ? 'gap-8'
+      : 'gap-6';
+
+  const getKpiGridClass = (defaultCols: 4 | 5) => {
+    const colSetting = dashboardLayoutConfig.kpiColumns;
+    if (colSetting === 2) return 'grid grid-cols-1 sm:grid-cols-2 gap-4';
+    if (colSetting === 3) return 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4';
+    if (colSetting === 4) return 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4';
+    if (colSetting === 5) return 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4';
+    return defaultCols === 5
+      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4'
+      : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4';
+  };
+
+  const getSectionSpanClass = (width: 'full' | 'half' | 'third') => {
+    if (width === 'half') return 'col-span-12 lg:col-span-6';
+    if (width === 'third') return 'col-span-12 lg:col-span-4';
+    return 'col-span-12';
+  };
+
+  const visibleOrderedSectionIds = useMemo(() => {
+    return dashboardLayoutConfig.sectionOrder.filter(id => {
+      const cfg = dashboardLayoutConfig.sections[id];
+      if (!cfg) return false;
+      return canUserViewDashboardSection(cfg, currentUser, {
+        simulatedRole: activeSimulatedRole,
+      });
+    });
+  }, [dashboardLayoutConfig, currentUser, activeSimulatedRole]);
+
+  const renderDashboardSection = (sectionId: DashboardSectionId): React.ReactNode => {
+    switch (sectionId) {
+      case 'welcome_banner':
+        return (
+          <div className="bg-linear-to-r from-[#1E3A8A] via-[#1E3A8A] to-[#0D9488] rounded-xl px-5 py-4 text-white shadow-sm border border-white/10 relative overflow-hidden">
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-widest text-amber-300 mb-1">
+                  Sistem ERP SPPG Aktif &amp; Terverifikasi
+                </div>
+                <h2 className="text-lg md:text-xl font-extrabold tracking-tight text-white">
+                  {sppgConfig.sppgName}
+                </h2>
+                <p className="text-xs text-blue-100 mt-0.5 max-w-2xl leading-relaxed">
+                  Pusat komando dan kendali terpadu Program Makan Bergizi Gratis (MBG) Kecamatan Krejengan.
+                  Pengelolaan gizi, rantai pasok, dapur, armada distribusi, dan akuntabilitas keuangan secara real-time.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('reports')}
+                  className="px-3.5 py-2 bg-white text-[#1E3A8A] hover:bg-slate-100 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap cursor-pointer"
+                >
+                  Laporan Harian BGN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('distribution')}
+                  className="px-3.5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white border border-white/15 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap cursor-pointer"
+                >
+                  Pantau Distribusi
+                </button>
+              </div>
+            </div>
+
+            {/* Subtle geometric highlight */}
+            <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
+          </div>
+        );
+
+      case 'critical_alerts':
+        if (criticalStockItems.length === 0 && pendingPOs.length === 0 && absentVolunteers.length === 0) {
+          return null;
+        }
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+            {criticalStockItems.length > 0 && (
+              <div
+                onClick={() => onNavigate('inventory')}
+                className="cursor-pointer bg-white dark:bg-slate-900 border border-[#DC2626]/30 dark:border-rose-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
+              >
+                <div className="p-2 rounded-lg bg-[#DC2626]/10 text-[#DC2626] shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h5 className="text-xs font-bold text-[#1F2937] dark:text-rose-200">
+                    {criticalStockItems.length} Bahan di Bawah Minimum
+                  </h5>
+                  <p className="text-[11px] text-[#64748B] dark:text-rose-300 mt-0.5">
+                    {criticalStockItems.map(i => i.name).join(', ')}. Segera lakukan restock!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {pendingPOs.length > 0 && (
+              <div
+                onClick={() => onNavigate('procurement')}
+                className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-amber-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
+              >
+                <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h5 className="text-xs font-bold text-[#1F2937] dark:text-amber-200">
+                    {pendingPOs.length} PO Menunggu Persetujuan
+                  </h5>
+                  <p className="text-[11px] text-[#64748B] dark:text-amber-300 mt-0.5">
+                    Menunggu verifikasi Pengawas Keuangan / Kepala SPPG.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {absentVolunteers.length > 0 && (
+              <div
+                onClick={() => onNavigate('volunteers')}
+                className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-orange-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
+              >
+                <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
+                  <UserX className="w-4 h-4" />
+                </div>
+                <div>
+                  <h5 className="text-xs font-bold text-[#1F2937] dark:text-orange-200">
+                    {absentVolunteers.length} Relawan Tidak Hadir
+                  </h5>
+                  <p className="text-[11px] text-[#64748B] dark:text-orange-300 mt-0.5">
+                    {absentVolunteers.map(v => `${v.volunteerName} (${v.status})`).join(', ')}.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'beneficiary_kpi':
+        return (
           <div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-amber-300 mb-1">
-              Sistem ERP SPPG Aktif &amp; Terverifikasi
+            <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
+              1. Penerima Manfaat &amp; Kapasitas Porsi
+            </h3>
+            <div className={getKpiGridClass(5)}>
+              <DashboardCard
+                title="Total Penerima Manfaat"
+                value={`${formatNumber(totalRecipients)} Siswa`}
+                subtitle="Target harian terealisasi 100%"
+                icon={<Users className="w-5 h-5 text-[#142B4A] dark:text-sky-400" />}
+                badge={{ text: 'Aktif MBG', color: 'blue' }}
+                accentColor="navy"
+                onClick={() => onNavigate('institutions')}
+              />
+              <DashboardCard
+                title="Jumlah Lembaga"
+                value={`${totalInstitutions} Lembaga`}
+                subtitle="SD, MI, SMP, MTs, SMK, Pesantren"
+                icon={<School className="w-5 h-5 text-[#0F766E] dark:text-teal-400" />}
+                badge={{ text: 'Krejengan', color: 'emerald' }}
+                accentColor="sky"
+                onClick={() => onNavigate('institutions')}
+              />
+              <DashboardCard
+                title="Total Porsi Kecil"
+                value={`${formatNumber(totalSmallPortions)} Porsi`}
+                subtitle="PAUD/TK & SD Kelas 1-3 (~620 kkal)"
+                icon={<Utensils className="w-5 h-5 text-[#16A34A] dark:text-emerald-400" />}
+                badge={{
+                  text: totalRecipients > 0 ? `${((totalSmallPortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
+                  color: 'emerald',
+                }}
+                accentColor="emerald"
+                onClick={() => onNavigate('institutions')}
+              />
+              <DashboardCard
+                title="Total Porsi Besar"
+                value={`${formatNumber(totalLargePortions)} Porsi`}
+                subtitle="SD Kelas 4-6, SMP, SMA (~875 kkal)"
+                icon={<Utensils className="w-5 h-5 text-[#2563EB] dark:text-blue-400" />}
+                badge={{
+                  text: totalRecipients > 0 ? `${((totalLargePortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
+                  color: 'blue',
+                }}
+                accentColor="indigo"
+                onClick={() => onNavigate('institutions')}
+              />
+              <DashboardCard
+                title="Total Porsi Harian"
+                value={`${formatNumber(totalRecipients)} Porsi`}
+                subtitle={`Alokasi hari ini (${menuToday.dayName || 'MBG'})`}
+                icon={<ChefHat className="w-5 h-5 text-[#D97706] dark:text-amber-400" />}
+                badge={{ text: 'Tercapai', color: 'amber' }}
+                accentColor="amber"
+                onClick={() => onNavigate('production')}
+              />
             </div>
-            <h2 className="text-lg md:text-xl font-extrabold tracking-tight text-white">
-              {sppgConfig.sppgName}
-            </h2>
-            <p className="text-xs text-blue-100 mt-0.5 max-w-2xl leading-relaxed">
-              Pusat komando dan kendali terpadu Program Makan Bergizi Gratis (MBG) Kecamatan Krejengan.
-              Pengelolaan gizi, rantai pasok, dapur, armada distribusi, dan akuntabilitas keuangan secara real-time.
-            </p>
           </div>
+        );
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onNavigate('reports')}
-              className="px-3.5 py-2 bg-white text-[#1E3A8A] hover:bg-slate-100 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap"
-            >
-              Laporan Harian BGN
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate('distribution')}
-              className="px-3.5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white border border-white/15 rounded-xl text-xs font-bold shadow-sm transition-all duration-200 ease-in-out whitespace-nowrap"
-            >
-              Pantau Distribusi
-            </button>
-          </div>
-        </div>
-
-        {/* Subtle geometric highlight */}
-        <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
-      </div>
-
-      {/* Critical Operational Action Alerts */}
-      {(criticalStockItems.length > 0 || pendingPOs.length > 0 || absentVolunteers.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-          {criticalStockItems.length > 0 && (
-            <div
-              onClick={() => onNavigate('inventory')}
-              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#DC2626]/30 dark:border-rose-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
-            >
-              <div className="p-2 rounded-lg bg-[#DC2626]/10 text-[#DC2626] shrink-0">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <h5 className="text-xs font-bold text-[#1F2937] dark:text-rose-200">
-                  {criticalStockItems.length} Bahan di Bawah Minimum
-                </h5>
-                <p className="text-[11px] text-[#64748B] dark:text-rose-300 mt-0.5">
-                  {criticalStockItems.map(i => i.name).join(', ')}. Segera lakukan restock!
-                </p>
-              </div>
-            </div>
-          )}
-
-          {pendingPOs.length > 0 && (
-            <div
-              onClick={() => onNavigate('procurement')}
-              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-amber-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
-            >
-              <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
-                <Clock className="w-4 h-4" />
-              </div>
-              <div>
-                <h5 className="text-xs font-bold text-[#1F2937] dark:text-amber-200">
-                  {pendingPOs.length} PO Menunggu Persetujuan
-                </h5>
-                <p className="text-[11px] text-[#64748B] dark:text-amber-300 mt-0.5">
-                  Menunggu verifikasi Pengawas Keuangan / Kepala SPPG.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {absentVolunteers.length > 0 && (
-            <div
-              onClick={() => onNavigate('volunteers')}
-              className="cursor-pointer bg-white dark:bg-slate-900 border border-[#D97706]/30 dark:border-orange-900 rounded-xl p-4 flex items-start gap-3 hover:shadow-sm transition"
-            >
-              <div className="p-2 rounded-lg bg-[#D97706]/10 text-[#D97706] shrink-0">
-                <UserX className="w-4 h-4" />
-              </div>
-              <div>
-                <h5 className="text-xs font-bold text-[#1F2937] dark:text-orange-200">
-                  {absentVolunteers.length} Relawan Tidak Hadir
-                </h5>
-                <p className="text-[11px] text-[#64748B] dark:text-orange-300 mt-0.5">
-                  {absentVolunteers.map(v => `${v.volunteerName} (${v.status})`).join(', ')}.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Row 1: Key Beneficiary & Portion Statistics */}
-      <div>
-        <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
-          1. Penerima Manfaat & Kapasitas Porsi
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <DashboardCard
-            title="Total Penerima Manfaat"
-            value={`${formatNumber(totalRecipients)} Siswa`}
-            subtitle="Target harian terealisasi 100%"
-            icon={<Users className="w-5 h-5 text-[#142B4A] dark:text-sky-400" />}
-            badge={{ text: 'Aktif MBG', color: 'blue' }}
-            accentColor="navy"
-            onClick={() => onNavigate('institutions')}
-          />
-          <DashboardCard
-            title="Jumlah Lembaga"
-            value={`${totalInstitutions} Lembaga`}
-            subtitle="SD, MI, SMP, MTs, SMK, Pesantren"
-            icon={<School className="w-5 h-5 text-[#0F766E] dark:text-teal-400" />}
-            badge={{ text: 'Krejengan', color: 'emerald' }}
-            accentColor="sky"
-            onClick={() => onNavigate('institutions')}
-          />
-          <DashboardCard
-            title="Total Porsi Kecil"
-            value={`${formatNumber(totalSmallPortions)} Porsi`}
-            subtitle="PAUD/TK & SD Kelas 1-3 (~620 kkal)"
-            icon={<Utensils className="w-5 h-5 text-[#16A34A] dark:text-emerald-400" />}
-            badge={{
-              text: totalRecipients > 0 ? `${((totalSmallPortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
-              color: 'emerald',
-            }}
-            accentColor="emerald"
-            onClick={() => onNavigate('institutions')}
-          />
-          <DashboardCard
-            title="Total Porsi Besar"
-            value={`${formatNumber(totalLargePortions)} Porsi`}
-            subtitle="SD Kelas 4-6, SMP, SMA (~875 kkal)"
-            icon={<Utensils className="w-5 h-5 text-[#2563EB] dark:text-blue-400" />}
-            badge={{
-              text: totalRecipients > 0 ? `${((totalLargePortions / totalRecipients) * 100).toFixed(1)}%` : '0%',
-              color: 'blue',
-            }}
-            accentColor="indigo"
-            onClick={() => onNavigate('institutions')}
-          />
-          <DashboardCard
-            title="Total Porsi Harian"
-            value={`${formatNumber(totalRecipients)} Porsi`}
-            subtitle={`Alokasi hari ini (${menuToday.dayName || 'MBG'})`}
-            icon={<ChefHat className="w-5 h-5 text-[#D97706] dark:text-amber-400" />}
-            badge={{ text: 'Tercapai', color: 'amber' }}
-            accentColor="amber"
-            onClick={() => onNavigate('production')}
-          />
-        </div>
-      </div>
-
-      {/* Row 2: Menu Hari Ini & Divisi Dapur Progress */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Menu Hari Ini Card */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
+      case 'today_menu':
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between h-full">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -660,10 +817,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
+          </div>
+        );
 
-        {/* Progres Tugas Divisi Dapur */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
+      case 'kitchen_progress':
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between h-full">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -791,10 +950,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
+          </div>
+        );
 
-        {/* Status Distribusi & Logistik Harian */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between">
+      case 'distribution_status':
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col justify-between h-full">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -868,15 +1029,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
-      </div>
+          </div>
+        );
 
-      {/* Row 3: Petty Cash, Pengadaan & Insentif Overview */}
-      <div>
-        <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
-          2. Kas Petty Cash, Pengadaan &amp; Gudang Bahan Pangan
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      case 'finance_petty_cash':
+        return (
+          <div>
+            <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
+              2. Kas Petty Cash, Pengadaan &amp; Gudang Bahan Pangan
+            </h3>
+            <div className={getKpiGridClass(5)}>
           <DashboardCard
             title="Saldo Awal Petty Cash"
             value={formatRupiah(pettyCashOpeningBalance)}
@@ -922,11 +1084,13 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             accentColor="sky"
             onClick={() => onNavigate('petty_cash')}
           />
-        </div>
-      </div>
+            </div>
+          </div>
+        );
 
-      {/* Row 4: Administrasi, Surat & Pelaporan Quick Indicators */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      case 'inventory_admin_kpi':
+        return (
+          <div className={getKpiGridClass(4)}>
         <DashboardCard
           title="Stok Bahan Gudang"
           value={`${totalStockItems} Item`}
@@ -963,10 +1127,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
           accentColor="emerald"
           onClick={() => onNavigate('reports')}
         />
-      </div>
+          </div>
+        );
 
-      {/* Row 5: Grafik Food Waste Harian & Statistik Bahan Rijek Harian */}
-      <div>
+      case 'waste_rejected_charts':
+        return (
+          <div>
         <h3 className="text-xs font-bold text-[#64748B] dark:text-slate-400 uppercase tracking-wider mb-3">
           3. Grafik Food Waste Harian & Informasi Bahan Rijek Harian
         </h3>
@@ -1243,10 +1409,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             </button>
           </div>
         </div>
-      </div>
+          </div>
+        );
 
-      {/* SECTION 4: REKAPITULASI STATUS GIZI ANAK & Z-SCORE WHO/KEMENKES (REAL-TIME) */}
-      <div className="space-y-4">
+      case 'nutrition_who':
+        return (
+          <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h3 className="text-base font-bold text-[#1F2937] dark:text-white tracking-tight flex items-center gap-2">
@@ -1465,7 +1633,467 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({ onNavigate }) 
             </button>
           </div>
         </div>
+          </div>
+        );
+
+      case 'plog_daily_sop':
+        return (
+          <div className="space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-[#1F2937] dark:text-white tracking-tight flex items-center gap-2">
+              <ClipboardList className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
+              <span>5. Standar Operasional Prosedur (SOP) &amp; Jobdesk Divisi Dapur MBG (Harian — PLOG)</span>
+            </h3>
+            <p className="text-xs text-[#64748B] dark:text-slate-400 mt-0.5">
+              Ditampilkan otomatis secara harian dari input PLOG pada submodul Jobdesk Divisi &amp; SOP · Tersinkron langsung untuk seluruh 5 divisi dapur.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Pemilih Tanggal Harian */}
+            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 shadow-2xs">
+              <CalendarDays className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
+              <select
+                value={sopDailyState.activeDate}
+                onChange={e => setSelectedSopDate(e.target.value)}
+                aria-label="Pilih tanggal SOP harian PLOG"
+                className="bg-transparent font-bold text-xs text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+              >
+                {sopDailyState.availableDates.map(d => (
+                  <option key={d} value={d} className="bg-white dark:bg-slate-900">
+                    {formatIndonesianDate(d)}{d === realTodayIso ? ' (Hari Ini)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Filter Divisi */}
+            <select
+              value={selectedSopDivisionFilter}
+              onChange={e => setSelectedSopDivisionFilter(e.target.value)}
+              aria-label="Filter divisi dapur SOP"
+              className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none cursor-pointer"
+            >
+              <option value="ALL">Semua Divisi ({sopDailyState.resolvedList.length})</option>
+              {sopDailyState.resolvedList.map(j => (
+                <option key={j.id} value={j.divisionName}>
+                  {j.divisionName}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  sessionStorage.setItem('sppg_menu_target_tab', 'jobdesk_divisi');
+                } catch {
+                  // ignore
+                }
+                onNavigate('menu');
+              }}
+              className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1E3A8A] hover:bg-[#162C6B] text-white text-xs font-bold shadow-xs transition cursor-pointer shrink-0"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              <span>Input / Edit SOP di PLOG</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Daily Menu Context & Summary Strip */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <span className="font-mono font-bold text-[#1E3A8A] dark:text-sky-400">
+                {formatIndonesianDate(sopDailyState.activeDate)}
+              </span>
+              {sopDailyState.activeMenu && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono font-bold text-[#0F766E] dark:text-teal-400">
+                    {sopDailyState.activeMenu.menuCode}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-semibold text-slate-900 dark:text-white truncate">
+                    {sopDailyState.activeMenu.stapleFood} · {sopDailyState.activeMenu.animalProtein} · {sopDailyState.activeMenu.vegetable}
+                  </span>
+                </>
+              )}
+            </div>
+            <p className="text-[11px] text-[#64748B] dark:text-slate-400">
+              {sopDailyState.isUsingMenuSpecific
+                ? 'Menampilkan SOP & Jobdesk Divisi yang diinput PLOG untuk tanggal/menu terpilih.'
+                : 'Belum ada penyesuaian SOP khusus untuk tanggal ini; menampilkan standar harian aktif terbaru dari PLOG.'}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums shrink-0">
+            <div>
+              <span className="text-[#64748B] dark:text-slate-400">Selesai: </span>
+              <strong className="text-[#16A34A] dark:text-emerald-400 font-mono">
+                {sopDailyState.doneCount}/{sopDailyState.resolvedList.length}
+              </strong>
+            </div>
+            <div>
+              <span className="text-[#64748B] dark:text-slate-400">Berjalan: </span>
+              <strong className="text-[#D97706] dark:text-amber-400 font-mono">
+                {sopDailyState.inProgressCount}
+              </strong>
+            </div>
+            <div>
+              <span className="text-[#64748B] dark:text-slate-400">Belum Mulai: </span>
+              <strong className="text-slate-700 dark:text-slate-300 font-mono">
+                {sopDailyState.pendingCount}
+              </strong>
+            </div>
+            <div>
+              <span className="text-[#64748B] dark:text-slate-400">Dokumentasi: </span>
+              <strong className="text-[#1E3A8A] dark:text-sky-400 font-mono">
+                {sopDailyState.totalPhotos} Foto
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Daily Division SOP Cards Grid */}
+        {sopDailyState.filteredList.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 rounded-xl p-8 border border-[#E2E8F0] dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400">
+            Belum ada data SOP &amp; Jobdesk Divisi Dapur MBG dari PLOG. Silakan tambahkan pada modul Perencanaan Menu &amp; Gizi (PLOG).
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {sopDailyState.filteredList.map(job => {
+              const photos =
+                Array.isArray(job.photoUrls) && job.photoUrls.length > 0
+                  ? job.photoUrls.filter(Boolean)
+                  : job.photoUrl
+                  ? [job.photoUrl]
+                  : [];
+              const coverPhoto = photos[0] || '';
+              const statusTone =
+                job.status === 'Selesai Sesuai Standar'
+                  ? 'text-[#16A34A] dark:text-emerald-400'
+                  : job.status === 'Sedang Berjalan'
+                  ? 'text-[#D97706] dark:text-amber-400'
+                  : 'text-slate-600 dark:text-slate-400';
+
+              return (
+                <div
+                  key={job.id}
+                  className="bg-white dark:bg-slate-900 rounded-xl border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] overflow-hidden flex flex-col justify-between"
+                >
+                  <div>
+                    {/* Card Header */}
+                    <div className="px-4 py-3 bg-slate-50/90 dark:bg-slate-800/60 border-b border-[#E2E8F0] dark:border-slate-800 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-bold text-[#1F2937] dark:text-white truncate">
+                          {job.divisionName}
+                        </h4>
+                        <p className="text-[11px] text-[#64748B] dark:text-slate-400 truncate mt-0.5">
+                          PIC: <strong className="text-slate-800 dark:text-slate-200">{job.picName || '-'}</strong>
+                        </p>
+                      </div>
+                      <span className={`text-[11px] font-bold shrink-0 ${statusTone}`}>
+                        {job.status}
+                      </span>
+                    </div>
+
+                    {/* Cover Photo */}
+                    <div
+                      onClick={() => {
+                        setActiveSopModalJob(job);
+                        setActiveSopModalPhotoIdx(0);
+                      }}
+                      className="relative h-36 bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer group"
+                    >
+                      {coverPhoto ? (
+                        <img
+                          src={coverPhoto}
+                          alt={job.divisionName}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-1">
+                          <ImageIcon className="w-6 h-6 opacity-50" />
+                          <span>Belum ada foto SOP</span>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent flex items-end justify-between gap-2 p-2.5">
+                        <span className="text-[11px] text-white/95 line-clamp-1">
+                          {job.photoCaption || 'Dokumentasi standar kerja divisi'}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-white bg-black/60 px-2 py-0.5 rounded shrink-0">
+                          {photos.length} Foto
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* SOP Body */}
+                    <div className="p-4 space-y-2.5 text-xs">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-[#64748B] dark:text-slate-400">
+                          Bahan &amp; Objek Ditangani
+                        </div>
+                        <p className="text-slate-800 dark:text-slate-200 font-medium mt-0.5 line-clamp-2">
+                          {job.ingredientsHandled}
+                        </p>
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-[#64748B] dark:text-slate-400">
+                          Standar Operasional Prosedur (SOP) &amp; Tugas
+                        </div>
+                        <div className="mt-1 p-2.5 rounded-lg bg-[#F4F7FA] dark:bg-slate-950/70 border border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-line leading-relaxed max-h-36 overflow-y-auto scrollbar-thin">
+                          {job.tasks}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card Footer */}
+                  <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400 truncate">
+                      {job.updatedAt ? `Diperbarui ${job.updatedAt}` : `Menu: ${sopDailyState.activeMenu?.menuCode || job.menuId}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSopModalJob(job);
+                        setActiveSopModalPhotoIdx(0);
+                      }}
+                      className="inline-flex items-center gap-1 font-bold text-[#1E3A8A] dark:text-sky-400 hover:underline shrink-0 cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Detail &amp; Galeri</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Admin Bar for Dashboard Layout & Granular Visibility Control */}
+      {isAdmin && (
+        <div className="bg-white dark:bg-slate-900 rounded-xl px-4 py-3 border border-[#E2E8F0] dark:border-slate-800 shadow-[0_1px_3px_rgba(20,43,74,0.04)] flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+            <SlidersHorizontal className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400 shrink-0" />
+            {activeSimulatedRole ? (
+              <span>
+                Mode Simulasi Peran: <strong className="text-amber-700 dark:text-amber-400">{activeSimulatedRole}</strong>{' '}
+                — Menampilkan <strong>{visibleOrderedSectionIds.length}</strong> dari {DASHBOARD_SECTIONS_META.length} blok data.
+              </span>
+            ) : (
+              <span>
+                Tampilan Dashboard Terpadu: <strong className="text-slate-900 dark:text-white">{visibleOrderedSectionIds.length}/{DASHBOARD_SECTIONS_META.length} Blok Aktif</strong>{' '}
+                · Kerapatan <strong className="capitalize">{dashboardLayoutConfig.density}</strong>
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200">
+              <Eye className="w-3.5 h-3.5 text-[#0F766E] dark:text-teal-400 shrink-0" />
+              <select
+                value={simulatedRole}
+                onChange={e => setSimulatedRole(e.target.value as RoleType | '')}
+                aria-label="Simulasikan tampilan dashboard peran lain"
+                className="bg-transparent font-semibold text-xs text-slate-800 dark:text-white focus:outline-none cursor-pointer"
+              >
+                <option value="" className="bg-white dark:bg-slate-900">
+                  Simulasi Peran: Tampilan Asli (Admin)
+                </option>
+                {ALL_ROLES_LIST.filter(r => r !== 'Admin Utama').map(r => (
+                  <option key={r} value={r} className="bg-white dark:bg-slate-900">
+                    Pratinjau Peran: {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setIsLayoutModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#1E3A8A] hover:bg-[#162C6B] dark:bg-sky-600 dark:hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Atur Tata Letak &amp; Akses</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Configurable Dashboard Grid */}
+      {visibleOrderedSectionIds.length === 0 ? (
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-10 border border-[#E2E8F0] dark:border-slate-800 text-center space-y-2">
+          <Lock className="w-8 h-8 mx-auto text-slate-400" />
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+            Tidak Ada Blok Data yang Ditampilkan
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            Saat ini seluruh blok informasi pada Dashboard Terpadu dibatasi atau disembunyikan untuk akun/peran ini oleh Admin Utama.
+          </p>
+        </div>
+      ) : (
+        <div className={`grid grid-cols-12 ${gridGapClass} items-stretch`}>
+          {visibleOrderedSectionIds.map(sectionId => {
+            const cfg = dashboardLayoutConfig.sections[sectionId];
+            if (!cfg) return null;
+            const node = renderDashboardSection(sectionId);
+            if (!node) return null;
+            return (
+              <div key={sectionId} className={getSectionSpanClass(cfg.width)}>
+                {node}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal: Pengaturan Manual Tata Letak & Akses Dashboard */}
+      <Modal
+        isOpen={isLayoutModalOpen}
+        onClose={() => setIsLayoutModalOpen(false)}
+        title="Pengaturan Manual Dashboard Terpadu"
+        subtitle="Atur urutan tata letak, lebar kolom, dan siapa saja yang dapat atau tidak dapat melihat setiap data"
+        maxWidth="4xl"
+      >
+        <DashboardSettingsPanel compactHeader onClose={() => setIsLayoutModalOpen(false)} />
+      </Modal>
+
+      {/* Modal: Detail SOP & Galeri Foto Divisi Dapur */}
+      <Modal
+        isOpen={Boolean(activeSopModalJob)}
+        onClose={() => setActiveSopModalJob(null)}
+        title={activeSopModalJob ? `SOP & Jobdesk — ${activeSopModalJob.divisionName}` : 'Detail SOP Divisi'}
+        subtitle={
+          activeSopModalJob
+            ? `${formatIndonesianDate(sopDailyState.activeDate)} · Koordinator: ${activeSopModalJob.picName || '-'}`
+            : undefined
+        }
+        maxWidth="3xl"
+      >
+        {activeSopModalJob && (() => {
+          const modalPhotos =
+            Array.isArray(activeSopModalJob.photoUrls) && activeSopModalJob.photoUrls.length > 0
+              ? activeSopModalJob.photoUrls.filter(Boolean)
+              : activeSopModalJob.photoUrl
+              ? [activeSopModalJob.photoUrl]
+              : [];
+          const currentPhoto = modalPhotos[activeSopModalPhotoIdx] || modalPhotos[0] || '';
+
+          return (
+            <div className="space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+                <div className="text-slate-600 dark:text-slate-300">
+                  <span>Menu Harian: </span>
+                  <strong className="text-slate-900 dark:text-white">
+                    {sopDailyState.activeMenu?.menuCode || activeSopModalJob.menuId} — {activeSopModalJob.menuName}
+                  </strong>
+                </div>
+                <span
+                  className={`font-bold ${
+                    activeSopModalJob.status === 'Selesai Sesuai Standar'
+                      ? 'text-[#16A34A] dark:text-emerald-400'
+                      : activeSopModalJob.status === 'Sedang Berjalan'
+                      ? 'text-[#D97706] dark:text-amber-400'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  Status: {activeSopModalJob.status}
+                </span>
+              </div>
+
+              {currentPhoto && (
+                <div className="space-y-2">
+                  <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 flex items-center justify-center max-h-72">
+                    <img
+                      src={currentPhoto}
+                      alt={activeSopModalJob.divisionName}
+                      className="w-full max-h-72 object-contain"
+                    />
+                  </div>
+                  {activeSopModalJob.photoCaption && (
+                    <p className="text-[11px] italic text-slate-600 dark:text-slate-400">
+                      {activeSopModalJob.photoCaption}
+                    </p>
+                  )}
+                  {modalPhotos.length > 1 && (
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {modalPhotos.map((src, idx) => (
+                        <button
+                          key={`modal-sop-photo-${idx}`}
+                          type="button"
+                          onClick={() => setActiveSopModalPhotoIdx(idx)}
+                          className={`w-14 h-14 rounded-lg overflow-hidden border-2 shrink-0 cursor-pointer transition ${
+                            idx === activeSopModalPhotoIdx
+                              ? 'border-[#1E3A8A] dark:border-sky-400'
+                              : 'border-slate-200 dark:border-slate-700 opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={src} alt={`SOP ${idx + 1}`} className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <div className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                  Bahan / Objek Kerja yang Ditangani
+                </div>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-white">
+                  {activeSopModalJob.ingredientsHandled}
+                </p>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                  Langkah Standar Operasional Prosedur (SOP)
+                </div>
+                <div className="mt-1 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 whitespace-pre-line leading-relaxed">
+                  {activeSopModalJob.tasks}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {activeSopModalJob.updatedBy
+                    ? `Terakhir diperbarui oleh ${activeSopModalJob.updatedBy} (${activeSopModalJob.updatedAt || '-'})`
+                    : 'Sumber: Perencanaan Menu & Gizi (PLOG)'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSopModalJob(null);
+                    try {
+                      sessionStorage.setItem('sppg_menu_target_tab', 'jobdesk_divisi');
+                    } catch {
+                      // ignore
+                    }
+                    onNavigate('menu');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1E3A8A] hover:bg-[#162C6B] text-white text-xs font-bold transition cursor-pointer"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Edit SOP ini di Modul PLOG</span>
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 };

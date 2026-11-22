@@ -5,6 +5,7 @@ import { ALL_MODULES_META, ALL_ROLES_LIST } from '../../lib/routeGuard';
 import { isProtectedSuperAdminEmail } from '../../lib/authCrypto';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { DashboardSettingsPanel } from './DashboardSettingsPanel';
 import {
   FIRESTORE_COLLECTIONS,
   FirestoreCollectionKey,
@@ -76,7 +77,18 @@ export const SettingsModule: React.FC = () => {
     connectFirebaseAdminSync,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'profil' | 'access' | 'rbac' | 'database' | 'audit'>('profil');
+  const [activeTab, setActiveTab] = useState<'profil' | 'access' | 'rbac' | 'dashboard' | 'database' | 'audit'>(() => {
+    try {
+      const target = sessionStorage.getItem('sppg_settings_target_tab');
+      if (target) sessionStorage.removeItem('sppg_settings_target_tab');
+      if (target === 'dashboard' || target === 'access' || target === 'rbac' || target === 'database' || target === 'audit') {
+        return target;
+      }
+    } catch {
+      // ignore
+    }
+    return 'profil';
+  });
 
   // Web Login Access Management States
   const [accessSearch, setAccessSearch] = useState('');
@@ -687,6 +699,19 @@ export const SettingsModule: React.FC = () => {
           >
             <Shield className="w-4 h-4 shrink-0" />
             <span>Matriks Hak Akses &amp; Modul (13 Peran)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'dashboard'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <LayoutGrid className="w-4 h-4 shrink-0" />
+            <span>Tata Letak &amp; Akses Dashboard</span>
           </button>
 
           <button
@@ -2384,6 +2409,13 @@ export const SettingsModule: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Tab Dashboard Layout & Granular Visibility Settings */}
+      {activeTab === 'dashboard' && (
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
+          <DashboardSettingsPanel />
         </div>
       )}
     </div>
