@@ -9,13 +9,20 @@ export const ToastContainer: React.FC = () => {
   if (toasts.length === 0 || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="toast-container fixed inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-5 sm:right-5 z-[70] flex flex-col space-y-2.5 sm:max-w-md sm:w-full pointer-events-none">
+    <div className="toast-container fixed inset-x-3 top-3 sm:inset-x-auto sm:top-5 sm:right-5 z-[75] flex flex-col space-y-2.5 sm:max-w-md sm:w-full pointer-events-none">
       {toasts.map(toast => {
         const iconWrappers = {
-          success: 'bg-[#0D9488]/10 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400',
-          warning: 'bg-[#D97706]/10 text-[#D97706] dark:bg-amber-950/60 dark:text-amber-400',
-          error: 'bg-[#E11D48]/10 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-400',
-          info: 'bg-[#1E3A8A]/10 text-[#1E3A8A] dark:bg-blue-950/60 dark:text-blue-400',
+          success: 'bg-teal-50 text-[#0D9488] border border-teal-200/70 dark:bg-teal-950/60 dark:text-teal-400 dark:border-teal-800/60',
+          warning: 'bg-amber-50 text-[#D97706] border border-amber-200/70 dark:bg-amber-950/60 dark:text-amber-400 dark:border-amber-800/60',
+          error: 'bg-rose-50 text-[#E11D48] border border-rose-200/70 dark:bg-rose-950/60 dark:text-rose-400 dark:border-rose-800/60',
+          info: 'bg-blue-50 text-[#1E3A8A] border border-blue-200/70 dark:bg-blue-950/60 dark:text-blue-400 dark:border-blue-800/60',
+        };
+
+        const accentBar = {
+          success: 'border-l-4 border-l-[#0D9488]',
+          warning: 'border-l-4 border-l-[#D97706]',
+          error: 'border-l-4 border-l-[#E11D48]',
+          info: 'border-l-4 border-l-[#1E3A8A]',
         };
 
         const icons = {
@@ -28,7 +35,9 @@ export const ToastContainer: React.FC = () => {
         return (
           <div
             key={toast.id}
-            className="pointer-events-auto bg-white dark:bg-slate-900 shadow-lg rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 transition-all duration-200 ease-in-out flex items-start gap-3"
+            role="status"
+            aria-live="polite"
+            className={`animate-toastIn pointer-events-auto bg-white dark:bg-slate-900 shadow-lg rounded-xl border border-slate-200/80 dark:border-slate-800 ${accentBar[toast.type]} p-3.5 sm:p-4 transition-all duration-200 ease-out flex items-start gap-3`}
           >
             <div className={`p-1.5 rounded-lg shrink-0 ${iconWrappers[toast.type]}`}>
               {icons[toast.type]}
@@ -44,7 +53,7 @@ export const ToastContainer: React.FC = () => {
             <button
               type="button"
               onClick={() => removeToast(toast.id)}
-              className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 p-1 rounded-md transition cursor-pointer"
+              className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 p-1 rounded-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
               aria-label="Tutup notifikasi"
             >
               <X className="w-4 h-4" />

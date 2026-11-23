@@ -1082,6 +1082,7 @@ export const BeneficiaryNutritionTab: React.FC<BeneficiaryNutritionTabProps> = (
             onExportExcel={handleExportExcel}
             onExportPDF={handleExportPDF}
             onPrint={triggerPrint}
+            stickyFirstColumn
           />
         </div>
       )}

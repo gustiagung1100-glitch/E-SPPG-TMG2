@@ -812,7 +812,7 @@ export const VolunteersModule: React.FC = () => {
 
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Menunggu Persetujuan
@@ -821,7 +821,7 @@ export const VolunteersModule: React.FC = () => {
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-[#D97706] dark:text-amber-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#D97706] dark:text-amber-400 mt-2">
             {stats.pendingAbsences}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -829,7 +829,7 @@ export const VolunteersModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Izin Disetujui
@@ -838,7 +838,7 @@ export const VolunteersModule: React.FC = () => {
               <CheckCircle className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-[#0D9488] dark:text-teal-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#0D9488] dark:text-teal-400 mt-2">
             {stats.approvedAbsences}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -846,7 +846,7 @@ export const VolunteersModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Presensi Hari Ini
@@ -855,7 +855,7 @@ export const VolunteersModule: React.FC = () => {
               <UserCheck className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {stats.presentToday} <span className="text-sm font-normal text-slate-500">/ {stats.totalAttendanceToday}</span>
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -863,7 +863,7 @@ export const VolunteersModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Master Relawan
@@ -872,7 +872,7 @@ export const VolunteersModule: React.FC = () => {
               <Users2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {masterVolunteers.length}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -883,7 +883,7 @@ export const VolunteersModule: React.FC = () => {
 
       {/* Main Responsive Pill Tabs */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar items-center gap-1.5 pb-1 sm:pb-0">
           <button
             type="button"
             onClick={() => setActiveTab('absences')}
@@ -943,7 +943,7 @@ export const VolunteersModule: React.FC = () => {
       {/* TAB 1: MODUL KETIDAKHADIRAN RELAWAN & PERGANTIAN SHIFT */}
       {/* ========================================================================= */}
       {activeTab === 'absences' && (
-        <div className="space-y-4">
+        <div key="absences" className="space-y-4 animate-fadeIn">
           {/* Rules Banner */}
           <div className="bg-amber-50/90 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-800/80 p-4 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -1036,7 +1036,7 @@ export const VolunteersModule: React.FC = () => {
       {/* TAB 2: PRESENSI HARIAN & SANITASI DAPUR */}
       {/* ========================================================================= */}
       {activeTab === 'attendance' && (
-        <div className="space-y-4">
+        <div key="attendance" className="space-y-4 animate-fadeIn">
           <div className="bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/70 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5 text-xs text-blue-900 dark:text-blue-200">
               <RefreshCw className="w-4 h-4 text-blue-600 dark:text-sky-400 shrink-0 mt-0.5" />
@@ -1089,7 +1089,7 @@ export const VolunteersModule: React.FC = () => {
       {/* TAB 3: DIREKTORI MASTER RELAWAN */}
       {/* ========================================================================= */}
       {activeTab === 'directory' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div key="directory" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fadeIn">
           {masterVolunteers.map(vol => {
             const attCount = volunteerAttendance.filter(
               a => a.volunteerId === vol.id || a.volunteerName.toLowerCase() === vol.name.toLowerCase()
@@ -1112,7 +1112,7 @@ export const VolunteersModule: React.FC = () => {
             return (
               <div
                 key={vol.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm flex items-start gap-3"
+                className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex items-start gap-3 h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
               >
                 <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 flex items-center justify-center font-bold text-sm shrink-0">
                   {vol.name.charAt(0)}

@@ -293,7 +293,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Sidebar Container - Institutional Navy Collapsible */}
       <aside
         aria-label="Navigasi Utama E-SPPG"
-        className={`fixed lg:sticky lg:top-0 lg:h-screen top-0 bottom-0 left-0 z-50 lg:z-40 bg-gradient-to-b from-[#1E3A8A] via-[#172554] to-[#0F172A] text-white border-r border-blue-900/60 shadow-xl flex flex-col transition-all duration-200 ease-in-out shrink-0 ${
+        className={`fixed lg:sticky lg:top-0 lg:h-screen top-0 bottom-0 left-0 z-50 lg:z-40 bg-gradient-to-b from-[#1E3A8A] via-[#172554] to-[#0F172A] text-white border-r border-blue-900/60 shadow-xl flex flex-col transition-all duration-300 ease-in-out shrink-0 ${
           isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
         } ${
           isDesktopHidden

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Download, Printer } from 'lucide-react';
+import { EmptyState } from './EmptyState';
 
 export interface Column<T> {
   key: string;
@@ -286,10 +287,25 @@ export function DataTable<T extends Record<string, any>>({
               ))
             ) : paginatedData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 1} className="py-12 text-center">
-                  <p className="text-slate-500 dark:text-slate-400">
-                    Tidak ada data yang sesuai.
-                  </p>
+                <td colSpan={columns.length + 1} className="p-0">
+                  <EmptyState
+                    variant={searchTerm.trim() ? 'search' : 'data'}
+                    title={searchTerm.trim() ? 'Hasil Pencarian Tidak Ditemukan' : 'Belum Ada Data'}
+                    description={
+                      searchTerm.trim()
+                        ? `Tidak ditemukan data yang cocok dengan kata kunci "${searchTerm}".`
+                        : 'Belum ada entri yang tersimpan pada tabel ini.'
+                    }
+                    actionLabel={searchTerm.trim() ? 'Reset Pencarian' : undefined}
+                    onAction={
+                      searchTerm.trim()
+                        ? () => {
+                            setSearchTerm('');
+                            setCurrentPage(1);
+                          }
+                        : undefined
+                    }
+                  />
                 </td>
               </tr>
             ) : (
@@ -351,7 +367,7 @@ export function DataTable<T extends Record<string, any>>({
                 setItemsPerPage(Number(e.target.value));
                 setCurrentPage(1);
               }}
-              className="bg-[#F4F7FA] dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md py-1 px-2 text-[#1F2937] dark:text-slate-200 focus:outline-hidden"
+              className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-1 px-2 text-slate-800 dark:text-slate-200 focus:outline-hidden"
             >
               {itemsPerPageOptions.map(opt => (
                 <option key={opt} value={opt}>
@@ -367,18 +383,18 @@ export function DataTable<T extends Record<string, any>>({
             type="button"
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            className="p-1.5 rounded-md border border-[#E2E8F0] dark:border-slate-700 hover:bg-[#F4F7FA] dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 active:scale-[0.98] cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="px-3 py-1 font-semibold text-[#1F2937] dark:text-slate-200">
+          <span className="px-3 py-1 font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
             Halaman {currentPage} dari {totalPages}
           </span>
           <button
             type="button"
             disabled={currentPage === totalPages}
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            className="p-1.5 rounded-md border border-[#E2E8F0] dark:border-slate-700 hover:bg-[#F4F7FA] dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 active:scale-[0.98] cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

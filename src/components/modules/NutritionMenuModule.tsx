@@ -31,18 +31,11 @@ import {
 } from '../../types';
 import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import {
-  DynamicFormEditToggleBar,
-  DynamicFormBuilderPanel,
   DynamicFormRenderer,
   validateDynamicFormFields,
 } from '../common/DynamicFormBuilder';
 import {
-  appendDynamicExcelFields,
-  appendDynamicExportColumns,
-  buildDynamicTableColumns,
-  getCustomTableFields,
   getInitialCustomFieldValues,
-  formatDynamicFieldValue,
 } from '../../lib/dynamicFormSchemas';
 import {
   defaultFoodCompositions,
@@ -230,9 +223,15 @@ export const NutritionMenuModule: React.FC = () => {
     dynamicFormSchemas,
   } = useApp();
 
-  const [isEditingMenuForm, setIsEditingMenuForm] = useState(false);
-  const [isModalMenuSchemaEdit, setIsModalMenuSchemaEdit] = useState(false);
   const [isZScoreModalOpen, setIsZScoreModalOpen] = useState(false);
+
+  const menuFormSchema = useMemo(
+    () => ({
+      ...dynamicFormSchemas.menu_form,
+      fields: dynamicFormSchemas.menu_form.fields.filter(f => f.isSystem),
+    }),
+    [dynamicFormSchemas.menu_form]
+  );
 
   // Active Sub-module Tab
   const [activeTab, setActiveTab] = useState<SubModuleTab>(() => {
@@ -319,14 +318,27 @@ export const NutritionMenuModule: React.FC = () => {
 
   // Modal State for Adding Ingredient to Menu
   const [isAddIngredientModalOpen, setIsAddIngredientModalOpen] = useState(false);
-  const [selectedCompositionId, setSelectedCompositionId] = useState<string>(foodCompositions[0]?.id || '');
-  const [customGramSmall, setCustomGramSmall] = useState<number>(50);
-  const [customGramLarge, setCustomGramLarge] = useState<number>(75);
-  const [customBdd, setCustomBdd] = useState<number>(100);
-  const [customBufferSmallPct, setCustomBufferSmallPct] = useState<number>(2);
-  const [customBufferLargePct, setCustomBufferLargePct] = useState<number>(2);
-  const [customUnitPrice, setCustomUnitPrice] = useState<number>(30000);
+  const [manualIngredientName, setManualIngredientName] = useState<string>('');
+  const [manualIngredientCategory, setManualIngredientCategory] = useState<string>('Lauk Hewani');
+  const [customGramSmall, setCustomGramSmall] = useState<string>('50');
+  const [customGramLarge, setCustomGramLarge] = useState<string>('75');
+  const [customBdd, setCustomBdd] = useState<string>('100');
+  const [customBufferSmallPct, setCustomBufferSmallPct] = useState<string>('2');
+  const [customBufferLargePct, setCustomBufferLargePct] = useState<string>('2');
   const [customPurchaseUnit, setCustomPurchaseUnit] = useState<string>(masterUnits[0]?.code || 'kg');
+  const [modalTouchedFields, setModalTouchedFields] = useState<{
+    category: boolean;
+    gramSmall: boolean;
+    gramLarge: boolean;
+    bdd: boolean;
+    unit: boolean;
+  }>({
+    category: false,
+    gramSmall: false,
+    gramLarge: false,
+    bdd: false,
+    unit: false,
+  });
 
   // Quick Add Row Modal State inside Tab C: Rincian Kandungan Gizi Menu
   const [isAddNutritionRowModalOpen, setIsAddNutritionRowModalOpen] = useState(false);
@@ -363,7 +375,6 @@ export const NutritionMenuModule: React.FC = () => {
   const [isCreateMenuModalOpen, setIsCreateMenuModalOpen] = useState(false);
   const [isSavingNewMenu, setIsSavingNewMenu] = useState(false);
   const [editingMenuItem, setEditingMenuItem] = useState<MenuItem | null>(null);
-  const [isEditModalSchemaEdit, setIsEditModalSchemaEdit] = useState(false);
   const [isSavingEditMenu, setIsSavingEditMenu] = useState(false);
   const [deleteMenuTarget, setDeleteMenuTarget] = useState<MenuItem | null>(null);
   const [recapViewMode, setRecapViewMode] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -440,7 +451,7 @@ export const NutritionMenuModule: React.FC = () => {
     milkOrExtra: 'Susu UHT Plain 125ml',
     estimatedCostPerPortion: 9000,
     notes: '',
-    customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+    customFields: getInitialCustomFieldValues(menuFormSchema),
   }));
 
   // Calculate actual total small & large portions from SPPG institutions
@@ -726,46 +737,133 @@ export const NutritionMenuModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   // HANDLERS
   // ---------------------------------------------------------------------------
-  const resolveLiveMaterialPriceAndUnit = (comp: FoodCompositionItem) => {
-    const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, comp.name));
-    const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, comp.name));
-    return {
-      unitPrice: invMatch?.pricePerUnit || mbMatch?.actualPrice || comp.defaultUnitPrice,
-      purchaseUnit: invMatch?.unit || mbMatch?.unit || comp.purchaseUnit || masterUnits[0]?.code || 'kg',
-    };
+  const parseModalNonNegNum = (raw: string, max?: number): number => {
+    const cleaned = String(raw ?? '').trim().replace(',', '.');
+    if (cleaned === '') return 0;
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed) || parsed < 0) return 0;
+    return typeof max === 'number' ? Math.min(max, parsed) : parsed;
   };
 
+  const modalFormulaPreview = useMemo(() => {
+    const bbSmall = parseModalNonNegNum(customGramSmall);
+    const bbLarge = parseModalNonNegNum(customGramLarge);
+    const bddVal = parseModalNonNegNum(customBdd, 100);
+    const bufSmall = parseModalNonNegNum(customBufferSmallPct, 100);
+    const bufLarge = parseModalNonNegNum(customBufferLargePct, 100);
+    const unitCode = (customPurchaseUnit || masterUnits[0]?.code || 'kg').trim() || 'kg';
+    const unitMeta = masterUnits.find(
+      u => u.code.trim().toLowerCase() === unitCode.toLowerCase()
+    );
+    const convFactor =
+      unitMeta && (unitMeta.baseUnit === 'gram' || unitMeta.baseUnit === 'ml') && unitMeta.conversionToBase > 0
+        ? Number((1 / unitMeta.conversionToBase).toFixed(6))
+        : unitCode === 'pcs'
+        ? 1
+        : 0.001;
+
+    const draftIng: RecipeIngredient = {
+      id: 'preview-ing',
+      name: manualIngredientName.trim() || 'Bahan Baru',
+      category: manualIngredientCategory || 'Lauk Hewani',
+      netWeightSmall: bbSmall,
+      netWeightLarge: bbLarge,
+      unit: unitMeta?.baseUnit === 'satuan' ? unitCode : 'gram',
+      ediblePortionPercent: bddVal,
+      conversionFactorToBase: convFactor,
+      purchaseUnit: unitCode,
+      bufferPercentSmall: bufSmall,
+      bufferPercentLarge: bufLarge,
+      unitPrice: 0,
+      calories100g: 0,
+      protein100g: 0,
+      fat100g: 0,
+      carb100g: 0,
+      fiber100g: 0,
+      referenceSource: 'Input Manual SPPG',
+    };
+
+    return resolveRecipeIngredientFormula(
+      draftIng,
+      masterUnits,
+      quotaSmall,
+      quotaLarge,
+      defaultBufferSmallPct,
+      defaultBufferLargePct
+    );
+  }, [
+    customGramSmall,
+    customGramLarge,
+    customBdd,
+    customBufferSmallPct,
+    customBufferLargePct,
+    customPurchaseUnit,
+    manualIngredientName,
+    manualIngredientCategory,
+    masterUnits,
+    quotaSmall,
+    quotaLarge,
+    defaultBufferSmallPct,
+    defaultBufferLargePct,
+  ]);
+
   const handleOpenAddIngredient = () => {
-    const comp = foodCompositions[0];
-    if (comp) {
-      const live = resolveLiveMaterialPriceAndUnit(comp);
-      setSelectedCompositionId(comp.id);
-      setCustomBdd(comp.ediblePortion);
-      setCustomUnitPrice(live.unitPrice);
-      setCustomPurchaseUnit(live.purchaseUnit);
-      setCustomGramSmall(comp.category === 'Makanan Pokok' ? 85 : 50);
-      setCustomGramLarge(comp.category === 'Makanan Pokok' ? 125 : 75);
-    }
+    setManualIngredientName('');
+    setManualIngredientCategory('Lauk Hewani');
+    setCustomBdd('100');
+    setCustomGramSmall('50');
+    setCustomGramLarge('75');
+    setCustomBufferSmallPct(String(defaultBufferSmallPct));
+    setCustomBufferLargePct(String(defaultBufferLargePct));
+    setCustomPurchaseUnit(masterUnits[0]?.code || 'kg');
+    setModalTouchedFields({
+      category: false,
+      gramSmall: false,
+      gramLarge: false,
+      bdd: false,
+      unit: false,
+    });
     setIsAddIngredientModalOpen(true);
   };
 
-  const handleCompositionChange = (compId: string) => {
-    setSelectedCompositionId(compId);
-    const comp = foodCompositions.find(c => c.id === compId);
-    if (comp) {
-      const live = resolveLiveMaterialPriceAndUnit(comp);
-      setCustomBdd(comp.ediblePortion);
-      setCustomUnitPrice(live.unitPrice);
-      setCustomPurchaseUnit(live.purchaseUnit);
+  const handleManualIngredientNameChange = (rawName: string) => {
+    setManualIngredientName(rawName);
+    const match = resolveFoodNutritionLookup(rawName, foodCompositions, masterBahan);
+    if (match) {
+      if (match.category && !modalTouchedFields.category) {
+        setManualIngredientCategory(match.category);
+      }
+      if (match.ediblePortionPercent >= 0 && !modalTouchedFields.bdd) {
+        setCustomBdd(String(match.ediblePortionPercent));
+      }
+      if (match.category === 'Makanan Pokok') {
+        if (!modalTouchedFields.gramSmall) setCustomGramSmall('85');
+        if (!modalTouchedFields.gramLarge) setCustomGramLarge('125');
+      }
+      if (!modalTouchedFields.unit) {
+        const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, rawName));
+        const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, rawName));
+        const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, rawName));
+        const liveUnit = invMatch?.unit || mbMatch?.unit || compMatch?.purchaseUnit;
+        if (liveUnit) setCustomPurchaseUnit(liveUnit);
+      }
     }
   };
 
   const handleSaveIngredientToMenu = (e: React.FormEvent) => {
     e.preventDefault();
-    const comp = foodCompositions.find(c => c.id === selectedCompositionId);
-    if (!comp) return;
+    const cleanedName = manualIngredientName.trim();
+    if (!cleanedName) {
+      addToast('warning', 'Nama Bahan Wajib Diisi', 'Ketik nama bahan makanan terlebih dahulu.');
+      return;
+    }
 
-    const chosenUnitCode = customPurchaseUnit || comp.purchaseUnit || 'kg';
+    const match = resolveFoodNutritionLookup(cleanedName, foodCompositions, masterBahan);
+    const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, cleanedName));
+    const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, cleanedName));
+    const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, cleanedName));
+
+    const chosenUnitCode = customPurchaseUnit || invMatch?.unit || mbMatch?.unit || compMatch?.purchaseUnit || 'kg';
     const unitMeta = masterUnits.find(
       u => u.code.trim().toLowerCase() === chosenUnitCode.trim().toLowerCase()
     );
@@ -776,31 +874,38 @@ export const NutritionMenuModule: React.FC = () => {
         ? 1
         : 0.001;
 
+    const resolvedUnitPrice =
+      invMatch?.pricePerUnit || mbMatch?.actualPrice || compMatch?.defaultUnitPrice || 0;
+
     const newIng: RecipeIngredient = {
       id: `ing-${Date.now()}`,
-      name: comp.name,
-      category: comp.category,
-      netWeightSmall: Number(customGramSmall),
-      netWeightLarge: Number(customGramLarge),
+      name: cleanedName,
+      category: manualIngredientCategory || match?.category || 'Lauk Hewani',
+      netWeightSmall: parseModalNonNegNum(customGramSmall),
+      netWeightLarge: parseModalNonNegNum(customGramLarge),
       unit: unitMeta?.baseUnit === 'satuan' ? chosenUnitCode : 'gram',
-      ediblePortionPercent: Number(customBdd),
+      ediblePortionPercent: parseModalNonNegNum(customBdd, 100),
       conversionFactorToBase: convFactor,
       purchaseUnit: chosenUnitCode,
-      bufferPercentSmall: Number(customBufferSmallPct),
-      bufferPercentLarge: Number(customBufferLargePct),
-      unitPrice: Number(customUnitPrice),
-      calories100g: comp.calories,
-      protein100g: comp.protein,
-      fat100g: comp.fat,
-      carb100g: comp.carbs,
-      fiber100g: comp.fiber,
-      referenceSource: comp.sourceReference,
+      bufferPercentSmall: parseModalNonNegNum(customBufferSmallPct, 100),
+      bufferPercentLarge: parseModalNonNegNum(customBufferLargePct, 100),
+      unitPrice: resolvedUnitPrice,
+      calories100g: match?.calories100g ?? 0,
+      protein100g: match?.protein100g ?? 0,
+      fat100g: match?.fat100g ?? 0,
+      carb100g: match?.carb100g ?? 0,
+      fiber100g: match?.fiber100g ?? 0,
+      referenceSource: match?.referenceSource || 'Input Manual SPPG',
     };
 
     const nextList = [...(menuIngredientsMap[activeMenuId] || []), newIng];
     updateMenuIngredients(activeMenuId, nextList);
 
-    addToast('success', 'Bahan Ditambahkan & Tersinkron', `${comp.name} ditambahkan. Food Cost & Gizi ${currentMenu?.menuCode || 'Menu'} diperbarui real-time.`);
+    addToast(
+      'success',
+      'Bahan Ditambahkan & Tersinkron',
+      `${cleanedName} ditambahkan. Rincian Resep & Gizi ${currentMenu?.menuCode || 'Menu'} diperbarui real-time.`
+    );
     setIsAddIngredientModalOpen(false);
   };
 
@@ -810,12 +915,21 @@ export const NutritionMenuModule: React.FC = () => {
     value: number
   ) => {
     const safeVal = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-    const overrideKey = field === 'bufferPercentSmall' ? 'bufferSmall' : 'bufferLarge';
+    const isSmall = field === 'bufferPercentSmall';
     const nextList = (menuIngredientsMap[activeMenuId] || []).map(item => {
       if (item.id !== ingId) return item;
       const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
       if (nextOverrides) {
-        delete nextOverrides[overrideKey];
+        if (isSmall) {
+          delete nextOverrides.bufferSmall;
+          delete nextOverrides.totalSmall;
+          delete nextOverrides.pembulatanSmall;
+        } else {
+          delete nextOverrides.bufferLarge;
+          delete nextOverrides.totalLarge;
+          delete nextOverrides.pembulatanLarge;
+        }
+        delete nextOverrides.totalKuantiti;
       }
       return {
         ...item,
@@ -836,13 +950,80 @@ export const NutritionMenuModule: React.FC = () => {
       if (item.id !== ingId) return item;
       if (field === 'name') {
         const cleaned = String(value).trim();
-        return { ...item, name: cleaned || item.name };
+        if (!cleaned) return item;
+        const match = resolveFoodNutritionLookup(cleaned, foodCompositions, masterBahan);
+        const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, cleaned));
+        const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, cleaned));
+        const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, cleaned));
+        const nextPrice =
+          invMatch?.pricePerUnit || mbMatch?.actualPrice || compMatch?.defaultUnitPrice;
+        return {
+          ...item,
+          name: cleaned,
+          ...(match
+            ? {
+                category: match.category || item.category,
+                calories100g: match.calories100g,
+                protein100g: match.protein100g,
+                fat100g: match.fat100g,
+                carb100g: match.carb100g,
+                fiber100g: match.fiber100g,
+                referenceSource: match.referenceSource,
+              }
+            : {}),
+          ...(typeof nextPrice === 'number' && nextPrice > 0 ? { unitPrice: nextPrice } : {}),
+        };
       }
       const parsed = Number(value);
       const safeNum = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-      return { ...item, [field]: safeNum };
+      const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
+      if (nextOverrides) {
+        if (field === 'netWeightSmall') {
+          delete nextOverrides.bkSmall;
+          delete nextOverrides.kebutuhanSmall;
+          delete nextOverrides.bufferSmall;
+          delete nextOverrides.totalSmall;
+          delete nextOverrides.pembulatanSmall;
+        } else {
+          delete nextOverrides.bkLarge;
+          delete nextOverrides.kebutuhanLarge;
+          delete nextOverrides.bufferLarge;
+          delete nextOverrides.totalLarge;
+          delete nextOverrides.pembulatanLarge;
+        }
+        delete nextOverrides.totalKuantiti;
+      }
+      return {
+        ...item,
+        [field]: safeNum,
+        manualOverrides:
+          nextOverrides && Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
+      };
     });
     updateMenuIngredients(activeMenuId, nextList);
+  };
+
+  const CASCADE_DOWNSTREAM_OVERRIDES: Record<
+    keyof RecipeIngredientManualOverrides,
+    (keyof RecipeIngredientManualOverrides)[]
+  > = {
+    bddSmall: ['bkSmall', 'kebutuhanSmall', 'bufferSmall', 'totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    bkSmall: ['kebutuhanSmall', 'bufferSmall', 'totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    porsiSmall: ['kebutuhanSmall', 'bufferSmall', 'totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    unitSmall: ['kebutuhanSmall', 'bufferSmall', 'totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    kebutuhanSmall: ['bufferSmall', 'totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    bufferSmall: ['totalSmall', 'pembulatanSmall', 'totalKuantiti'],
+    totalSmall: ['pembulatanSmall', 'totalKuantiti'],
+    pembulatanSmall: ['totalKuantiti'],
+    bddLarge: ['bkLarge', 'kebutuhanLarge', 'bufferLarge', 'totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    bkLarge: ['kebutuhanLarge', 'bufferLarge', 'totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    porsiLarge: ['kebutuhanLarge', 'bufferLarge', 'totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    unitLarge: ['kebutuhanLarge', 'bufferLarge', 'totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    kebutuhanLarge: ['bufferLarge', 'totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    bufferLarge: ['totalLarge', 'pembulatanLarge', 'totalKuantiti'],
+    totalLarge: ['pembulatanLarge', 'totalKuantiti'],
+    pembulatanLarge: ['totalKuantiti'],
+    totalKuantiti: [],
   };
 
   const handleUpdateFormulaOverride = (
@@ -867,8 +1048,14 @@ export const NutritionMenuModule: React.FC = () => {
       } else {
         const num = Number(value);
         if (!Number.isFinite(num) || num < 0) return item;
-        nextOverrides[key] = key === 'bddSmall' || key === 'bddLarge' ? Math.max(1, Math.min(100, num)) : num;
+        nextOverrides[key] = key === 'bddSmall' || key === 'bddLarge' ? Math.max(0, Math.min(100, num)) : num;
       }
+
+      // Bersihkan override kolom turunan di bawahnya agar antar kolom selalu sinkron otomatis
+      for (const downstreamKey of CASCADE_DOWNSTREAM_OVERRIDES[key] || []) {
+        delete nextOverrides[downstreamKey];
+      }
+
       return {
         ...item,
         manualOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
@@ -1185,7 +1372,7 @@ export const NutritionMenuModule: React.FC = () => {
     e.preventDefault();
     if (isSavingNewMenu) return;
 
-    const err = validateDynamicFormFields(dynamicFormSchemas.menu_form, {
+    const err = validateDynamicFormFields(menuFormSchema, {
       ...newMenuForm,
       ...(newMenuForm.customFields || {}),
     });
@@ -1259,7 +1446,7 @@ export const NutritionMenuModule: React.FC = () => {
         vegetable: '',
         fruit: '',
         notes: '',
-        customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+        customFields: getInitialCustomFieldValues(menuFormSchema),
       }));
       setIsCreateMenuModalOpen(false);
       addToast(
@@ -1298,18 +1485,17 @@ export const NutritionMenuModule: React.FC = () => {
       notes: menu.notes || '',
       status: menu.status || 'Draft',
       customFields: {
-        ...getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+        ...getInitialCustomFieldValues(menuFormSchema),
         ...(menu.customFields || {}),
       },
     });
-    setIsEditModalSchemaEdit(false);
   };
 
   const handleSaveEditMenu = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMenuItem || isSavingEditMenu) return;
 
-    const err = validateDynamicFormFields(dynamicFormSchemas.menu_form, {
+    const err = validateDynamicFormFields(menuFormSchema, {
       ...editMenuForm,
       ...(editMenuForm.customFields || {}),
     });
@@ -1570,8 +1756,8 @@ export const NutritionMenuModule: React.FC = () => {
   };
 
   const handleExportMenusPDF = () => {
-    const baseHeaders = ['Tanggal', 'Kode Menu', 'Makanan Pokok', 'Lauk Hewani', 'Nabati & Sayur', 'Buah & Susu', 'Status'];
-    const baseRows = menuItems.map(m => [
+    const headers = ['Tanggal', 'Kode Menu', 'Makanan Pokok', 'Lauk Hewani', 'Nabati & Sayur', 'Buah & Susu', 'Status'];
+    const rows = menuItems.map(m => [
       `${m.dayName}, ${formatIndonesianDate(m.date)}`,
       m.menuCode,
       m.stapleFood,
@@ -1580,12 +1766,6 @@ export const NutritionMenuModule: React.FC = () => {
       `${m.fruit} (${m.milkOrExtra})`,
       m.status,
     ]);
-    const { headers, rows } = appendDynamicExportColumns(
-      dynamicFormSchemas.menu_form,
-      baseHeaders,
-      baseRows,
-      menuItems
-    );
     exportTableToPDF({
       title: 'Daftar Perencanaan Menu Harian MBG',
       subtitle: `SPPG Probolinggo Krejengan Temenggungan 2 • Yayasan Hafshawaty`,
@@ -1599,27 +1779,21 @@ export const NutritionMenuModule: React.FC = () => {
   };
 
   const handleExportMenusExcel = () => {
-    const dataToExport = menuItems.map(m =>
-      appendDynamicExcelFields(
-        dynamicFormSchemas.menu_form,
-        {
-          'Tanggal': m.date,
-          'Hari': m.dayName,
-          'Kode Menu': m.menuCode,
-          'Makanan Pokok': m.stapleFood,
-          'Lauk Hewani': m.animalProtein,
-          'Lauk Nabati': m.plantProtein,
-          'Sayuran': m.vegetable,
-          'Buah': m.fruit,
-          'Pelengkap / Susu': m.milkOrExtra,
-          'Kalori Kecil (kkal)': m.caloriesSmall,
-          'Kalori Besar (kkal)': m.caloriesLarge,
-          'Status': m.status,
-          'Catatan': m.notes || '-',
-        },
-        m
-      )
-    );
+    const dataToExport = menuItems.map(m => ({
+      'Tanggal': m.date,
+      'Hari': m.dayName,
+      'Kode Menu': m.menuCode,
+      'Makanan Pokok': m.stapleFood,
+      'Lauk Hewani': m.animalProtein,
+      'Lauk Nabati': m.plantProtein,
+      'Sayuran': m.vegetable,
+      'Buah': m.fruit,
+      'Pelengkap / Susu': m.milkOrExtra,
+      'Kalori Kecil (kkal)': m.caloriesSmall,
+      'Kalori Besar (kkal)': m.caloriesLarge,
+      'Status': m.status,
+      'Catatan': m.notes || '-',
+    }));
     exportToExcel(dataToExport, 'Daftar_Menu_Makanan_MBG_SPPG_TMG2', 'Daftar Menu');
   };
 
@@ -2025,12 +2199,6 @@ export const NutritionMenuModule: React.FC = () => {
             <span>Kalkulator Z-Score</span>
           </button>
 
-          <DynamicFormEditToggleBar
-            formId="menu_form"
-            isEditing={isEditingMenuForm}
-            onToggleEdit={() => setIsEditingMenuForm(v => !v)}
-          />
-
           <button
             type="button"
             onClick={() => {
@@ -2041,9 +2209,8 @@ export const NutritionMenuModule: React.FC = () => {
                   prev.menuCode && !menuItems.some(m => m.menuCode === prev.menuCode)
                     ? prev.menuCode
                     : buildSuggestedMenuCode(menuItems),
-                customFields: getInitialCustomFieldValues(dynamicFormSchemas.menu_form),
+                customFields: getInitialCustomFieldValues(menuFormSchema),
               }));
-              setIsModalMenuSchemaEdit(false);
               setIsCreateMenuModalOpen(true);
             }}
             className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all duration-200 cursor-pointer"
@@ -2053,13 +2220,6 @@ export const NutritionMenuModule: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {isEditingMenuForm && (
-        <DynamicFormBuilderPanel
-          formId="menu_form"
-          onClose={() => setIsEditingMenuForm(false)}
-        />
-      )}
 
       {/* Metric Context Bar: Sasaran Penerima & Pagu Anggaran (Uniform Equal-Height Cards) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2171,18 +2331,6 @@ export const NutritionMenuModule: React.FC = () => {
             <span>•</span>
             <span className="text-amber-200">{currentMenu?.fruit}</span>
           </div>
-          {getCustomTableFields(dynamicFormSchemas.menu_form).length > 0 && currentMenu?.customFields && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {getCustomTableFields(dynamicFormSchemas.menu_form).map(cf => (
-                <span
-                  key={cf.id}
-                  className="px-2 py-0.5 rounded bg-white/10 text-[11px] text-sky-100"
-                >
-                  <strong>{cf.label}:</strong> {formatDynamicFieldValue(cf, currentMenu.customFields?.[cf.key])}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -2224,7 +2372,7 @@ export const NutritionMenuModule: React.FC = () => {
       </div>
 
       {/* Responsive Pill Sub-Module Tabs (A - F) */}
-      <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm text-xs font-bold">
+      <div className="flex flex-nowrap sm:flex-wrap items-center gap-2 overflow-x-auto no-scrollbar bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm text-xs font-bold">
         {[
           {
             key: 'menu_bahan' as SubModuleTab,
@@ -2269,7 +2417,7 @@ export const NutritionMenuModule: React.FC = () => {
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-out active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer ${
                 isActive
                   ? 'bg-[#1E3A8A] text-white shadow-sm'
                   : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white border border-slate-200/70 dark:border-slate-700'
@@ -2297,7 +2445,7 @@ export const NutritionMenuModule: React.FC = () => {
       {/* SUBMODUL A: PERENCANAAN MENU DAN BAHAN */}
       {/* ========================================================================= */}
       {activeTab === 'menu_bahan' && (
-        <div className="space-y-4">
+        <div key="menu_bahan" className="space-y-4 animate-fadeIn">
           {/* Explanation Banner */}
           <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-900 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs text-sky-900 dark:text-sky-200">
             <div className="flex items-start gap-3">
@@ -2516,7 +2664,7 @@ export const NutritionMenuModule: React.FC = () => {
                           <FormulaNumericCell
                             value={item.bddSmall}
                             decimals={0}
-                            min={1}
+                            min={0}
                             max={100}
                             suffix="%"
                             isOverridden={ov.bddSmall !== undefined}
@@ -2648,7 +2796,7 @@ export const NutritionMenuModule: React.FC = () => {
                           <FormulaNumericCell
                             value={item.bddLarge}
                             decimals={0}
-                            min={1}
+                            min={0}
                             max={100}
                             suffix="%"
                             isOverridden={ov.bddLarge !== undefined}
@@ -2842,10 +2990,10 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Daftar Menu Makanan Terjadwal (Auto-synced with Form Menu Custom Fields) */}
+          {/* Daftar Menu Makanan Terjadwal */}
           <DataTable
             title="Daftar Siklus Menu Makanan MBG"
-            subtitle="Rekapitulasi menu harian lengkap beserta kolom custom dari Form Perencanaan Menu"
+            subtitle="Rekapitulasi jadwal siklus menu harian makanan MBG terintegrasi"
             data={menuItems}
             keyExtractor={item => item.id}
             searchPlaceholder="Cari kode menu, lauk hewani, atau makanan pokok..."
@@ -2929,7 +3077,6 @@ export const NutritionMenuModule: React.FC = () => {
                   </div>
                 ),
               },
-              ...buildDynamicTableColumns<MenuItem>(dynamicFormSchemas.menu_form),
             ]}
           />
         </div>
@@ -3102,12 +3249,12 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
 
             {/* Table of Gramasi Item Menu */}
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm animate-fadeIn">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
-                      <th className="py-3 px-3 text-center w-10">#</th>
+                      <th className="py-3 px-3 text-center w-10 sticky left-0 z-20 bg-slate-100 dark:bg-slate-800">#</th>
                       <th className="py-3 px-3 min-w-[140px]">Kategori Item</th>
                       <th className="py-3 px-3 min-w-[240px]">Nama Item Menu (Dari Menu Baru PLOG)</th>
                       <th className="py-3 px-3 text-center bg-sky-50/90 dark:bg-sky-950/50 text-sky-900 dark:text-sky-200 min-w-[165px]">
@@ -3123,7 +3270,7 @@ export const NutritionMenuModule: React.FC = () => {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {grammageDrafts.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-400">
+                        <td colSpan={7} className="py-8 text-center text-slate-500">
                           Belum ada item menu pada perencanaan menu ini. Tambahkan Menu Baru pada sub-menu A atau klik &quot;Tambah Item Manual&quot;.
                         </td>
                       </tr>
@@ -3131,8 +3278,8 @@ export const NutritionMenuModule: React.FC = () => {
                       grammageDrafts.map((item, idx) => {
                         const diff = (Number(item.largeGrams) || 0) - (Number(item.smallGrams) || 0);
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors">
-                            <td className="py-3.5 px-3 text-center font-mono text-slate-500 font-bold">
+                          <tr key={item.id} className="group hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3.5 px-3 text-center font-mono text-slate-500 font-bold sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800">
                               {idx + 1}
                             </td>
                             <td className="py-3.5 px-3">
@@ -3271,7 +3418,7 @@ export const NutritionMenuModule: React.FC = () => {
       {/* SUBMODUL C: INPUT & EVALUASI KANDUNGAN GIZI */}
       {/* ========================================================================= */}
       {activeTab === 'kandungan_gizi' && (
-        <div className="space-y-6">
+        <div key="kandungan_gizi" className="space-y-6 animate-fadeIn">
           {/* Target AKG Status & Configuration Bar */}
           <div
             className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
@@ -3694,7 +3841,7 @@ export const NutritionMenuModule: React.FC = () => {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                      <th className="p-3">Nama Bahan</th>
+                      <th className="p-3 sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Nama Bahan</th>
                       <th className="p-3">Menu Hidangan</th>
                       <th className="p-3 text-center">Gram Bersih (K / B)</th>
                       <th className="p-3 text-right">Energi / 100g</th>
@@ -3709,8 +3856,8 @@ export const NutritionMenuModule: React.FC = () => {
                     {ingredientsCalculated.map(i => {
                       const canEdit = hasPermission('menu', 'edit');
                       return (
-                        <tr key={i.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">
+                        <tr key={i.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-3 font-sans font-bold text-slate-900 dark:text-white sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                             {canEdit ? (
                               <input
                                 type="text"
@@ -3887,7 +4034,7 @@ export const NutritionMenuModule: React.FC = () => {
       {/* SUBMODUL C: INPUT FOOD COST MENU & ANALISIS ANGGARAN */}
       {/* ========================================================================= */}
       {activeTab === 'food_cost' && (
-        <div className="space-y-6">
+        <div key="food_cost" className="space-y-6 animate-fadeIn">
           {/* Konfigurasi Pagu Anggaran Dua Kategori (Porsi Besar & Porsi Kecil) */}
           <form
             onSubmit={handleSaveBudgetCaps}
@@ -4058,7 +4205,7 @@ export const NutritionMenuModule: React.FC = () => {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">Nama Bahan</th>
+                    <th className="p-3 sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Nama Bahan</th>
                     <th className="p-3">Kategori</th>
                     <th className="p-3 text-right">Harga Satuan</th>
                     <th className="p-3 text-right">Total Kebutuhan Beli</th>
@@ -4072,8 +4219,8 @@ export const NutritionMenuModule: React.FC = () => {
                   {ingredientsCalculated.map(i => {
                     const sharePercent = totalMenuProcurementCost > 0 ? (i.totalCost / totalMenuProcurementCost) * 100 : 0;
                     return (
-                      <tr key={i.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">
+                      <tr key={i.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="p-3 font-sans font-bold text-slate-900 dark:text-white sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           {i.name}
                         </td>
                         <td className="p-3 font-sans text-slate-500">{i.category}</td>
@@ -4143,21 +4290,21 @@ export const NutritionMenuModule: React.FC = () => {
       {/* SUBMODUL D: JOBDESK DIVISI & SOP FOTO */}
       {/* ========================================================================= */}
       {activeTab === 'jobdesk_divisi' && (
-        <div className="space-y-6">
+        <div key="jobdesk_divisi" className="space-y-6 animate-fadeIn">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-                Standar Operasional Prosedur (SOP) & Jobdesk Divisi Dapur MBG
+                <Layers className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+                Standar Operasional Prosedur (SOP) &amp; Jobdesk Divisi Dapur MBG
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Instruksi kerja harian tanggal <strong>{formatIndonesianDate(currentMenu?.date || '2026-11-08')}</strong> untuk menu {currentMenu?.menuCode} ({currentMenu?.animalProtein}) — otomatis tampil di Dashboard Terpadu
               </p>
             </div>
 
             <button
               onClick={triggerPrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition-all duration-200 active:scale-[0.98] cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>Cetak Lembar Jobdesk Dapur</span>
@@ -4165,7 +4312,7 @@ export const NutritionMenuModule: React.FC = () => {
           </div>
 
           {/* Grid of Division Jobdesks with Multi-Photo Upload & SOP Edit */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
             {currentMenuJobdesks.map(job => {
               const photos = getJobdeskPhotos(job);
               const coverPhoto = photos[0] || '';
@@ -4174,13 +4321,13 @@ export const NutritionMenuModule: React.FC = () => {
               return (
                 <div
                   key={job.id}
-                  className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs flex flex-col"
+                  className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full"
                 >
                   {/* Division Header */}
-                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0" />
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                         {job.divisionName}
                       </h4>
                       {isPersiapan && (
@@ -4193,9 +4340,9 @@ export const NutritionMenuModule: React.FC = () => {
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           job.status === 'Selesai Sesuai Standar'
-                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            ? 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
                             : job.status === 'Sedang Berjalan'
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            ? 'bg-amber-100 text-[#D97706] dark:bg-amber-950 dark:text-amber-300'
                             : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                         }`}
                       >
@@ -4204,32 +4351,33 @@ export const NutritionMenuModule: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openJobdeskEditModal(job)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 transition-all duration-200 active:scale-[0.98] cursor-pointer"
                         title="Edit SOP & Kelola Galeri Foto"
                       >
-                        <Edit className="w-3 h-3 text-blue-700 dark:text-sky-400" />
+                        <Edit className="w-3 h-3 text-[#1E3A8A] dark:text-sky-400" />
                         <span>SOP Edit</span>
                       </button>
                     </div>
                   </div>
 
-                  {/* Photo Example Cover Container */}
-                  <div className="relative h-48 bg-slate-100 dark:bg-slate-800 overflow-hidden group">
-                    {coverPhoto ? (
-                      <img
-                        src={coverPhoto}
-                        alt={job.divisionName}
-                        onClick={() =>
-                          setPhotoLightbox({
-                            divisionName: job.divisionName,
-                            photos,
-                            index: 0,
-                            caption: job.photoCaption,
-                          })
-                        }
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
-                      />
-                    ) : (
+                  {/* Photo Example Cover Container (Uniform 4:3 Aspect Ratio) */}
+                  <div className="p-3 pb-0">
+                    <div className="relative aspect-[4/3] w-full rounded-lg bg-slate-100 dark:bg-slate-800 overflow-hidden group border border-slate-200/80 dark:border-slate-700">
+                      {coverPhoto ? (
+                        <img
+                          src={coverPhoto}
+                          alt={job.divisionName}
+                          onClick={() =>
+                            setPhotoLightbox({
+                              divisionName: job.divisionName,
+                              photos,
+                              index: 0,
+                              caption: job.photoCaption,
+                            })
+                          }
+                          className="w-full h-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-300 cursor-pointer"
+                        />
+                      ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-1.5">
                         <Image className="w-8 h-8 opacity-50" />
                         <span>Belum ada foto SOP terunggah</span>
@@ -4273,6 +4421,7 @@ export const NutritionMenuModule: React.FC = () => {
                         onChange={e => handlePhotoUpload(e, job.id)}
                       />
                     </label>
+                    </div>
                   </div>
 
                   {/* Multi-Photo Gallery Strip */}
@@ -4416,16 +4565,18 @@ export const NutritionMenuModule: React.FC = () => {
       {/* SUBMODUL F: DAFTAR MENU & REKAPITULASI MENU MINGGUAN DAN BULANAN          */}
       {/* ========================================================================= */}
       {activeTab === 'daftar_rekap' && (
-        <div className="space-y-5">
+        <div key="daftar_rekap" className="space-y-5 animate-fadeIn">
           {/* Summary KPI Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
               <div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
                   <span>Total Menu Terinput</span>
-                  <UtensilsCrossed className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+                  <div className="p-1.5 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-blue-950/60 dark:text-sky-400">
+                    <UtensilsCrossed className="w-4 h-4" />
+                  </div>
                 </div>
-                <div className="text-2xl font-black text-[#1E3A8A] dark:text-white mt-1.5 tabular-nums">
+                <div className="text-2xl font-bold tracking-tight text-[#1E3A8A] dark:text-white mt-1.5 tabular-nums">
                   {filteredRecapMenus.length} Menu
                 </div>
               </div>
@@ -4434,13 +4585,15 @@ export const NutritionMenuModule: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
               <div>
                 <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
                   <span>Status Persetujuan</span>
-                  <CheckCircle className="w-4 h-4 text-[#0D9488]" />
+                  <div className="p-1.5 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400">
+                    <CheckCircle className="w-4 h-4" />
+                  </div>
                 </div>
-                <div className="text-2xl font-black text-[#0D9488] dark:text-teal-300 mt-1.5 tabular-nums">
+                <div className="text-2xl font-bold tracking-tight text-[#0D9488] dark:text-teal-300 mt-1.5 tabular-nums">
                   {filteredRecapMenus.filter(m => m.status === 'Disetujui Kepala').length} Disetujui
                 </div>
               </div>
@@ -4625,7 +4778,7 @@ export const NutritionMenuModule: React.FC = () => {
                       <table className="w-full text-left text-xs tabular-nums">
                         <thead className="bg-slate-50/70 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300 uppercase text-[10px] font-bold border-b border-slate-200 dark:border-slate-700">
                           <tr>
-                            <th className="py-2.5 px-4">Tanggal &amp; Kode</th>
+                            <th className="py-2.5 px-4 sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal &amp; Kode</th>
                             <th className="py-2.5 px-4">Menu Lengkap</th>
                             <th className="py-2.5 px-4 text-center">Kalori (K/B)</th>
                             <th className="py-2.5 px-4 text-right">Est. Cost/Porsi</th>
@@ -4635,8 +4788,8 @@ export const NutritionMenuModule: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {group.items.map(menu => (
-                            <tr key={menu.id} className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40">
-                              <td className="py-3 px-4 whitespace-nowrap">
+                            <tr key={menu.id} className="group hover:bg-blue-50/40 dark:hover:bg-slate-800/40">
+                              <td className="py-3 px-4 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-blue-50/80 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                                 <div className="font-bold text-slate-900 dark:text-white font-mono">
                                   {menu.menuCode}
                                 </div>
@@ -5200,25 +5353,51 @@ export const NutritionMenuModule: React.FC = () => {
         isOpen={isAddIngredientModalOpen}
         onClose={() => setIsAddIngredientModalOpen(false)}
         title="Tambah Bahan ke Perencanaan Menu"
-        subtitle={`Pilih bahan dari database pangan dan tentukan gramasi porsi kecil & besar`}
+        subtitle={`Input bahan makanan secara manual (atau pilih saran TKPI) dan tentukan gramasi porsi kecil & besar`}
         maxWidth="lg"
       >
         <form onSubmit={handleSaveIngredientToMenu} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Pilih Bahan dari Komposisi Pangan (TKPI 2020 / USDA) *
-            </label>
-            <select
-              value={selectedCompositionId}
-              onChange={e => handleCompositionChange(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-            >
-              {foodCompositions.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.code} - {c.name} ({c.category}) — BDD {c.ediblePortion}%
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Nama Bahan Makanan (Input Manual) *
+              </label>
+              <input
+                type="text"
+                required
+                list="add-ingredient-food-suggestions"
+                placeholder="Contoh: Daging Ayam Fillet, Wortel, Bawang Putih..."
+                value={manualIngredientName}
+                onChange={e => handleManualIngredientNameChange(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              />
+              <datalist id="add-ingredient-food-suggestions">
+                {foodNameOptions.map(opt => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Kategori Bahan
+              </label>
+              <select
+                value={manualIngredientCategory}
+                onChange={e => {
+                  setManualIngredientCategory(e.target.value);
+                  setModalTouchedFields(prev => ({ ...prev, category: true }));
+                }}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+              >
+                <option value="Makanan Pokok">Makanan Pokok</option>
+                <option value="Lauk Hewani">Lauk Hewani</option>
+                <option value="Lauk Nabati">Lauk Nabati</option>
+                <option value="Sayuran">Sayuran</option>
+                <option value="Buah Segar">Buah Segar</option>
+                <option value="Bumbu & Minyak">Bumbu &amp; Minyak</option>
+                <option value="Ekstra / Susu">Ekstra / Susu</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -5228,10 +5407,17 @@ export const NutritionMenuModule: React.FC = () => {
               </label>
               <input
                 type="number"
-                min="1"
+                min="0"
+                step="any"
                 required
                 value={customGramSmall}
-                onChange={e => setCustomGramSmall(Number(e.target.value))}
+                onChange={e => {
+                  setCustomGramSmall(e.target.value);
+                  setModalTouchedFields(prev => ({ ...prev, gramSmall: true }));
+                }}
+                onBlur={() => {
+                  if (customGramSmall.trim() === '') setCustomGramSmall('0');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5241,10 +5427,17 @@ export const NutritionMenuModule: React.FC = () => {
               </label>
               <input
                 type="number"
-                min="1"
+                min="0"
+                step="any"
                 required
                 value={customGramLarge}
-                onChange={e => setCustomGramLarge(Number(e.target.value))}
+                onChange={e => {
+                  setCustomGramLarge(e.target.value);
+                  setModalTouchedFields(prev => ({ ...prev, gramLarge: true }));
+                }}
+                onBlur={() => {
+                  if (customGramLarge.trim() === '') setCustomGramLarge('0');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5255,10 +5448,13 @@ export const NutritionMenuModule: React.FC = () => {
               <input
                 type="number"
                 min="0"
-                max="50"
-                step="0.5"
+                max="100"
+                step="any"
                 value={customBufferSmallPct}
-                onChange={e => setCustomBufferSmallPct(Number(e.target.value))}
+                onChange={e => setCustomBufferSmallPct(e.target.value)}
+                onBlur={() => {
+                  if (customBufferSmallPct.trim() === '') setCustomBufferSmallPct('0');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5269,27 +5465,37 @@ export const NutritionMenuModule: React.FC = () => {
               <input
                 type="number"
                 min="0"
-                max="50"
-                step="0.5"
+                max="100"
+                step="any"
                 value={customBufferLargePct}
-                onChange={e => setCustomBufferLargePct(Number(e.target.value))}
+                onChange={e => setCustomBufferLargePct(e.target.value)}
+                onBlur={() => {
+                  if (customBufferLargePct.trim() === '') setCustomBufferLargePct('0');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Persentase BDD (% Dapat Dimakan) *
               </label>
               <input
                 type="number"
-                min="10"
+                min="0"
                 max="100"
+                step="any"
                 required
                 value={customBdd}
-                onChange={e => setCustomBdd(Number(e.target.value))}
+                onChange={e => {
+                  setCustomBdd(e.target.value);
+                  setModalTouchedFields(prev => ({ ...prev, bdd: true }));
+                }}
+                onBlur={() => {
+                  if (customBdd.trim() === '') setCustomBdd('0');
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5300,7 +5506,10 @@ export const NutritionMenuModule: React.FC = () => {
               <select
                 required
                 value={customPurchaseUnit}
-                onChange={e => setCustomPurchaseUnit(e.target.value)}
+                onChange={e => {
+                  setCustomPurchaseUnit(e.target.value);
+                  setModalTouchedFields(prev => ({ ...prev, unit: true }));
+                }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
               >
                 {masterUnits.map(u => (
@@ -5313,18 +5522,35 @@ export const NutritionMenuModule: React.FC = () => {
                 )}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Harga per {customPurchaseUnit} (Rp) *
-              </label>
-              <input
-                type="number"
-                min="100"
-                required
-                value={customUnitPrice}
-                onChange={e => setCustomUnitPrice(Number(e.target.value))}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
-              />
+          </div>
+
+          {/* Live Cross-Column Sync Preview */}
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 text-[11px]">
+            <div className="flex items-center justify-between flex-wrap gap-1">
+              <span className="font-bold text-slate-800 dark:text-slate-200">
+                Pratinjau Sinkronisasi Kolom Otomatis
+              </span>
+              <span className="font-mono font-black text-sky-800 dark:text-sky-300">
+                Total Kuantiti: {formatNumber(modalFormulaPreview.totalKuantiti)} {customPurchaseUnit}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono">
+              <div className="p-2 rounded-lg bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/50 text-rose-900 dark:text-rose-200">
+                <div className="font-sans font-bold text-[10px] mb-0.5">
+                  Porsi Kecil ({formatNumber(modalFormulaPreview.porsiSmall)} porsi)
+                </div>
+                <div>
+                  BK: {modalFormulaPreview.bkSmall.toFixed(1)}g • Keb: {modalFormulaPreview.kebutuhanSmall.toFixed(1)} • Buf: {modalFormulaPreview.bufferSmall.toFixed(2)} • Bulat: <strong>{modalFormulaPreview.pembulatanSmall} {modalFormulaPreview.unitSmall}</strong>
+                </div>
+              </div>
+              <div className="p-2 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/50 text-emerald-900 dark:text-emerald-200">
+                <div className="font-sans font-bold text-[10px] mb-0.5">
+                  Porsi Besar ({formatNumber(modalFormulaPreview.porsiLarge)} porsi)
+                </div>
+                <div>
+                  BK: {modalFormulaPreview.bkLarge.toFixed(1)}g • Keb: {modalFormulaPreview.kebutuhanLarge.toFixed(1)} • Buf: {modalFormulaPreview.bufferLarge.toFixed(2)} • Bulat: <strong>{modalFormulaPreview.pembulatanLarge} {modalFormulaPreview.unitLarge}</strong>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -5475,21 +5701,8 @@ export const NutritionMenuModule: React.FC = () => {
         maxWidth="2xl"
       >
         <form onSubmit={handleCreateNewMenu} className="space-y-4">
-          <DynamicFormEditToggleBar
-            formId="menu_form"
-            isEditing={isModalMenuSchemaEdit}
-            onToggleEdit={() => setIsModalMenuSchemaEdit(v => !v)}
-            compact
-          />
-          {isModalMenuSchemaEdit && (
-            <DynamicFormBuilderPanel
-              formId="menu_form"
-              onClose={() => setIsModalMenuSchemaEdit(false)}
-            />
-          )}
-
           <DynamicFormRenderer
-            schema={dynamicFormSchemas.menu_form}
+            schema={menuFormSchema}
             values={{
               ...newMenuForm,
               ...(newMenuForm.customFields || {}),
@@ -5860,21 +6073,8 @@ export const NutritionMenuModule: React.FC = () => {
         maxWidth="2xl"
       >
         <form onSubmit={handleSaveEditMenu} className="space-y-4">
-          <DynamicFormEditToggleBar
-            formId="menu_form"
-            isEditing={isEditModalSchemaEdit}
-            onToggleEdit={() => setIsEditModalSchemaEdit(v => !v)}
-            compact
-          />
-          {isEditModalSchemaEdit && (
-            <DynamicFormBuilderPanel
-              formId="menu_form"
-              onClose={() => setIsEditModalSchemaEdit(false)}
-            />
-          )}
-
           <DynamicFormRenderer
-            schema={dynamicFormSchemas.menu_form}
+            schema={menuFormSchema}
             values={{
               ...editMenuForm,
               ...(editMenuForm.customFields || {}),

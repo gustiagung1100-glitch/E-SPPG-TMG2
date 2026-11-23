@@ -55,6 +55,7 @@ import {
   StockOpnameRecord,
   MutationType,
   RecipeIngredient,
+  RecipeCustomColumn,
   DivisionJobdesk,
   DashboardLayoutConfig,
 } from '../types';
@@ -136,8 +137,13 @@ import {
 import {
   isMatchingMaterialNameShared,
   normalizeMaterialSyncName,
+  buildDailyMenuIngredientKey,
+  formatIndonesianPeriodMonth,
   resolveRecipeIngredientFormula,
+  getDishLabelFromMenu,
   syncRABWithMenuPlans,
+  seedAndSyncDailyPurchaseOrders,
+  sortPOItemsBahanThenOperasional,
   reconcileRABWithPurchaseOrders as reconcileRABWithPurchaseOrdersShared,
   reconcilePurchaseOrdersWithQC,
   reconcileInventoryFromQualityControl,
@@ -421,6 +427,15 @@ interface AppContextType {
   approveMenuItem: (id: string, approvedBy: string) => Promise<void>;
   menuIngredientsMap: Record<string, RecipeIngredient[]>;
   updateMenuIngredients: (menuId: string, ingredients: RecipeIngredient[]) => void;
+  recipeCustomColumns: RecipeCustomColumn[];
+  addRecipeCustomColumn: (
+    col: Omit<RecipeCustomColumn, 'id' | 'createdAt' | 'createdBy'>
+  ) => RecipeCustomColumn;
+  updateRecipeCustomColumn: (
+    colId: string,
+    patch: Partial<Pick<RecipeCustomColumn, 'title' | 'inputType' | 'placeholder'>>
+  ) => void;
+  deleteRecipeCustomColumn: (colId: string) => void;
   divisionJobdesks: DivisionJobdesk[];
   updateDivisionJobdesks: (
     updater: DivisionJobdesk[] | ((prev: DivisionJobdesk[]) => DivisionJobdesk[])
@@ -454,6 +469,7 @@ interface AppContextType {
   approvePurchaseOrderHead: (id: string, approverName: string) => Promise<void>;
   updatePOQualityControl: (id: string, qcStatus: PurchaseOrder['qcStatus'], notes: string) => Promise<void>;
   receivePOToWarehouse: (id: string) => Promise<void>;
+  syncDailyPOsFromRAB: (targetDate?: string) => Promise<number>;
 
   // Modul PLOK: RAB & Quality Control
   rabItems: RABItem[];
@@ -462,7 +478,7 @@ interface AppContextType {
   deleteRABItem: (id: string) => Promise<void>;
   approveRABItem: (id: string, approverName: string) => Promise<void>;
   syncCriticalInventoryToRAB: () => Promise<number>;
-  syncAllMenuNeedsToRAB: () => Promise<number>;
+  syncAllMenuNeedsToRAB: (targetDate?: string) => Promise<number>;
   syncInventoryFromQualityControl: () => Promise<number>;
   syncMenuNeedsToRAB: (
     menuId: string,
@@ -963,10 +979,12 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     date: '2026-11-07',
     supplierName: 'PT Unggas Barokah Probolinggo',
     supplierContact: 'H. Suwandi - 0812-7788-9911',
-    deliveryDate: '2026-11-08',
+    deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-2',
     items: [
-      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 250, unit: 'kg', unitPrice: 38000, subtotal: 9500000, rabId: 'rab-2', receivedQuantity: 250 },
+      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 250, unit: 'kg', unitPrice: 38000, subtotal: 9500000, rabId: 'rab-2', receivedQuantity: 250, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 9500000,
     status: 'Selesai diterima',
@@ -974,10 +992,10 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     qcNotes: 'Suhu tiba 2.8°C, bau segar alami, potongan seragam bersih tanpa lemak berlebih.',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Pengiriman batch subuh pukul 03:30 WIB dari alokasi RAB-BP-2026-11-002.',
+    notes: 'Pengiriman batch H-1 (menu 2026-11-08) dari alokasi RAB-BP-2026-11-002.',
     supplierConfirmed: true,
     supplierConfirmedAt: '2026-11-07 14:00',
-    supplierEstimatedDelivery: '2026-11-08 03:30 WIB',
+    supplierEstimatedDelivery: '2026-11-07 18:30 WIB',
     supplierDriverName: 'Budi Santoso',
     supplierDriverPhone: '0813-8822-1100',
     supplierVehicleNumber: 'N 8922 UB',
@@ -1006,9 +1024,11 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierName: 'Koperasi Tani Makmur Krejengan',
     supplierContact: 'H. Abdurrahman - 0852-3344-9988',
     deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-1',
     items: [
-      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1800, unit: 'kg', unitPrice: 14500, subtotal: 26100000, rabId: 'rab-1', receivedQuantity: 1800 },
+      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1800, unit: 'kg', unitPrice: 14500, subtotal: 26100000, rabId: 'rab-1', receivedQuantity: 1800, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 26100000,
     status: 'Selesai diterima',
@@ -1032,9 +1052,11 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierName: 'Kebun Pisang Gending',
     supplierContact: 'Moch. Mansur - 0819-2233-4455',
     deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-5',
     items: [
-      { itemId: 'inv-6', itemName: 'Pisang Cavendish Masak Pohon', quantity: 250, unit: 'kg', unitPrice: 13500, subtotal: 3375000, rabId: 'rab-5', receivedQuantity: 250 },
+      { itemId: 'inv-6', itemName: 'Pisang Cavendish Masak Pohon', quantity: 250, unit: 'kg', unitPrice: 13500, subtotal: 3375000, rabId: 'rab-5', receivedQuantity: 250, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 3375000,
     status: 'Selesai diterima',
@@ -1057,10 +1079,12 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     date: '2026-11-07',
     supplierName: 'CV Segar Sayur Bromo',
     supplierContact: 'Ibu Endang - 0813-5566-7788',
-    deliveryDate: '2026-11-08',
+    deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-4',
     items: [
-      { itemId: 'inv-4', itemName: 'Wortel & Buncis Segar Dataran Tinggi', quantity: 220, unit: 'kg', unitPrice: 12000, subtotal: 2640000, rabId: 'rab-4', receivedQuantity: 210 },
+      { itemId: 'inv-4', itemName: 'Wortel & Buncis Segar Dataran Tinggi', quantity: 220, unit: 'kg', unitPrice: 12000, subtotal: 2640000, rabId: 'rab-4', receivedQuantity: 210, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 2640000,
     status: 'Sebagian diterima',
@@ -1068,10 +1092,10 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     qcNotes: '210 kg diterima baik, 10 kg wortel berlendir ditolak.',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Pasokan sayur segar dari RAB-BP-2026-11-004.',
+    notes: 'Pasokan sayur segar H-1 (menu 2026-11-08) dari RAB-BP-2026-11-004.',
     supplierConfirmed: true,
     supplierConfirmedAt: '2026-11-07 15:00',
-    supplierEstimatedDelivery: '2026-11-08 05:30 WIB',
+    supplierEstimatedDelivery: '2026-11-07 17:30 WIB',
     supplierDeliveryStatus: 'Telah Tiba di Gudang',
   },
   {
@@ -1081,9 +1105,11 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     supplierName: 'Peternakan Ayam Barokah Pajarakan',
     supplierContact: 'H. Yusuf - 0812-4455-6677',
     deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-3',
     items: [
-      { itemId: 'inv-3', itemName: 'Telur Ayam Ras Grade A Segar', quantity: 180, unit: 'kg', unitPrice: 27500, subtotal: 4950000, rabId: 'rab-3', receivedQuantity: 180 },
+      { itemId: 'inv-3', itemName: 'Telur Ayam Ras Grade A Segar', quantity: 180, unit: 'kg', unitPrice: 27500, subtotal: 4950000, rabId: 'rab-3', receivedQuantity: 180, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 4950000,
     status: 'Selesai diterima',
@@ -1100,10 +1126,12 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     date: '2026-11-04',
     supplierName: 'Distributor Resmi Susu Nasional',
     supplierContact: 'CS Susu MBG - 0811-3344-5566',
-    deliveryDate: '2026-11-05',
+    deliveryDate: '2026-11-07',
+    distributionDate: '2026-11-08',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-6',
     items: [
-      { itemId: 'inv-7', itemName: 'Susu UHT Plain / Cokelat 125ml', quantity: 4800, unit: 'pcs', unitPrice: 3600, subtotal: 17280000, rabId: 'rab-6', receivedQuantity: 4800 },
+      { itemId: 'inv-7', itemName: 'Susu UHT Plain / Cokelat 125ml', quantity: 4800, unit: 'pcs', unitPrice: 3600, subtotal: 17280000, rabId: 'rab-6', receivedQuantity: 4800, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 17280000,
     status: 'Selesai diterima',
@@ -1120,17 +1148,19 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     date: '2026-11-09',
     supplierName: 'PT Unggas Barokah Probolinggo',
     supplierContact: 'H. Suwandi - 0812-7788-9911',
-    deliveryDate: '2026-11-10',
+    deliveryDate: '2026-11-09',
+    distributionDate: '2026-11-10',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-2',
     items: [
-      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 290, unit: 'kg', unitPrice: 38000, subtotal: 11020000, rabId: 'rab-2', receivedQuantity: 0 },
+      { itemId: 'inv-2', itemName: 'Daging Ayam Broiler Fillet Dada Segar', quantity: 290, unit: 'kg', unitPrice: 38000, subtotal: 11020000, rabId: 'rab-2', receivedQuantity: 0, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 11020000,
     status: 'Dikirim ke supplier',
     qcStatus: 'Belum QC',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Kebutuhan pasokan ayam potong segar untuk menu hari Selasa, 10 November 2026 (RAB-BP-2026-11-002). Siap dilakukan QC kedatangan.',
+    notes: 'Kebutuhan pasokan ayam potong segar untuk menu hari Selasa, 10 November 2026 (RAB-BP-2026-11-002). Target kirim H-1 (2026-11-09). Siap dilakukan QC kedatangan.',
     supplierConfirmed: true,
     supplierDeliveryStatus: 'Dalam Pengiriman',
   },
@@ -1140,17 +1170,19 @@ const initialPurchaseOrders: PurchaseOrder[] = [
     date: '2026-11-09',
     supplierName: 'Koperasi Tani Makmur Krejengan',
     supplierContact: 'H. Abdurrahman - 0852-3344-9988',
-    deliveryDate: '2026-11-10',
+    deliveryDate: '2026-11-09',
+    distributionDate: '2026-11-10',
+    poCategory: 'Bahan Pangan',
     rabId: 'rab-1',
     items: [
-      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1000, unit: 'kg', unitPrice: 14500, subtotal: 14500000, rabId: 'rab-1', receivedQuantity: 0 },
+      { itemId: 'inv-1', itemName: 'Beras Pulen Wangi Standar BGN (50kg)', quantity: 1000, unit: 'kg', unitPrice: 14500, subtotal: 14500000, rabId: 'rab-1', receivedQuantity: 0, category: 'RAB Bahan Pangan' },
     ],
     totalAmount: 14500000,
     status: 'Dikirim ke supplier',
     qcStatus: 'Belum QC',
     approvedBy: 'Dr. H. Ahmad Zaini, S.Pd.',
     verifiedByFinance: 'M. Farhan, S.E.',
-    notes: 'Pengadaan beras gelombang 2 dari RAB-BP-2026-11-001. Menunggu pemeriksaan QC kedatangan.',
+    notes: 'Pengadaan beras gelombang 2 untuk menu 10 November 2026 (RAB-BP-2026-11-001). Target kirim H-1 (2026-11-09). Menunggu pemeriksaan QC kedatangan.',
     supplierConfirmed: true,
     supplierDeliveryStatus: 'Dalam Pengiriman',
   },
@@ -2348,6 +2380,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return buildDefaultMenuIngredientsMap();
   });
 
+  const [recipeCustomColumns, setRecipeCustomColumns] = useState<RecipeCustomColumn[]>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_recipe_custom_columns_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    return [];
+  });
+
   const [divisionJobdesks, setDivisionJobdesks] = useState<DivisionJobdesk[]>(() => {
     try {
       const saved = localStorage.getItem('esppg_division_jobdesks_v1');
@@ -2439,8 +2484,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       rawQCs = defaultQualityControlRecords;
     }
 
-    const syncedPOs = reconcilePurchaseOrdersWithQC(rawPOs, rawQCs);
-    const syncedRABs = reconcileRABWithPurchaseOrders(syncedPOs, rawRABs);
+    let initialRABs = rawRABs;
+    try {
+      const dailySeeded = localStorage.getItem('esppg_rab_daily_seeded_v1');
+      if (!dailySeeded && menuItems.length > 0) {
+        let skippedKeys = new Set<string>();
+        try {
+          const rawDeleted = localStorage.getItem('esppg_deleted_menu_rab_keys_v1');
+          if (rawDeleted) {
+            const parsedDeleted = JSON.parse(rawDeleted);
+            if (Array.isArray(parsedDeleted)) skippedKeys = new Set(parsedDeleted);
+          }
+        } catch {
+          // ignore
+        }
+        const dailySeedRes = syncRABWithMenuPlans({
+          menuItems,
+          menuIngredientsMap,
+          masterUnits,
+          institutions,
+          rabItems: rawRABs,
+          inventory: rawInv,
+          masterBahan,
+          options: {
+            preserveManualEdits: true,
+            skipDeletedKeys: skippedKeys,
+          },
+        });
+        initialRABs = dailySeedRes.rabItems;
+        localStorage.setItem('esppg_rab_daily_seeded_v1', '1');
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+
+    let preparedPOs = rawPOs;
+    try {
+      const poDailySeeded = localStorage.getItem('esppg_po_daily_ops_seeded_v1');
+      if (!poDailySeeded && menuItems.length > 0) {
+        const seededPORes = seedAndSyncDailyPurchaseOrders({
+          purchaseOrders: rawPOs,
+          rabItems: initialRABs,
+          menuItems,
+          includeApprovedPangan: false,
+        });
+        preparedPOs = seededPORes.purchaseOrders;
+        localStorage.setItem('esppg_po_daily_ops_seeded_v1', '1');
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+
+    const syncedPOs = reconcilePurchaseOrdersWithQC(preparedPOs, rawQCs);
+    const syncedRABs = reconcileRABWithPurchaseOrders(syncedPOs, initialRABs);
     const invSync = reconcileInventoryFromQualityControl({
       qualityControlRecords: rawQCs,
       purchaseOrders: syncedPOs,
@@ -2492,6 +2588,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const purchaseOrdersRef = React.useRef<PurchaseOrder[]>(purchaseOrders);
   const rabItemsRef = React.useRef<RABItem[]>(rabItems);
   const qualityControlRecordsRef = React.useRef<QualityControlRecord[]>(qualityControlRecords);
+  const deletedMenuRabKeysRef = React.useRef<Set<string>>(
+    (() => {
+      try {
+        const raw = localStorage.getItem('esppg_deleted_menu_rab_keys_v1');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return new Set<string>(parsed);
+        }
+      } catch {
+        // ignore
+      }
+      return new Set<string>();
+    })()
+  );
 
   useEffect(() => {
     institutionsRef.current = institutions;
@@ -2903,6 +3013,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     safeWriteLocalStorage('esppg_menu_ingredients_v1', JSON.stringify(menuIngredientsMap));
   }, [menuIngredientsMap, safeWriteLocalStorage]);
+
+  useEffect(() => {
+    safeWriteLocalStorage('esppg_recipe_custom_columns_v1', JSON.stringify(recipeCustomColumns));
+  }, [recipeCustomColumns, safeWriteLocalStorage]);
 
   useEffect(() => {
     safeWriteLocalStorage('esppg_division_jobdesks_v1', JSON.stringify(divisionJobdesks));
@@ -3353,6 +3467,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .catch(() => {
             // Keep localStorage dashboard config fallback if offline
           });
+
+        // Load persisted custom recipe columns from Firestore if available
+        getDoc(doc(db, 'recipes', 'custom_recipe_columns'))
+          .then(snap => {
+            if (snap.exists()) {
+              const cloudCols = snap.data()?.columns;
+              if (Array.isArray(cloudCols)) {
+                setRecipeCustomColumns(cloudCols);
+              }
+            }
+          })
+          .catch(() => {
+            // Keep localStorage fallback if offline
+          });
       } else {
         // Not signed into Firebase Auth: verify signed local/session storage token
         const verifiedManual = validateStoredSessionAgainstPolicy(latestUsers, latestPolicy);
@@ -3559,6 +3687,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             menuIngredientsMapRef.current = parsed;
             setMenuIngredientsMap(parsed);
           }
+        } catch {
+          // Ignore
+        }
+      } else if (e.key === 'esppg_recipe_custom_columns_v1' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setRecipeCustomColumns(parsed);
         } catch {
           // Ignore
         }
@@ -6512,7 +6647,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('info', 'Data Dihapus', `Data pemeriksaan ibu menyusui ${target?.fullName || ''} telah dihapus.`);
   };
 
-  // Menu Items CRUD & Approval (auto-syncs linked Draft/Pending RAB items)
+  // Menu Items CRUD & Approval (auto-syncs linked non-manually-overridden daily RAB items)
   const syncLinkedMenuPlansToRABSilently = (
     nextMenus: MenuItem[],
     nextMap: Record<string, RecipeIngredient[]>,
@@ -6526,6 +6661,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       rabItems: rabItemsRef.current,
       inventory: inventoryRef.current,
       masterBahan,
+      options: {
+        preserveManualEdits: true,
+        skipDeletedKeys: deletedMenuRabKeysRef.current,
+      },
     });
     const reconciledRABs = reconcileRABWithPurchaseOrders(purchaseOrdersRef.current, rabSync.rabItems);
     rabItemsRef.current = reconciledRABs;
@@ -6649,6 +6788,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     menuItemsRef.current = nextMenus;
     setMenuItems(nextMenus);
     syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
+
+    if (auth.currentUser && /^[a-zA-Z0-9_-]+$/.test(menuId)) {
+      setDoc(
+        doc(db, 'recipes', `menu_${menuId}`),
+        {
+          id: `menu_${menuId}`,
+          sppgId: 'GFBQSYXD',
+          menuId,
+          ingredients,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name,
+        },
+        { merge: true }
+      ).catch(() => {
+        // Non-blocking fallback to LocalStorage
+      });
+    }
+  };
+
+  const syncRecipeCustomColumnsToFirestore = (nextCols: RecipeCustomColumn[]) => {
+    safeWriteLocalStorage('esppg_recipe_custom_columns_v1', JSON.stringify(nextCols));
+    if (auth.currentUser) {
+      setDoc(
+        doc(db, 'recipes', 'custom_recipe_columns'),
+        {
+          id: 'custom_recipe_columns',
+          sppgId: 'GFBQSYXD',
+          columns: nextCols,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser.name,
+        },
+        { merge: true }
+      ).catch(() => {
+        // Non-blocking fallback to LocalStorage
+      });
+    }
+  };
+
+  const addRecipeCustomColumn = (
+    col: Omit<RecipeCustomColumn, 'id' | 'createdAt' | 'createdBy'>
+  ): RecipeCustomColumn => {
+    const newCol: RecipeCustomColumn = {
+      id: `resep_col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: col.title.trim(),
+      inputType: col.inputType || 'text',
+      placeholder: col.placeholder?.trim() || undefined,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+    };
+    setRecipeCustomColumns(prev => {
+      const next = [...prev, newCol];
+      syncRecipeCustomColumnsToFirestore(next);
+      return next;
+    });
+    return newCol;
+  };
+
+  const updateRecipeCustomColumn = (
+    colId: string,
+    patch: Partial<Pick<RecipeCustomColumn, 'title' | 'inputType' | 'placeholder'>>
+  ) => {
+    setRecipeCustomColumns(prev => {
+      const next = prev.map(c =>
+        c.id === colId
+          ? {
+              ...c,
+              ...(patch.title !== undefined ? { title: patch.title.trim() || c.title } : {}),
+              ...(patch.inputType !== undefined ? { inputType: patch.inputType } : {}),
+              ...(patch.placeholder !== undefined ? { placeholder: patch.placeholder.trim() || undefined } : {}),
+            }
+          : c
+      );
+      syncRecipeCustomColumnsToFirestore(next);
+      return next;
+    });
+  };
+
+  const deleteRecipeCustomColumn = (colId: string) => {
+    setRecipeCustomColumns(prev => {
+      const next = prev.filter(c => c.id !== colId);
+      syncRecipeCustomColumnsToFirestore(next);
+      return next;
+    });
   };
 
   const updateDivisionJobdesks = (
@@ -7013,7 +7235,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Purchase Orders Workflow (Single-pass RAB Reconciliation prevents double-counting & releases cancelled/rejected PO allocations)
   const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
-    const newPO: PurchaseOrder = { ...po, id: 'po-' + Date.now() };
+    const sortedItems = sortPOItemsBahanThenOperasional(
+      po.items || [],
+      po,
+      rabItemsRef.current
+    );
+    const newPO: PurchaseOrder = { ...po, items: sortedItems, id: 'po-' + Date.now() };
     const nextPOs = [newPO, ...purchaseOrdersRef.current];
     const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
     purchaseOrdersRef.current = nextPOs;
@@ -7053,12 +7280,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const approvePurchaseOrderHead = async (id: string, approverName: string) => {
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
     const nextPOs = purchaseOrdersRef.current.map(p =>
       p.id === id
         ? {
             ...p,
             approvedBy: approverName,
             status: 'Disetujui Kepala' as const,
+            items: (p.items || []).map(it =>
+              it.approvalStatus === 'Ditolak'
+                ? it
+                : {
+                    ...it,
+                    approvalStatus: 'Disetujui' as const,
+                    approvedBy: approverName,
+                    approvedAt: stamp,
+                  }
+            ),
           }
         : p
     );
@@ -7087,10 +7325,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const receivePOToWarehouse = async (id: string) => {
     const po = purchaseOrdersRef.current.find(p => p.id === id);
     if (!po) return;
+    const eligibleItems = (po.items || []).filter(it => it.approvalStatus !== 'Ditolak');
+    if (eligibleItems.length === 0) {
+      addToast('warning', 'Tidak Ada Item Disetujui', `Seluruh item pada PO ${po.poNumber} berstatus Ditolak.`);
+      return;
+    }
     // Record QC records per PO item so Warehouse Stock strictly flows through QC -> Inventory
     const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
     const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    const createdQCs: QualityControlRecord[] = (po.items || []).map((it, idx) => ({
+    const createdQCs: QualityControlRecord[] = eligibleItems.map((it, idx) => ({
       id: `qc-${Date.now()}-${idx}`,
       poId: po.id,
       poNumber: po.poNumber,
@@ -7139,6 +7382,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'Bahan Diterima di Gudang', `PO ${po.poNumber} telah dicatat pada QC dan otomatis memperbarui Stok Gudang.`);
   };
 
+  const syncDailyPOsFromRAB = async (targetDate?: string): Promise<number> => {
+    const res = seedAndSyncDailyPurchaseOrders({
+      purchaseOrders: purchaseOrdersRef.current,
+      rabItems: rabItemsRef.current,
+      menuItems: menuItemsRef.current,
+      targetDate: targetDate && targetDate !== 'ALL' ? targetDate : undefined,
+      includeApprovedPangan: true,
+    });
+    const reconciledPOs = reconcilePurchaseOrdersWithQC(
+      res.purchaseOrders,
+      qualityControlRecordsRef.current
+    );
+    const reconciledRABs = reconcileRABWithPurchaseOrders(
+      reconciledPOs,
+      rabItemsRef.current
+    );
+    purchaseOrdersRef.current = reconciledPOs;
+    rabItemsRef.current = reconciledRABs;
+    setPurchaseOrders(reconciledPOs);
+    setRabItems(reconciledRABs);
+
+    const changed = res.createdCount + res.updatedCount;
+    const scopeLabel =
+      targetDate && targetDate !== 'ALL' ? `tanggal ${targetDate}` : 'seluruh jadwal harian';
+    await logAudit(
+      'CREATE',
+      'procurement',
+      `Sinkronisasi PO Harian (Bahan Pangan lalu Operasional, target kirim H-1) untuk ${scopeLabel}: +${res.createdCount} PO baru, ${res.updatedCount} PO disesuaikan`
+    );
+    addToast(
+      'success',
+      'PO Harian (Bahan & Operasional) Disinkronkan',
+      res.createdCount > 0
+        ? `${res.createdCount} PO harian baru dibuat (target kirim H-1, urutan Bahan Pangan → Operasional) untuk ${scopeLabel}.`
+        : `Daftar PO ${scopeLabel} sudah sesuai (urutan Bahan Pangan → Operasional & target kirim H-1).`
+    );
+    return changed;
+  };
+
   // Modul PLOK: RAB Handlers & Single-Entry Sync Generators
   const addRABItem = async (item: Omit<RABItem, 'id' | 'totalBudget'>) => {
     const totalBudget = item.volume * item.unitPrice;
@@ -7154,27 +7436,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'RAB Ditambahkan', `Anggaran ${newRAB.budgetCode} berhasil diajukan.`);
   };
 
+  // Edit RAB strictly inside RAB state — NEVER modifies Menu PLOG or Foodcost PLOG
   const updateRABItem = async (id: string, item: Partial<RABItem>) => {
-    setRabItems(prev =>
-      prev.map(r => {
-        if (r.id === id) {
-          const updated = { ...r, ...item };
-          if (item.volume !== undefined || item.unitPrice !== undefined) {
-            updated.totalBudget = (updated.volume || 0) * (updated.unitPrice || 0);
-          }
-          return updated;
+    const hasContentEdit =
+      item.itemName !== undefined ||
+      item.volume !== undefined ||
+      item.unit !== undefined ||
+      item.unitPrice !== undefined ||
+      item.totalBudget !== undefined ||
+      item.planDate !== undefined;
+
+    const nextRABs = rabItemsRef.current.map(r => {
+      if (r.id === id) {
+        const updated: RABItem = {
+          ...r,
+          ...item,
+          ...(item.planDate && !item.periodMonth
+            ? { periodMonth: formatIndonesianPeriodMonth(item.planDate) }
+            : {}),
+          isManualOverride:
+            item.isManualOverride !== undefined
+              ? item.isManualOverride
+              : hasContentEdit
+              ? true
+              : r.isManualOverride,
+        };
+        if (item.volume !== undefined || item.unitPrice !== undefined) {
+          updated.totalBudget = (updated.volume || 0) * (updated.unitPrice || 0);
         }
-        return r;
-      })
-    );
+        return updated;
+      }
+      return r;
+    });
+
+    rabItemsRef.current = nextRABs;
+    setRabItems(nextRABs);
     await logAudit('UPDATE', 'procurement', `Memperbarui anggaran RAB ID: ${id}`);
-    addToast('success', 'RAB Diperbarui', 'Data Rencana Anggaran Belanja diperbarui.');
+    addToast('success', 'RAB Diperbarui', 'Data Rencana Anggaran Belanja diperbarui tanpa mengubah Menu/Food Cost PLOG.');
   };
 
+  // Delete RAB strictly inside RAB state — NEVER deletes Menu PLOG or Foodcost PLOG
   const deleteRABItem = async (id: string) => {
-    setRabItems(prev => prev.filter(r => r.id !== id));
-    await logAudit('DELETE', 'procurement', `Menghapus anggaran RAB ID: ${id}`);
-    addToast('info', 'RAB Dihapus', 'Data anggaran berhasil dihapus.');
+    const target = rabItemsRef.current.find(r => r.id === id);
+    if (target && target.category === 'RAB Bahan Pangan') {
+      const nextDeleted = new Set(deletedMenuRabKeysRef.current);
+      if (target.sourceIngredientKey) {
+        nextDeleted.add(target.sourceIngredientKey);
+      }
+      if (target.planDate && target.itemName) {
+        nextDeleted.add(buildDailyMenuIngredientKey(target.planDate, target.itemName));
+      }
+      deletedMenuRabKeysRef.current = nextDeleted;
+      safeWriteLocalStorage(
+        'esppg_deleted_menu_rab_keys_v1',
+        JSON.stringify(Array.from(nextDeleted))
+      );
+    }
+
+    const nextRABs = rabItemsRef.current.filter(r => r.id !== id);
+    rabItemsRef.current = nextRABs;
+    setRabItems(nextRABs);
+    await logAudit('DELETE', 'procurement', `Menghapus anggaran RAB ID: ${id} (Menu & Food Cost PLOG tetap aman)`);
+    addToast(
+      'info',
+      'Item RAB Dihapus',
+      'Item bahan pangan dihapus dari RAB. Menu PLOG & Food Cost PLOG tetap utuh dan tidak ikut terhapus.'
+    );
   };
 
   const approveRABItem = async (id: string, approverName: string) => {
@@ -7246,32 +7573,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newEntries.length;
   };
 
-  const syncAllMenuNeedsToRAB = async (): Promise<number> => {
+  const syncAllMenuNeedsToRAB = async (targetDate?: string): Promise<number> => {
+    // When user explicitly triggers daily sync, allow re-syncing items for the targeted date(s)
+    // while keeping user's manually edited RAB overrides protected.
+    const nextDeleted = new Set(deletedMenuRabKeysRef.current);
+    if (targetDate && targetDate !== 'ALL') {
+      for (const key of Array.from(nextDeleted)) {
+        if (key.startsWith(`${targetDate}__`)) {
+          nextDeleted.delete(key);
+        }
+      }
+    } else {
+      nextDeleted.clear();
+    }
+    deletedMenuRabKeysRef.current = nextDeleted;
+    safeWriteLocalStorage(
+      'esppg_deleted_menu_rab_keys_v1',
+      JSON.stringify(Array.from(nextDeleted))
+    );
+
     const res = syncRABWithMenuPlans({
-      menuItems,
-      menuIngredientsMap,
+      menuItems: menuItemsRef.current,
+      menuIngredientsMap: menuIngredientsMapRef.current,
       masterUnits,
-      institutions,
+      institutions: institutionsRef.current,
       rabItems: rabItemsRef.current,
       inventory: inventoryRef.current,
       masterBahan,
+      options: {
+        targetDate: targetDate && targetDate !== 'ALL' ? targetDate : undefined,
+        preserveManualEdits: true,
+      },
     });
     const reconciledRABs = reconcileRABWithPurchaseOrders(purchaseOrdersRef.current, res.rabItems);
     rabItemsRef.current = reconciledRABs;
     setRabItems(reconciledRABs);
 
     const changed = res.createdCount + res.updatedCount;
+    const scopeLabel =
+      targetDate && targetDate !== 'ALL' ? `tanggal ${targetDate}` : 'seluruh jadwal harian';
     await logAudit(
       'CREATE',
       'procurement',
-      `Sinkronisasi menyeluruh Perencanaan Menu (PLOG) ke RAB (+${res.createdCount} item baru, ${res.updatedCount} item diperbarui)`
+      `Sinkronisasi harian Perencanaan Menu (PLOG) ${scopeLabel} ke RAB (+${res.createdCount} item baru, ${res.updatedCount} item diperbarui)`
     );
     addToast(
       'success',
-      'RAB Tersinkron dari Perencanaan Menu',
+      'RAB Harian Tersinkron dari Menu PLOG',
       changed > 0
-        ? `${res.createdCount} item RAB baru ditambahkan & ${res.updatedCount} item RAB diperbarui dari Perencanaan Menu PLOG.`
-        : 'Seluruh item Perencanaan Menu sudah tersinkron dengan RAB Bahan Pangan.'
+        ? `${res.createdCount} item RAB baru ditambahkan & ${res.updatedCount} item RAB diperbarui untuk ${scopeLabel}.`
+        : `Seluruh item Perencanaan Menu ${scopeLabel} sudah sesuai di RAB Bahan Pangan.`
     );
     return changed;
   };
@@ -7324,10 +7675,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unitPrice: number;
     }>
   ): Promise<number> => {
-    const targetMenu = menuItems.find(m => m.id === menuId);
+    const targetMenu = menuItemsRef.current.find(m => m.id === menuId);
     const todayStr = new Date().toISOString().slice(0, 10);
+    const targetDate = targetMenu?.date || todayStr;
+    const derivedPeriodMonth = formatIndonesianPeriodMonth(targetDate);
     let createdCount = 0;
     let updatedCount = 0;
+
+    // Clear deleted-key block for items being explicitly synced for this menu day
+    const nextDeleted = new Set(deletedMenuRabKeysRef.current);
+    needs.forEach(n => {
+      nextDeleted.delete(buildDailyMenuIngredientKey(targetDate, n.name));
+    });
+    deletedMenuRabKeysRef.current = nextDeleted;
+    safeWriteLocalStorage(
+      'esppg_deleted_menu_rab_keys_v1',
+      JSON.stringify(Array.from(nextDeleted))
+    );
 
     const next = [...rabItemsRef.current];
     needs.forEach((need, idx) => {
@@ -7337,40 +7701,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const resolvedPrice = need.unitPrice || mbMatch?.actualPrice || invMatch?.pricePerUnit || 15000;
       const resolvedUnit = need.unit || mbMatch?.unit || invMatch?.unit || 'kg';
       const menuLabel = targetMenu
-        ? `${targetMenu.menuCode} (${targetMenu.dayName}, ${targetMenu.date})`
+        ? `${targetMenu.menuCode} (${targetMenu.dayName}, ${targetDate})`
         : menuId;
+      const sourceKey = buildDailyMenuIngredientKey(targetDate, need.name);
 
+      // Match strictly within the same daily date (targetDate) or sourceMenuId
       const existingDraftIdx = next.findIndex(
         r =>
           r.category === 'RAB Bahan Pangan' &&
           r.status !== 'Ditolak' &&
-          (r.status === 'Draft' || r.status === 'Menunggu Persetujuan' || (r.poCreatedQuantity || 0) === 0) &&
-          isMatchingMaterialName(r.itemName, need.name)
+          (
+            (r.sourceIngredientKey && r.sourceIngredientKey === sourceKey) ||
+            (r.planDate === targetDate && isMatchingMaterialName(r.itemName, need.name)) ||
+            (r.sourceMenuId === menuId && isMatchingMaterialName(r.itemName, need.name))
+          )
       );
+
+      const menuDishLabel = targetMenu
+        ? getDishLabelFromMenu(targetMenu, need.category)
+        : menuLabel;
+      const autoRincianLine = {
+        id: `rin-sync-${menuId}-${idx}-${Date.now()}`,
+        menuName: menuDishLabel,
+        ingredientName: need.name,
+        quantity: need.quantity,
+        unit: resolvedUnit,
+        sourceMenuId: menuId,
+        sourceMenuCode: targetMenu?.menuCode || menuId,
+        isManual: false,
+      };
 
       if (existingDraftIdx >= 0) {
         const curr = next[existingDraftIdx];
-        next[existingDraftIdx] = {
-          ...curr,
-          volume: need.quantity,
-          unit: resolvedUnit,
-          unitPrice: resolvedPrice,
-          totalBudget: need.quantity * resolvedPrice,
-          sourceType: 'menu_planning',
-          sourceMenuId: menuId,
-          sourceMenuCode: targetMenu?.menuCode || menuId,
-          sourceMenuLabel: menuLabel,
-          notes: `Sumber Perencanaan Menu PLOG: ${menuLabel}`,
-        };
-        updatedCount++;
+        if (curr.isManualOverride) {
+          return;
+        }
+        const poUsedQty = curr.poCreatedQuantity || 0;
+        const canUpdateAmounts =
+          curr.status === 'Draft' ||
+          curr.status === 'Menunggu Persetujuan' ||
+          poUsedQty === 0;
+        if (canUpdateAmounts) {
+          const effVol = Math.max(need.quantity, poUsedQty);
+          next[existingDraftIdx] = {
+            ...curr,
+            planDate: targetDate,
+            periodMonth: derivedPeriodMonth,
+            volume: effVol,
+            unit: resolvedUnit,
+            unitPrice: resolvedPrice,
+            totalBudget: effVol * resolvedPrice,
+            sourceType: 'menu_planning',
+            sourceMenuId: menuId,
+            sourceMenuCode: targetMenu?.menuCode || menuId,
+            sourceMenuLabel: menuLabel,
+            sourceIngredientKey: curr.sourceIngredientKey || sourceKey,
+            notes: `Sumber Perencanaan Menu PLOG Harian (${targetDate}): ${menuLabel}`,
+            rincianItems: curr.isRincianManual ? curr.rincianItems : [autoRincianLine],
+            isRincianManual: curr.isRincianManual ?? false,
+          };
+          updatedCount++;
+        }
       } else {
         const codeNum = String(next.length + 1).padStart(3, '0');
+        const compactDate = targetDate.replace(/-/g, '').slice(2);
         next.unshift({
-          id: `rab-menu-${Date.now()}-${idx}`,
+          id: `rab-menu-${targetDate}-${Date.now()}-${idx}`,
           category: 'RAB Bahan Pangan',
-          budgetCode: `RAB-BP-${todayStr.slice(2, 7).replace('-', '')}-${codeNum}`,
-          planDate: targetMenu?.date || todayStr,
-          periodMonth: 'November 2026',
+          budgetCode: `RAB-BP-${compactDate}-${codeNum}`,
+          planDate: targetDate,
+          periodMonth: derivedPeriodMonth,
           itemName: need.name,
           volume: need.quantity,
           unit: resolvedUnit,
@@ -7383,7 +7783,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           sourceMenuId: menuId,
           sourceMenuCode: targetMenu?.menuCode || menuId,
           sourceMenuLabel: menuLabel,
-          notes: `Sumber Perencanaan Menu PLOG: ${menuLabel} (${need.category})`,
+          sourceIngredientKey: sourceKey,
+          notes: `Sumber Perencanaan Menu PLOG Harian (${targetDate}): ${menuLabel} (${need.category})`,
+          rincianItems: [autoRincianLine],
+          isRincianManual: false,
+          isManualOverride: false,
         });
         createdCount++;
       }
@@ -7396,12 +7800,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await logAudit(
       'CREATE',
       'procurement',
-      `Sinkronisasi kebutuhan bahan Menu ${targetMenu?.menuCode || menuId} ke RAB (+${createdCount} baru, ${updatedCount} diperbarui)`
+      `Sinkronisasi kebutuhan bahan harian Menu ${targetMenu?.menuCode || menuId} (${targetDate}) ke RAB (+${createdCount} baru, ${updatedCount} diperbarui)`
     );
     addToast(
       'success',
-      'Kebutuhan Resep Tersinkron ke RAB',
-      `${createdCount} item RAB baru & ${updatedCount} item RAB diperbarui langsung dari resep ${targetMenu?.menuCode || ''}.`
+      'Kebutuhan Resep Harian Tersinkron ke RAB',
+      `${createdCount} item RAB baru & ${updatedCount} item RAB diperbarui untuk tanggal ${targetDate} dari resep ${targetMenu?.menuCode || ''}.`
     );
     return createdCount + updatedCount;
   };
@@ -8483,6 +8887,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         approveMenuItem,
         menuIngredientsMap,
         updateMenuIngredients,
+        recipeCustomColumns,
+        addRecipeCustomColumn,
+        updateRecipeCustomColumn,
+        deleteRecipeCustomColumn,
         divisionJobdesks,
         updateDivisionJobdesks,
         inventory,
@@ -8502,6 +8910,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         approvePurchaseOrderHead,
         updatePOQualityControl,
         receivePOToWarehouse,
+        syncDailyPOsFromRAB,
         rabItems,
         addRABItem,
         updateRABItem,

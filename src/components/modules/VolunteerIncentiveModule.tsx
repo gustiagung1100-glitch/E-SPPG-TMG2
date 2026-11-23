@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import {
   exportTableToPDF,
@@ -704,15 +705,17 @@ export const VolunteerIncentiveModule: React.FC = () => {
       </div>
 
       {/* KPI Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Shift Hadir &amp; Pengganti
             </span>
-            <UserCheck className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <UserCheck className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums">
             {formatNumber(metrics.eligibleCount)} Shift
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -720,14 +723,16 @@ export const VolunteerIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Total Insentif Terhitung
             </span>
-            <Coins className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Coins className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums font-mono">
             {formatRupiah(metrics.totalAmount)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -735,14 +740,16 @@ export const VolunteerIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Sudah Dibayarkan
             </span>
-            <Wallet className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <Wallet className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
             {formatRupiah(metrics.paidAmount)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -750,14 +757,16 @@ export const VolunteerIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Sisa Belum Dibayar
             </span>
-            <Coins className="w-4 h-4 text-[#D97706]" />
+            <span className="w-8 h-8 rounded-lg bg-amber-50 text-[#D97706] dark:bg-amber-950/60 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Coins className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-[#D97706] dark:text-amber-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-[#D97706] dark:text-amber-400 tabular-nums font-mono">
             {formatRupiah(metrics.unpaidAmount)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -845,12 +854,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
 
       {/* Data Table */}
       {viewMode === 'daily' ? (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+        <div key="daily" className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm animate-fadeIn">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  <th className="py-3 px-4">Tanggal</th>
+                  <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-3 px-4 min-w-[110px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal</th>
                   <th className="py-3 px-4">Nama Relawan</th>
                   <th className="py-3 px-4">Divisi &amp; Shift</th>
                   <th className="py-3 px-4">Status Absensi</th>
@@ -863,16 +872,27 @@ export const VolunteerIncentiveModule: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-10 text-center text-slate-500">
-                      Tidak ada data absensi relawan yang cocok dengan filter.
+                    <td colSpan={8} className="p-4">
+                      <EmptyState
+                        variant={searchQuery || selectedDivision !== 'ALL' || selectedStatus !== 'ALL' ? 'search' : 'data'}
+                        compact
+                        title="Tidak ada data absensi relawan yang cocok"
+                        description="Ubah filter tanggal, divisi, status, atau kata kunci pencarian untuk menampilkan data relawan."
+                        actionLabel={searchQuery || selectedDivision !== 'ALL' || selectedStatus !== 'ALL' ? 'Reset Filter' : undefined}
+                        onAction={searchQuery || selectedDivision !== 'ALL' || selectedStatus !== 'ALL' ? () => {
+                          setSearchQuery('');
+                          setSelectedDivision('ALL');
+                          setSelectedStatus('ALL');
+                        } : undefined}
+                      />
                     </td>
                   </tr>
                 ) : (
                   filteredRows.map(row => {
                     const isEligible = row.attendanceStatus === 'Hadir' && row.totalIncentive > 0;
                     return (
-                      <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                        <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-700 dark:text-slate-300">
+                      <tr key={row.id} className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-3 px-4 whitespace-nowrap font-medium text-slate-700 dark:text-slate-300 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           {row.date}
                         </td>
                         <td className="py-3 px-4">
@@ -982,12 +1002,12 @@ export const VolunteerIncentiveModule: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+        <div key="summary" className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm animate-fadeIn">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  <th className="py-3 px-4">Nama Relawan</th>
+                  <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-3 px-4 min-w-[160px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Nama Relawan</th>
                   <th className="py-3 px-4">Divisi</th>
                   <th className="py-3 px-4 text-right">Hari Hadir</th>
                   <th className="py-3 px-4 text-right">Shift Pengganti</th>
@@ -999,8 +1019,8 @@ export const VolunteerIncentiveModule: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {volunteerSummaryRows.map(item => (
-                  <tr key={`${item.volunteerName}-${item.division}`} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                    <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">{item.volunteerName}</td>
+                  <tr key={`${item.volunteerName}-${item.division}`} className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                    <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-3 px-4 font-semibold text-slate-900 dark:text-white shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{item.volunteerName}</td>
                     <td className="py-3 px-4 text-slate-700 dark:text-slate-300">Div. {item.division}</td>
                     <td className="py-3 px-4 text-right tabular-nums font-semibold text-emerald-700 dark:text-emerald-400">
                       {item.presentDays} hari

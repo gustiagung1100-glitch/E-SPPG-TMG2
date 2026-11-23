@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
@@ -743,55 +744,63 @@ export const InventoryModule: React.FC = () => {
       )}
 
       {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-stretch">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>Total Komoditas Gudang</span>
-            <Warehouse className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Warehouse className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white font-mono tabular-nums mt-2">
             {kpiData.totalItems} Komoditas
           </div>
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Bahan Basah & Kering</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">Bahan Basah & Kering</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>Peringatan Stok Minimum</span>
-            <AlertTriangle className={`w-4 h-4 ${kpiData.criticalCount > 0 ? 'text-[#E11D48]' : 'text-slate-400'}`} />
+            <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${kpiData.criticalCount > 0 ? 'bg-rose-50 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+              <AlertTriangle className="w-4 h-4" />
+            </span>
           </div>
           <div
-            className={`text-2xl font-black font-mono mt-1 ${
+            className={`text-2xl font-bold tracking-tight font-mono tabular-nums mt-2 ${
               kpiData.criticalCount > 0 ? 'text-[#E11D48]' : 'text-slate-900 dark:text-white'
             }`}
           >
             {kpiData.criticalCount} Item Kritis
           </div>
-          <div className="text-[11px] text-[#E11D48] font-semibold mt-0.5">
+          <div className={`text-[11px] font-semibold mt-1 ${kpiData.criticalCount > 0 ? 'text-[#E11D48]' : 'text-[#0D9488]'}`}>
             {kpiData.criticalCount > 0 ? 'Wajib terbitkan PO segera' : 'Seluruh stok di atas batas aman'}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>Total Valuasi Nilai Stok</span>
-            <DollarSign className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <DollarSign className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-xl font-black text-[#0D9488] font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-[#0D9488] font-mono tabular-nums mt-2">
             {formatRupiah(kpiData.totalValuation)}
           </div>
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">Aset Bahan Pangan Tersimpan</div>
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">Aset Bahan Pangan Tersimpan</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>FEFO Mendekati Expired</span>
-            <Clock className="w-4 h-4 text-[#D97706]" />
+            <span className="w-8 h-8 rounded-lg bg-amber-50 text-[#D97706] dark:bg-amber-950/60 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Clock className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-2xl font-black text-[#D97706] font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-[#D97706] font-mono tabular-nums mt-2">
             {kpiData.expiringSoonItems.length} Batch
           </div>
-          <div className="text-[11px] text-[#D97706] dark:text-amber-400 font-semibold mt-0.5">
+          <div className="text-[11px] text-[#D97706] dark:text-amber-400 font-semibold mt-1">
             Kadaluarsa dalam &le; 5 Hari
           </div>
         </div>
@@ -832,7 +841,7 @@ export const InventoryModule: React.FC = () => {
 
       {/* Sub-Tabs Navigation (Responsive Pill Tabs) */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar text-xs font-semibold">
           {[
             {
               key: 'stok_gudang' as InventoryTab,
@@ -869,7 +878,7 @@ export const InventoryModule: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-out whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
@@ -896,7 +905,7 @@ export const InventoryModule: React.FC = () => {
       {/* TAB 1: INVENTARIS STOK GUDANG & METODE FEFO */}
       {/* ========================================================================= */}
       {activeTab === 'stok_gudang' && (
-        <div className="space-y-4">
+        <div key="stok_gudang" className="space-y-4 animate-fadeIn">
           {/* Filter Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1140,7 +1149,7 @@ export const InventoryModule: React.FC = () => {
       {/* TAB 2: RIWAYAT MUTASI BARANG (AUDIT TRAIL) */}
       {/* ========================================================================= */}
       {activeTab === 'mutasi_barang' && (
-        <div className="space-y-4">
+        <div key="mutasi_barang" className="space-y-4 animate-fadeIn">
           <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-800 flex items-start gap-3 text-xs text-sky-900 dark:text-sky-200">
             <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
             <div className="space-y-1">
@@ -1216,6 +1225,7 @@ export const InventoryModule: React.FC = () => {
             onExportExcel={handleExportMutationsExcel}
             onExportPDF={handleExportMutationsPDF}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'timestamp',
@@ -1408,22 +1418,22 @@ export const InventoryModule: React.FC = () => {
       {/* TAB 3: BUKU KARTU STOK (STOCK CARD LEDGER) */}
       {/* ========================================================================= */}
       {activeTab === 'kartu_stok' && (
-        <div className="space-y-4">
+        <div key="kartu_stok" className="space-y-4 animate-fadeIn">
           {/* Item Selector & Profile Card */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-blue-900 text-white flex items-center justify-center font-black">
+              <div className="w-12 h-12 rounded-xl bg-[#1E3A8A] text-white flex items-center justify-center font-black">
                 <ClipboardList className="w-6 h-6 text-sky-400" />
               </div>
               <div>
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Buku Kartu Stok Bahan:</div>
+                <div className="text-[10px] text-slate-500 font-bold uppercase">Buku Kartu Stok Bahan:</div>
                 <div className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <span>{selectedStockCardItem.name}</span>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-sky-300">
+                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-50 text-[#1E3A8A] dark:bg-blue-950 dark:text-sky-300">
                     {selectedStockCardItem.code}
                   </span>
                 </div>
-                <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2 mt-0.5">
                   <span>Lokasi: <strong>{selectedStockCardItem.storageLocation}</strong></span>
                   <span>•</span>
                   <span>Satuan: <strong>{selectedStockCardItem.unit}</strong></span>
@@ -1448,7 +1458,7 @@ export const InventoryModule: React.FC = () => {
 
               <button
                 onClick={handleExportStockCardPDF}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs transition"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white rounded-xl text-xs font-bold shadow-xs transition"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Cetak Kartu Stok</span>
@@ -1457,26 +1467,26 @@ export const InventoryModule: React.FC = () => {
           </div>
 
           {/* Quick Ledger Table for Selected Item */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3">Tanggal & Jam</th>
+                    <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 p-3 min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal & Jam</th>
                     <th className="p-3">No. Dokumen / Reff</th>
                     <th className="p-3">Uraian Mutasi</th>
                     <th className="p-3">Batch & Expired</th>
-                    <th className="p-3 text-center text-emerald-600">Masuk (+)</th>
-                    <th className="p-3 text-center text-rose-600">Keluar (-)</th>
-                    <th className="p-3 text-center font-black text-blue-900 dark:text-sky-300">Sisa Saldo Stok</th>
+                    <th className="p-3 text-center text-[#0D9488]">Masuk (+)</th>
+                    <th className="p-3 text-center text-[#E11D48]">Keluar (-)</th>
+                    <th className="p-3 text-center font-black text-[#1E3A8A] dark:text-sky-300">Sisa Saldo Stok</th>
                     <th className="p-3">Paraf Petugas</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                   {stockCardMutations.map(m => (
-                    <tr key={m.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="p-3 font-sans text-slate-600 dark:text-slate-400">{m.timestamp}</td>
-                      <td className="p-3 font-bold text-blue-900 dark:text-sky-300">{m.referenceNumber}</td>
+                    <tr key={m.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 p-3 font-sans text-slate-600 dark:text-slate-400 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{m.timestamp}</td>
+                      <td className="p-3 font-bold text-[#1E3A8A] dark:text-sky-300">{m.referenceNumber}</td>
                       <td className="p-3 font-sans">
                         <div className="font-semibold text-slate-900 dark:text-white">{m.type}</div>
                         <div className="text-[10px] text-slate-500">{m.notes}</div>
@@ -1520,21 +1530,21 @@ export const InventoryModule: React.FC = () => {
       {/* TAB 4: STOK OPNAME (FISIK VS SISTEM) */}
       {/* ========================================================================= */}
       {activeTab === 'stok_opname' && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div key="stok_opname" className="space-y-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Scale className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                <Scale className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
                 Stok Opname Fisik vs Sistem
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Verifikasi kesesuaian kuantitas fisik di rak/chiller dengan saldo pencatatan sistem, mencatat selisih & BAP
               </p>
             </div>
 
             <button
               onClick={() => handleOpenOpnameModal()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-900 hover:bg-blue-800 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#1E3A8A] hover:bg-blue-900 dark:bg-sky-600 dark:hover:bg-sky-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
             >
               <Plus className="w-4 h-4" />
               <span>Input Hasil Stok Opname</span>
@@ -1549,6 +1559,7 @@ export const InventoryModule: React.FC = () => {
             searchPlaceholder="Cari no opname, barang, pemeriksa..."
             searchKeys={['opnameNumber', 'itemName', 'reason', 'inspectorName']}
             onPrint={triggerPrint}
+            stickyFirstColumn
             columns={[
               {
                 key: 'opnameNumber',
@@ -1644,13 +1655,13 @@ export const InventoryModule: React.FC = () => {
       {/* TAB 5: REKAP PENGGUNAAN BAHAN MBG */}
       {/* ========================================================================= */}
       {activeTab === 'rekap_penggunaan' && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div key="rekap_penggunaan" className="space-y-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                <FileSpreadsheet className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
                 Rekapitulasi Penggunaan Bahan Baku Dapur MBG (Terhubung Mutasi Keluar)
               </h3>
-              <p className="text-xs text-slate-500 mb-4">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">
                 Dihitung otomatis secara real-time dari catatan transaksi Barang Keluar gudang dan kuota {formatNumber(totalRegisteredPortions)} porsi harian
               </p>
 
@@ -1658,7 +1669,7 @@ export const InventoryModule: React.FC = () => {
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                      <th className="p-3">Hari & Tanggal</th>
+                      <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 p-3 min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Hari & Tanggal</th>
                       <th className="p-3">Menu / Keterangan Mutasi</th>
                       <th className="p-3 text-center">Porsi MBG</th>
                       <th className="p-3 text-center">Beras</th>
@@ -1671,14 +1682,19 @@ export const InventoryModule: React.FC = () => {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                     {usageSummary.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-6 text-center font-sans text-slate-500">
-                          Belum ada transaksi Barang Keluar tercatat di gudang. Catat mutasi Barang Keluar agar rekap pemakaian muncul otomatis.
+                        <td colSpan={8} className="p-4 font-sans">
+                          <EmptyState
+                            variant="data"
+                            compact
+                            title="Belum ada transaksi Barang Keluar tercatat"
+                            description="Catat mutasi Barang Keluar agar rekap pemakaian bahan baku dapur muncul otomatis."
+                          />
                         </td>
                       </tr>
                     ) : (
                       usageSummary.map(u => (
-                        <tr key={u.dateKey} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-sans font-bold text-slate-900 dark:text-white">{u.day}</td>
+                        <tr key={u.dateKey} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 p-3 font-sans font-bold text-slate-900 dark:text-white shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{u.day}</td>
                           <td className="p-3 font-sans text-slate-700 dark:text-slate-300">
                             <div>{u.menu}</div>
                             <div className="text-[10px] text-slate-400">{u.mutationCount} transaksi barang keluar</div>

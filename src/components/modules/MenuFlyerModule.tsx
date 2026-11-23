@@ -804,9 +804,9 @@ ${largeLines}
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fadeIn">
       {/* TOP ACTION BAR */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 print:hidden">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-5 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 print:hidden">
         <div>
           <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
             Publikasi Resmi SPPG · Integrasi PLOG &amp; Divisi Pemorsian
@@ -854,7 +854,7 @@ ${largeLines}
         {/* LEFT COLUMN: CONTROLS */}
         <div className="lg:col-span-4 space-y-4 print:hidden">
           {/* 1. Menu Selection from PLOG */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3 transition-all duration-200 ease-out hover:shadow-md">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
               <Calendar className="w-4 h-4 text-blue-900 dark:text-sky-400" />
               <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -886,7 +886,7 @@ ${largeLines}
           </div>
 
           {/* 2. Foto Porsi Kecil & Besar */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3 transition-all duration-200 ease-out hover:shadow-md">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -926,14 +926,14 @@ ${largeLines}
                   <img
                     src={smallPhotoUrl}
                     alt="Preview Porsi Kecil"
-                    className="w-full h-20 rounded object-cover border border-slate-200 dark:border-slate-700"
+                    className="w-full aspect-[4/3] rounded-lg object-cover border border-slate-200 dark:border-slate-700"
                   />
                 ) : (
-                  <div className="w-full h-20 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
+                  <div className="w-full aspect-[4/3] rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
                     Belum ada foto
                   </div>
                 )}
-                <label className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                <label className="w-full inline-flex items-center justify-center gap-1 px-2 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-[11px] font-semibold text-slate-700 dark:text-slate-200 cursor-pointer transition-colors">
                   <Upload className="w-3 h-3" />
                   <span>Ganti Foto</span>
                   <input type="file" accept="image/*" onChange={handleUploadSmallPhoto} className="hidden" />
@@ -949,10 +949,10 @@ ${largeLines}
                   <img
                     src={largePhotoUrl}
                     alt="Preview Porsi Besar"
-                    className="w-full h-20 rounded object-cover border border-slate-200 dark:border-slate-700"
+                    className="w-full aspect-[4/3] rounded-lg object-cover border border-slate-200 dark:border-slate-700"
                   />
                 ) : (
-                  <div className="w-full h-20 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
+                  <div className="w-full aspect-[4/3] rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
                     Belum ada foto
                   </div>
                 )}
@@ -1051,7 +1051,7 @@ ${largeLines}
           </div>
 
           {/* 3. Tema Warna & Ukuran */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3 transition-all duration-200 ease-out hover:shadow-md">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
               <Layers className="w-4 h-4 text-blue-900 dark:text-sky-400" />
               <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -1105,7 +1105,7 @@ ${largeLines}
           </div>
 
           {/* 4. Jumlah Porsi, AKG, Harga & Batas Konsumsi */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3 transition-all duration-200 ease-out hover:shadow-md">
             <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
               <Clock className="w-4 h-4 text-rose-500" />
               <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">

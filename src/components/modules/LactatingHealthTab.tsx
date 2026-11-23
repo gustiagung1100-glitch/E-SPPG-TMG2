@@ -1709,6 +1709,7 @@ export const LactatingHealthTab: React.FC = () => {
           onExportExcel={handleExportRegistryExcel}
           onExportPDF={handleExportRegistryPDF}
           onPrint={triggerPrint}
+          stickyFirstColumn
         />
       </div>
 

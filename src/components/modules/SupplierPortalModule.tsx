@@ -501,7 +501,7 @@ export const SupplierPortalModule: React.FC = () => {
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Total PO Masuk
@@ -510,7 +510,7 @@ export const SupplierPortalModule: React.FC = () => {
               <PackageCheck className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {stats.total}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -518,7 +518,7 @@ export const SupplierPortalModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Perlu Konfirmasi
@@ -527,7 +527,7 @@ export const SupplierPortalModule: React.FC = () => {
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-[#D97706] dark:text-amber-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#D97706] dark:text-amber-400 mt-2">
             {stats.needConfirm}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -535,7 +535,7 @@ export const SupplierPortalModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Dalam Proses Kirim
@@ -544,7 +544,7 @@ export const SupplierPortalModule: React.FC = () => {
               <Truck className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-[#1E3A8A] dark:text-sky-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#1E3A8A] dark:text-sky-400 mt-2">
             {stats.inDelivery}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -552,7 +552,7 @@ export const SupplierPortalModule: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Selesai Diterima Gudang
@@ -561,7 +561,7 @@ export const SupplierPortalModule: React.FC = () => {
               <CheckCircle className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-[#0D9488] dark:text-teal-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#0D9488] dark:text-teal-400 mt-2">
             {stats.completed}
           </div>
           <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -572,7 +572,7 @@ export const SupplierPortalModule: React.FC = () => {
 
       {/* Responsive Pill Tabs */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar items-center gap-1.5 pb-1 sm:pb-0">
           <button
             type="button"
             onClick={() => setActiveTab('active_po')}
@@ -632,7 +632,7 @@ export const SupplierPortalModule: React.FC = () => {
       {/* TAB 1 & 2: DAFTAR PO AKTIF & RIWAYAT */}
       {/* ========================================================================= */}
       {(activeTab === 'active_po' || activeTab === 'history') && (
-        <div className="space-y-4">
+        <div key={activeTab} className="space-y-4 animate-fadeIn">
           {/* Filters & Actions Bar */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex flex-1 flex-col sm:flex-row gap-3">
@@ -695,6 +695,7 @@ export const SupplierPortalModule: React.FC = () => {
               onExportPDF={handleExportPDF}
               onExportExcel={handleExportExcel}
               onPrint={triggerPrint}
+              stickyFirstColumn
             />
           </div>
         </div>
@@ -704,7 +705,7 @@ export const SupplierPortalModule: React.FC = () => {
       {/* TAB 3: PROFIL REKENING & LEGALITAS MITRA */}
       {/* ========================================================================= */}
       {activeTab === 'profile' && (
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+        <div key="profile" className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-6 animate-fadeIn">
           <div className="flex items-center gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
             <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 flex items-center justify-center font-bold text-lg">
               <Building className="w-6 h-6" />

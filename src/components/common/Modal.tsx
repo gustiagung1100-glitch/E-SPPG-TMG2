@@ -145,7 +145,7 @@ export const Modal: React.FC<ModalProps> = ({
       />
       <div
         style={{ maxHeight: computedMaxHeight }}
-        className={`relative w-full ${maxWidthClasses[maxWidth]} flex flex-col bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden z-10 transition-all duration-200 ease-in-out print:max-w-full print:max-h-none print:shadow-none print:border-none print:rounded-none print:overflow-visible print:block`}
+        className={`animate-modalEnter relative w-full ${maxWidthClasses[maxWidth]} flex flex-col bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden z-10 transition-all duration-200 ease-out print:max-w-full print:max-h-none print:shadow-none print:border-none print:rounded-none print:overflow-visible print:block`}
       >
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 backdrop-blur-xs print:hidden">
@@ -162,7 +162,7 @@ export const Modal: React.FC<ModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-9 h-9 sm:w-9 sm:h-9 flex items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+            className="w-9 h-9 sm:w-9 sm:h-9 flex items-center justify-center text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-all duration-200 active:scale-[0.98] shrink-0 cursor-pointer"
             aria-label="Tutup modal"
           >
             <X className="w-5 h-5" />

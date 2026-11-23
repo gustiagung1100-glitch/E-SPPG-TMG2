@@ -5,9 +5,12 @@ import {
   MasterUnit,
   MenuItem,
   PurchaseOrder,
+  PurchaseOrderItem,
+  POItemApprovalStatus,
   QCStatusPLOK,
   QualityControlRecord,
   RABItem,
+  RABRincianItem,
   RecipeIngredient,
   StockBatch,
   StockMutation,
@@ -122,6 +125,7 @@ export interface MenuPlannedNeedItem {
   sourceMenuCode: string;
   sourceMenuDate: string;
   sourceMenuLabel: string;
+  menuDishLabel?: string;
 }
 
 export interface AggregatedMenuNeed {
@@ -136,6 +140,43 @@ export interface AggregatedMenuNeed {
   sourceMenuCodes: string[];
   sourceMenuLabels: string[];
   planDate: string;
+  rincianItems: RABRincianItem[];
+}
+
+export function getDishLabelFromMenu(
+  menu: Pick<
+    MenuItem,
+    | 'menuCode'
+    | 'dayName'
+    | 'date'
+    | 'stapleFood'
+    | 'animalProtein'
+    | 'plantProtein'
+    | 'vegetable'
+    | 'fruit'
+    | 'milkOrExtra'
+  >,
+  category?: string,
+  explicitMenuName?: string
+): string {
+  const customDish = (explicitMenuName || '').trim();
+  if (customDish) {
+    return `${menu.menuCode} — ${customDish}`;
+  }
+  const cat = (category || '').toLowerCase();
+  let dishSlot = '';
+  if (cat.includes('pokok') || cat.includes('karbo')) dishSlot = menu.stapleFood;
+  else if (cat.includes('hewani')) dishSlot = menu.animalProtein;
+  else if (cat.includes('nabati')) dishSlot = menu.plantProtein;
+  else if (cat.includes('sayur')) dishSlot = menu.vegetable;
+  else if (cat.includes('buah')) dishSlot = menu.fruit;
+  else if (cat.includes('susu') || cat.includes('ekstra')) dishSlot = menu.milkOrExtra;
+  else dishSlot = [menu.stapleFood, menu.animalProtein].filter(Boolean).join(' & ');
+
+  if (dishSlot && dishSlot.trim()) {
+    return `${menu.menuCode} — ${dishSlot.trim()}`;
+  }
+  return `${menu.menuCode} (${menu.dayName}, ${menu.date})`;
 }
 
 function computeKebutuhanAndPortionCost(params: {
@@ -223,15 +264,28 @@ export function resolveRecipeIngredientFormula(
   const bbSmall = Math.max(0, Number(ing.netWeightSmall) || 0);
   const bbLarge = Math.max(0, Number(ing.netWeightLarge) || 0);
 
-  const bddSmall = hasNum(ov.bddSmall)
-    ? Math.max(1, ov.bddSmall)
-    : Math.max(1, ing.ediblePortionPercent || 100);
-  const bddLarge = hasNum(ov.bddLarge)
-    ? Math.max(1, ov.bddLarge)
-    : Math.max(1, ing.ediblePortionPercent || 100);
+  const rawBaseBdd =
+    typeof ing.ediblePortionPercent === 'number' && Number.isFinite(ing.ediblePortionPercent)
+      ? Math.max(0, Math.min(100, ing.ediblePortionPercent))
+      : 100;
 
-  const bkSmall = hasNum(ov.bkSmall) ? ov.bkSmall : bbSmall / (bddSmall / 100);
-  const bkLarge = hasNum(ov.bkLarge) ? ov.bkLarge : bbLarge / (bddLarge / 100);
+  const bddSmall = hasNum(ov.bddSmall)
+    ? Math.max(0, Math.min(100, ov.bddSmall))
+    : rawBaseBdd;
+  const bddLarge = hasNum(ov.bddLarge)
+    ? Math.max(0, Math.min(100, ov.bddLarge))
+    : rawBaseBdd;
+
+  const bkSmall = hasNum(ov.bkSmall)
+    ? ov.bkSmall
+    : bddSmall > 0
+    ? bbSmall / (bddSmall / 100)
+    : 0;
+  const bkLarge = hasNum(ov.bkLarge)
+    ? ov.bkLarge
+    : bddLarge > 0
+    ? bbLarge / (bddLarge / 100)
+    : 0;
 
   const porsiSmall = hasNum(ov.porsiSmall) ? ov.porsiSmall : Math.max(0, quotaSmall);
   const porsiLarge = hasNum(ov.porsiLarge) ? ov.porsiLarge : Math.max(0, quotaLarge);
@@ -359,6 +413,34 @@ export function calculateIngredientPurchaseQuantity(
   };
 }
 
+const INDONESIAN_MONTHS = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember',
+];
+
+export function formatIndonesianPeriodMonth(isoDate: string): string {
+  if (!isoDate || isoDate.length < 7) return 'November 2026';
+  const parts = isoDate.split('-');
+  const year = Number(parts[0]);
+  const monthIdx = Number(parts[1]) - 1;
+  if (!Number.isFinite(year) || monthIdx < 0 || monthIdx > 11) return 'November 2026';
+  return `${INDONESIAN_MONTHS[monthIdx]} ${year}`;
+}
+
+export function buildDailyMenuIngredientKey(planDate: string, ingredientName: string): string {
+  return `${(planDate || '').trim()}__${normalizeMaterialSyncName(ingredientName)}`;
+}
+
 export function computeMenuAggregatedNeeds(params: {
   menuItems: MenuItem[];
   menuIngredientsMap: Record<string, RecipeIngredient[]>;
@@ -386,10 +468,12 @@ export function computeMenuAggregatedNeeds(params: {
 
   const perMenuItems: MenuPlannedNeedItem[] = [];
   const aggMap = new Map<string, AggregatedMenuNeed>();
+  const todayFallback = new Date().toISOString().slice(0, 10);
 
   for (const menu of menuItems) {
     const ings = menuIngredientsMap[menu.id] || menu.ingredients || [];
-    const menuLabel = `${menu.menuCode} (${menu.dayName}, ${menu.date})`;
+    const menuDate = menu.date || todayFallback;
+    const menuLabel = `${menu.menuCode} (${menu.dayName}, ${menuDate})`;
 
     for (const ing of ings) {
       const calc = calculateIngredientPurchaseQuantity(ing, masterUnits, quotaSmall, quotaLarge);
@@ -401,6 +485,8 @@ export function computeMenuAggregatedNeeds(params: {
       const resolvedPrice =
         ing.unitPrice || mbMatch?.actualPrice || invMatch?.pricePerUnit || 15000;
 
+      const menuDishLabel = getDishLabelFromMenu(menu, ing.category, ing.menuName);
+
       const itemEntry: MenuPlannedNeedItem = {
         key: `${menu.id}__${ing.id}`,
         name: ing.name,
@@ -411,14 +497,28 @@ export function computeMenuAggregatedNeeds(params: {
         totalBudget: calc.totalKuantiti * resolvedPrice,
         sourceMenuId: menu.id,
         sourceMenuCode: menu.menuCode,
-        sourceMenuDate: menu.date,
+        sourceMenuDate: menuDate,
         sourceMenuLabel: menuLabel,
+        menuDishLabel,
       };
       perMenuItems.push(itemEntry);
 
+      const rincianLine: RABRincianItem = {
+        id: `rin-${menu.id}-${ing.id}`,
+        menuName: menuDishLabel,
+        ingredientName: ing.name,
+        quantity: calc.totalKuantiti,
+        unit: resolvedUnit,
+        sourceMenuId: menu.id,
+        sourceMenuCode: menu.menuCode,
+        isManual: false,
+      };
+
+      // Group strictly per day (menuDate) + unit + normalized material name
       let matchedKey: string | null = null;
       for (const [k, grp] of aggMap.entries()) {
         if (
+          grp.planDate === menuDate &&
           grp.unit.toLowerCase() === resolvedUnit.toLowerCase() &&
           isMatchingMaterialNameShared(grp.name, ing.name)
         ) {
@@ -431,6 +531,7 @@ export function computeMenuAggregatedNeeds(params: {
         const existing = aggMap.get(matchedKey)!;
         existing.quantity += calc.totalKuantiti;
         existing.totalBudget = existing.quantity * existing.unitPrice;
+        existing.rincianItems.push(rincianLine);
         if (!existing.sourceMenuIds.includes(menu.id)) {
           existing.sourceMenuIds.push(menu.id);
         }
@@ -441,7 +542,7 @@ export function computeMenuAggregatedNeeds(params: {
           existing.sourceMenuLabels.push(menuLabel);
         }
       } else {
-        const newKey = `${normalizeMaterialSyncName(ing.name)}__${resolvedUnit.toLowerCase()}`;
+        const newKey = `${menuDate}__${normalizeMaterialSyncName(ing.name)}__${resolvedUnit.toLowerCase()}`;
         aggMap.set(newKey, {
           key: newKey,
           name: ing.name,
@@ -453,7 +554,8 @@ export function computeMenuAggregatedNeeds(params: {
           sourceMenuIds: [menu.id],
           sourceMenuCodes: [menu.menuCode],
           sourceMenuLabels: [menuLabel],
-          planDate: menu.date || new Date().toISOString().slice(0, 10),
+          planDate: menuDate,
+          rincianItems: [rincianLine],
         });
       }
     }
@@ -465,6 +567,12 @@ export function computeMenuAggregatedNeeds(params: {
   };
 }
 
+export interface SyncRABOptions {
+  targetDate?: string;
+  preserveManualEdits?: boolean;
+  skipDeletedKeys?: Set<string>;
+}
+
 export function syncRABWithMenuPlans(params: {
   menuItems: MenuItem[];
   menuIngredientsMap: Record<string, RecipeIngredient[]>;
@@ -473,31 +581,53 @@ export function syncRABWithMenuPlans(params: {
   rabItems: RABItem[];
   inventory?: InventoryItem[];
   masterBahan?: MasterBahan[];
+  options?: SyncRABOptions;
 }): {
   rabItems: RABItem[];
   createdCount: number;
   updatedCount: number;
 } {
   const { aggregated } = computeMenuAggregatedNeeds(params);
+  const { options } = params;
+  const targetDate = options?.targetDate;
+  const preserveManualEdits = Boolean(options?.preserveManualEdits);
+  const skipDeletedKeys = options?.skipDeletedKeys;
+
+  const needsToProcess =
+    targetDate && targetDate !== 'ALL'
+      ? aggregated.filter(n => n.planDate === targetDate)
+      : aggregated;
+
   const nextRABs = [...params.rabItems];
   let createdCount = 0;
   let updatedCount = 0;
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  aggregated.forEach((need, idx) => {
+  needsToProcess.forEach((need, idx) => {
+    const planDate = need.planDate || todayStr;
+    const sourceKey = buildDailyMenuIngredientKey(planDate, need.name);
+
     const matchingIdx = nextRABs.findIndex(
       r =>
         r.category === 'RAB Bahan Pangan' &&
         r.status !== 'Ditolak' &&
-        isMatchingMaterialNameShared(r.itemName, need.name)
+        (
+          (r.sourceIngredientKey && r.sourceIngredientKey === sourceKey) ||
+          (r.planDate === planDate && isMatchingMaterialNameShared(r.itemName, need.name))
+        )
     );
 
     const menuCodesStr = need.sourceMenuCodes.join(', ');
-    const menuNotes = `Sumber Perencanaan Menu PLOG: ${need.sourceMenuLabels.join(' + ')} (${need.category})`;
+    const menuNotes = `Sumber Perencanaan Menu PLOG Harian (${planDate}): ${need.sourceMenuLabels.join(' + ')} (${need.category})`;
+    const derivedPeriodMonth = formatIndonesianPeriodMonth(planDate);
 
     if (matchingIdx >= 0) {
       const existing = nextRABs[matchingIdx];
+      if (preserveManualEdits && existing.isManualOverride) {
+        return;
+      }
+
       const poUsedQty = existing.poCreatedQuantity || 0;
       const isEditableFromMenu =
         existing.status === 'Draft' ||
@@ -508,6 +638,8 @@ export function syncRABWithMenuPlans(params: {
         const effectiveVol = Math.max(need.quantity, poUsedQty);
         nextRABs[matchingIdx] = {
           ...existing,
+          planDate,
+          periodMonth: derivedPeriodMonth,
           volume: effectiveVol,
           unit: need.unit || existing.unit,
           unitPrice: need.unitPrice || existing.unitPrice,
@@ -516,27 +648,39 @@ export function syncRABWithMenuPlans(params: {
           sourceMenuId: need.sourceMenuIds[0],
           sourceMenuCode: menuCodesStr,
           sourceMenuLabel: need.sourceMenuLabels.join(', '),
+          sourceIngredientKey: existing.sourceIngredientKey || sourceKey,
           notes: menuNotes,
+          rincianItems: existing.isRincianManual ? existing.rincianItems : need.rincianItems,
+          isRincianManual: existing.isRincianManual ?? false,
         };
         updatedCount++;
-      } else if (!existing.sourceType) {
+      } else if (!existing.sourceType || !existing.sourceIngredientKey) {
         nextRABs[matchingIdx] = {
           ...existing,
-          sourceType: 'menu_planning',
+          sourceType: existing.sourceType || 'menu_planning',
           sourceMenuId: existing.sourceMenuId || need.sourceMenuIds[0],
           sourceMenuCode: existing.sourceMenuCode || menuCodesStr,
           sourceMenuLabel: existing.sourceMenuLabel || need.sourceMenuLabels.join(', '),
+          sourceIngredientKey: existing.sourceIngredientKey || sourceKey,
+          rincianItems: existing.isRincianManual
+            ? existing.rincianItems
+            : existing.rincianItems?.length
+            ? existing.rincianItems
+            : need.rincianItems,
         };
       }
     } else {
+      if (skipDeletedKeys && skipDeletedKeys.has(sourceKey)) {
+        return;
+      }
       const codeNum = String(nextRABs.length + 1).padStart(3, '0');
-      const ym = (need.planDate || todayStr).slice(0, 7);
+      const compactDate = planDate.replace(/-/g, '').slice(2);
       nextRABs.unshift({
-        id: `rab-menu-${Date.now()}-${idx}`,
+        id: `rab-menu-${planDate}-${Date.now()}-${idx}`,
         category: 'RAB Bahan Pangan',
-        budgetCode: `RAB-BP-${ym}-${codeNum}`,
-        planDate: need.planDate || todayStr,
-        periodMonth: 'November 2026',
+        budgetCode: `RAB-BP-${compactDate}-${codeNum}`,
+        planDate,
+        periodMonth: derivedPeriodMonth,
         itemName: need.name,
         volume: need.quantity,
         unit: need.unit,
@@ -549,7 +693,11 @@ export function syncRABWithMenuPlans(params: {
         sourceMenuId: need.sourceMenuIds[0],
         sourceMenuCode: menuCodesStr,
         sourceMenuLabel: need.sourceMenuLabels.join(', '),
+        sourceIngredientKey: sourceKey,
         notes: menuNotes,
+        rincianItems: need.rincianItems,
+        isRincianManual: false,
+        isManualOverride: false,
       });
       createdCount++;
     }
@@ -562,9 +710,109 @@ export function syncRABWithMenuPlans(params: {
   };
 }
 
+export function resolveAutoRincianForRAB(
+  rab: RABItem,
+  perMenuItems: MenuPlannedNeedItem[],
+  menuItems: MenuItem[]
+): RABRincianItem[] {
+  const sameDateMatches = rab.planDate
+    ? perMenuItems.filter(
+        need =>
+          need.sourceMenuDate === rab.planDate &&
+          isMatchingMaterialNameShared(need.name, rab.itemName)
+      )
+    : [];
+
+  const matchedNeeds =
+    sameDateMatches.length > 0
+      ? sameDateMatches
+      : perMenuItems.filter(need => isMatchingMaterialNameShared(need.name, rab.itemName));
+
+  if (matchedNeeds.length > 0) {
+    return matchedNeeds.map((need, idx) => ({
+      id: `rin-auto-${rab.id}-${need.sourceMenuId}-${idx}`,
+      menuName: need.menuDishLabel || need.sourceMenuLabel || need.sourceMenuCode,
+      ingredientName: need.name,
+      quantity: need.quantity,
+      unit: need.unit,
+      sourceMenuId: need.sourceMenuId,
+      sourceMenuCode: need.sourceMenuCode,
+      isManual: false,
+    }));
+  }
+
+  const menuCodes = (rab.sourceMenuCode || '')
+    .split(',')
+    .map(c => c.trim().toLowerCase())
+    .filter(Boolean);
+
+  const matchedMenus = menuItems.filter(
+    m =>
+      (rab.sourceMenuId && m.id === rab.sourceMenuId) ||
+      menuCodes.includes((m.menuCode || '').trim().toLowerCase())
+  );
+
+  if (matchedMenus.length > 0) {
+    return matchedMenus.map((m, idx) => ({
+      id: `rin-menu-${rab.id}-${m.id}-${idx}`,
+      menuName: getDishLabelFromMenu(m),
+      ingredientName: rab.itemName,
+      quantity: idx === 0 ? rab.volume : 0,
+      unit: rab.unit,
+      sourceMenuId: m.id,
+      sourceMenuCode: m.menuCode,
+      isManual: false,
+    }));
+  }
+
+  if (rab.sourceType === 'menu_planning' && (rab.sourceMenuLabel || rab.sourceMenuCode)) {
+    return [
+      {
+        id: `rin-src-${rab.id}-0`,
+        menuName: rab.sourceMenuLabel || rab.sourceMenuCode || '-',
+        ingredientName: rab.itemName,
+        quantity: rab.volume,
+        unit: rab.unit,
+        sourceMenuId: rab.sourceMenuId,
+        sourceMenuCode: rab.sourceMenuCode,
+        isManual: false,
+      },
+    ];
+  }
+
+  return [];
+}
+
 // =============================================================================
 // STAGE 2: RAB -> PURCHASE ORDER (PO)
 // =============================================================================
+
+export function resolvePOItemApprovalStatus(
+  item: Pick<PurchaseOrderItem, 'approvalStatus'>,
+  po: Pick<PurchaseOrder, 'status'>
+): POItemApprovalStatus {
+  if (
+    item.approvalStatus === 'Disetujui' ||
+    item.approvalStatus === 'Ditolak' ||
+    item.approvalStatus === 'Menunggu persetujuan'
+  ) {
+    return item.approvalStatus;
+  }
+  if (po.status === 'Ditolak' || po.status === 'Dibatalkan') {
+    return 'Ditolak';
+  }
+  if (
+    po.status === 'Disetujui' ||
+    po.status === 'Disetujui Kepala' ||
+    po.status === 'Dikirim ke supplier' ||
+    po.status === 'Sebagian diterima' ||
+    po.status === 'Selesai diterima' ||
+    po.status === 'Diterima di Gudang'
+  ) {
+    return 'Disetujui';
+  }
+  return 'Menunggu persetujuan';
+}
 
 export function reconcileRABWithPurchaseOrders(
   pos: PurchaseOrder[],
@@ -576,7 +824,10 @@ export function reconcileRABWithPurchaseOrders(
     let totalAmount = 0;
 
     for (const po of activePOs) {
-      const matchingItems = (po.items || []).filter(item => item.rabId === rab.id);
+      const nonRejectedItems = (po.items || []).filter(
+        item => item.approvalStatus !== 'Ditolak'
+      );
+      const matchingItems = nonRejectedItems.filter(item => item.rabId === rab.id);
       if (matchingItems.length > 0) {
         for (const item of matchingItems) {
           totalQty += Number(item.quantity || 0);
@@ -585,10 +836,10 @@ export function reconcileRABWithPurchaseOrders(
           );
         }
       } else if (po.rabId === rab.id) {
-        const matchedByName = (po.items || []).filter(it =>
+        const matchedByName = nonRejectedItems.filter(it =>
           isMatchingMaterialNameShared(it.itemName, rab.itemName)
         );
-        const itemsToSum = matchedByName.length > 0 ? matchedByName : po.items || [];
+        const itemsToSum = matchedByName.length > 0 ? matchedByName : nonRejectedItems;
         for (const it of itemsToSum) {
           totalQty += Number(it.quantity || 0);
           totalAmount += Number(it.subtotal || (it.quantity || 0) * (it.unitPrice || 0));
@@ -602,6 +853,470 @@ export function reconcileRABWithPurchaseOrders(
       poCreatedAmount: totalAmount,
     };
   });
+}
+
+const OPERASIONAL_ITEM_KEYWORDS = [
+  'gas lpg',
+  'lpg',
+  'bbm',
+  'pertalite',
+  'solar',
+  'sabun',
+  'disinfektan',
+  'apd',
+  'kebersihan',
+  'air kemasan galon',
+  'galon',
+  'filter sterilisasi',
+  'insentif',
+  'biaya lain',
+  'operasional',
+];
+
+export function shiftIsoDate(isoDate: string, deltaDays: number): string {
+  const trimmed = (isoDate || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return trimmed;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const dt = new Date(Date.UTC(year, month - 1, day + deltaDays));
+  if (Number.isNaN(dt.getTime())) return trimmed;
+  return dt.toISOString().slice(0, 10);
+}
+
+export function isOperasionalPOItem(
+  item: Pick<PurchaseOrderItem, 'itemName' | 'rabId' | 'category'>,
+  po: Pick<PurchaseOrder, 'rabId' | 'poCategory' | 'notes'>,
+  rabItems: RABItem[]
+): boolean {
+  if (item.category === 'RAB Operasional') return true;
+  if (item.category === 'RAB Bahan Pangan') return false;
+  const linkedRab = rabItems.find(r => r.id === (item.rabId || po.rabId));
+  if (linkedRab) {
+    return linkedRab.category === 'RAB Operasional';
+  }
+  if (po.poCategory === 'Operasional') return true;
+  if (po.poCategory === 'Bahan Pangan') return false;
+  const lower = (item.itemName || '').toLowerCase();
+  return OPERASIONAL_ITEM_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+export function sortPOItemsBahanThenOperasional(
+  items: PurchaseOrderItem[],
+  po: Pick<PurchaseOrder, 'rabId' | 'poCategory' | 'notes'>,
+  rabItems: RABItem[]
+): PurchaseOrderItem[] {
+  if (!Array.isArray(items) || items.length <= 1) return items || [];
+  return items
+    .map((it, idx) => ({
+      it,
+      idx,
+      rank: isOperasionalPOItem(it, po, rabItems) ? 1 : 0,
+    }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx))
+    .map(entry => entry.it);
+}
+
+export function getPODisplayCategoryRank(
+  po: PurchaseOrder,
+  rabItems: RABItem[]
+): number {
+  const items = po.items || [];
+  if (items.length === 0) {
+    if (po.poCategory === 'Operasional') return 1;
+    const linkedRab = po.rabId ? rabItems.find(r => r.id === po.rabId) : undefined;
+    return linkedRab?.category === 'RAB Operasional' ? 1 : 0;
+  }
+  const hasBahan = items.some(it => !isOperasionalPOItem(it, po, rabItems));
+  return hasBahan ? 0 : 1;
+}
+
+export function resolveRABDistributionDate(
+  rab: RABItem | undefined,
+  menuItems: MenuItem[],
+  fallbackDate = ''
+): string {
+  if (!rab) return fallbackDate;
+  const menuDates = new Set(menuItems.map(m => m.date).filter(Boolean));
+  if (rab.planDate && menuDates.has(rab.planDate)) {
+    return rab.planDate;
+  }
+  if (rab.sourceMenuId) {
+    const matched = menuItems.find(m => m.id === rab.sourceMenuId);
+    if (matched?.date) return matched.date;
+  }
+  if (rab.sourceMenuCode) {
+    const codes = rab.sourceMenuCode
+      .split(',')
+      .map(c => c.trim().toLowerCase())
+      .filter(Boolean);
+    const matched = menuItems.find(
+      m => m.menuCode && codes.includes(m.menuCode.trim().toLowerCase())
+    );
+    if (matched?.date) return matched.date;
+  }
+  if (rab.planDate) return rab.planDate;
+  return fallbackDate;
+}
+
+export function resolvePODistributionDate(
+  po: PurchaseOrder,
+  rabItems: RABItem[],
+  menuItems: MenuItem[]
+): string {
+  if (po.distributionDate && /^\d{4}-\d{2}-\d{2}$/.test(po.distributionDate.trim())) {
+    return po.distributionDate.trim();
+  }
+
+  const menuDates = new Set(menuItems.map(m => m.date).filter(Boolean));
+
+  // Try matching notes against scheduled menu codes or explicit ISO date
+  const notesText = (po.notes || '').trim();
+  if (notesText) {
+    const isoMatch = /\b(\d{4}-\d{2}-\d{2})\b/.exec(notesText);
+    if (isoMatch && menuDates.has(isoMatch[1])) {
+      return isoMatch[1];
+    }
+    const lowerNotes = notesText.toLowerCase();
+    for (const m of menuItems) {
+      if (m.menuCode && lowerNotes.includes(m.menuCode.toLowerCase())) {
+        return m.date;
+      }
+      if (m.date === '2026-11-10' && lowerNotes.includes('10 november 2026')) {
+        return '2026-11-10';
+      }
+      if (m.date === '2026-11-09' && lowerNotes.includes('9 november 2026')) {
+        return '2026-11-09';
+      }
+      if (m.date === '2026-11-08' && lowerNotes.includes('8 november 2026')) {
+        return '2026-11-08';
+      }
+    }
+  }
+
+  if (po.deliveryDate && /^\d{4}-\d{2}-\d{2}$/.test(po.deliveryDate.trim())) {
+    const nextDay = shiftIsoDate(po.deliveryDate.trim(), 1);
+    if (menuDates.has(nextDay)) return nextDay;
+    if (menuDates.has(po.deliveryDate.trim())) return po.deliveryDate.trim();
+  }
+
+  const linkedRabId = po.rabId || po.items?.[0]?.rabId;
+  const linkedRab = linkedRabId ? rabItems.find(r => r.id === linkedRabId) : undefined;
+  if (linkedRab) {
+    const resolvedFromRab = resolveRABDistributionDate(linkedRab, menuItems, '');
+    if (resolvedFromRab && menuDates.has(resolvedFromRab)) return resolvedFromRab;
+  }
+
+  if (po.deliveryDate && /^\d{4}-\d{2}-\d{2}$/.test(po.deliveryDate.trim())) {
+    return shiftIsoDate(po.deliveryDate.trim(), 1);
+  }
+  return po.date || '';
+}
+
+function getDailyOperationalSliceQty(rab: RABItem, remainingQty: number, isExactPlanDate: boolean): number {
+  if (remainingQty <= 0) return 0;
+  if (isExactPlanDate) {
+    return remainingQty;
+  }
+  const lower = (rab.itemName || '').toLowerCase();
+  let suggested = 1;
+  if (lower.includes('bbm') || lower.includes('pertalite') || lower.includes('solar')) {
+    suggested = 40;
+  } else if (lower.includes('sabun') || lower.includes('disinfektan')) {
+    suggested = 3;
+  } else if (lower.includes('apd') || lower.includes('sarung tangan') || lower.includes('hairnet')) {
+    suggested = 2;
+  } else if (lower.includes('gas lpg') || lower.includes('elpiji')) {
+    suggested = 1;
+  } else {
+    suggested = Math.max(1, Math.min(remainingQty, Math.ceil(rab.volume / 3)));
+  }
+  return Math.min(remainingQty, suggested);
+}
+
+function resolveOperationalSupplierMeta(itemName: string): {
+  supplierName: string;
+  supplierContact: string;
+} {
+  const lower = (itemName || '').toLowerCase();
+  if (lower.includes('gas') || lower.includes('lpg') || lower.includes('elpiji')) {
+    return {
+      supplierName: 'Agen Gas LPG Industri Mitra BGN',
+      supplierContact: 'H. Ridwan - 0812-3311-4455',
+    };
+  }
+  if (lower.includes('bbm') || lower.includes('pertalite') || lower.includes('solar')) {
+    return {
+      supplierName: 'SPBU Armada Mitra Krejengan',
+      supplierContact: 'Bpk. Hendra - 0852-6677-8899',
+    };
+  }
+  return {
+    supplierName: 'CV Higiene & Sanitasi Nusantara',
+    supplierContact: 'Ibu Ratna - 0813-4455-7700',
+  };
+}
+
+export function seedAndSyncDailyPurchaseOrders(params: {
+  purchaseOrders: PurchaseOrder[];
+  rabItems: RABItem[];
+  menuItems: MenuItem[];
+  targetDate?: string;
+  includeApprovedPangan?: boolean;
+}): {
+  purchaseOrders: PurchaseOrder[];
+  createdCount: number;
+  updatedCount: number;
+} {
+  const {
+    purchaseOrders,
+    rabItems,
+    menuItems,
+    targetDate,
+    includeApprovedPangan = false,
+  } = params;
+
+  const knownPODistributionFixes: Record<string, { dist: string; delivery: string }> = {
+    'po-1': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-2': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-3': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-5': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-6': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-7': { dist: '2026-11-08', delivery: '2026-11-07' },
+    'po-4': { dist: '2026-11-10', delivery: '2026-11-09' },
+    'po-8': { dist: '2026-11-10', delivery: '2026-11-09' },
+  };
+
+  let updatedCount = 0;
+  let createdCount = 0;
+
+  const nextPOs: PurchaseOrder[] = purchaseOrders.map(po => {
+    const fix = knownPODistributionFixes[po.id];
+    const resolvedDist = fix?.dist || resolvePODistributionDate(po, rabItems, menuItems);
+    const expectedHMinus1 = resolvedDist ? shiftIsoDate(resolvedDist, -1) : po.deliveryDate;
+    const nextDelivery = fix?.delivery || expectedHMinus1 || po.deliveryDate;
+
+    const sortedItems = sortPOItemsBahanThenOperasional(
+      (po.items || []).map(it => ({
+        ...it,
+        category:
+          it.category ||
+          (isOperasionalPOItem(it, po, rabItems) ? 'RAB Operasional' : 'RAB Bahan Pangan'),
+      })),
+      po,
+      rabItems
+    );
+
+    const hasBahan = sortedItems.some(it => it.category === 'RAB Bahan Pangan');
+    const hasOps = sortedItems.some(it => it.category === 'RAB Operasional');
+    const nextPoCategory: PurchaseOrder['poCategory'] =
+      hasBahan && hasOps ? 'Gabungan' : hasOps ? 'Operasional' : 'Bahan Pangan';
+
+    if (
+      po.distributionDate !== resolvedDist ||
+      po.deliveryDate !== nextDelivery ||
+      po.poCategory !== nextPoCategory
+    ) {
+      updatedCount++;
+    }
+
+    return {
+      ...po,
+      distributionDate: resolvedDist || undefined,
+      deliveryDate: nextDelivery,
+      poCategory: nextPoCategory,
+      items: sortedItems,
+    };
+  });
+
+  // Track allocated PO qty per RAB so we never exceed approved RAB quotas
+  const getUsedQtyForRAB = (rabId: string): number =>
+    nextPOs
+      .filter(p => p.status !== 'Ditolak' && p.status !== 'Dibatalkan')
+      .reduce((sum, p) => {
+        const direct = (p.items || []).filter(it => it.rabId === rabId);
+        if (direct.length > 0) {
+          return sum + direct.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+        }
+        if (p.rabId === rabId) {
+          return sum + (p.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+        }
+        return sum;
+      }, 0);
+
+  const uniqueMenuDates = Array.from(
+    new Set(menuItems.map(m => m.date).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+
+  const targetDates =
+    targetDate && targetDate !== 'ALL'
+      ? [targetDate]
+      : uniqueMenuDates.length > 0
+      ? uniqueMenuDates
+      : ['2026-11-08'];
+
+  let nextSeq = nextPOs.length + 101;
+
+  for (const distDate of targetDates) {
+    const hMinus1 = shiftIsoDate(distDate, -1);
+    const matchedMenus = menuItems.filter(m => m.date === distDate);
+    const menuCodesLabel =
+      matchedMenus.map(m => m.menuCode).filter(Boolean).join(', ') || distDate;
+    const compactDist = distDate.replace(/-/g, '').slice(2);
+
+    const existingPOsForDay = nextPOs.filter(
+      p =>
+        p.status !== 'Ditolak' &&
+        p.status !== 'Dibatalkan' &&
+        resolvePODistributionDate(p, rabItems, menuItems) === distDate
+    );
+
+    const dayHasRABOrName = (rab: RABItem): boolean =>
+      existingPOsForDay.some(p =>
+        (p.items || []).some(
+          it =>
+            it.rabId === rab.id ||
+            isMatchingMaterialNameShared(it.itemName, rab.itemName)
+        )
+      );
+
+    // 1. Optional Bahan Pangan approved RAB sync for this day
+    if (includeApprovedPangan) {
+      const panganRABsForDay = rabItems.filter(r => {
+        if (r.category !== 'RAB Bahan Pangan' || r.status !== 'Disetujui') return false;
+        const resolvedDate = resolveRABDistributionDate(r, menuItems, r.planDate);
+        return resolvedDate === distDate;
+      });
+
+      const panganItemsToAdd: PurchaseOrderItem[] = [];
+      for (const rab of panganRABsForDay) {
+        if (dayHasRABOrName(rab)) continue;
+        const usedQty = getUsedQtyForRAB(rab.id);
+        const remQty = Math.max(0, Number(rab.volume || 0) - usedQty);
+        if (remQty <= 0) continue;
+        const unitPrice = Number(rab.unitPrice || 0);
+        panganItemsToAdd.push({
+          itemId: rab.id,
+          itemName: rab.itemName,
+          quantity: remQty,
+          unit: rab.unit,
+          unitPrice,
+          subtotal: remQty * unitPrice,
+          rabId: rab.id,
+          receivedQuantity: 0,
+          category: 'RAB Bahan Pangan',
+        });
+      }
+
+      if (panganItemsToAdd.length > 0) {
+        const totalAmount = panganItemsToAdd.reduce((s, it) => s + it.subtotal, 0);
+        nextSeq++;
+        nextPOs.push({
+          id: `po-auto-bp-${distDate}-${nextSeq}`,
+          poNumber: `PO/SPPG-TMG2/2026/XI/${compactDist}-${String(nextSeq).slice(-2)}`,
+          date: hMinus1,
+          supplierName: 'Koperasi Pemasok Pangan Mitra BGN',
+          supplierContact: 'Tim Pengadaan Pangan - 0812-7788-9911',
+          deliveryDate: hMinus1,
+          distributionDate: distDate,
+          poCategory: 'Bahan Pangan',
+          rabId: panganItemsToAdd[0].rabId,
+          items: sortPOItemsBahanThenOperasional(panganItemsToAdd, { poCategory: 'Bahan Pangan' }, rabItems),
+          totalAmount,
+          status: 'Menunggu persetujuan',
+          qcStatus: 'Belum QC',
+          notes: `PO Bahan Pangan Harian untuk menu ${menuCodesLabel} (${distDate}). Target kirim H-1 (${hMinus1}).`,
+          supplierDeliveryStatus: 'Menunggu Konfirmasi',
+        });
+        createdCount++;
+      }
+    }
+
+    // 2. Daily Operational items from approved RAB Operasional
+    const exactDayOps = rabItems.filter(
+      r =>
+        r.category === 'RAB Operasional' &&
+        r.status === 'Disetujui' &&
+        r.planDate === distDate
+    );
+    const standingOps = rabItems.filter(
+      r =>
+        r.category === 'RAB Operasional' &&
+        r.status === 'Disetujui' &&
+        r.planDate !== distDate
+    );
+    const candidateOps = exactDayOps.length > 0 ? [...exactDayOps, ...standingOps] : standingOps;
+
+    const opsItemsToAdd: Array<{
+      item: PurchaseOrderItem;
+      supplierName: string;
+      supplierContact: string;
+    }> = [];
+
+    for (const rab of candidateOps) {
+      if (dayHasRABOrName(rab)) continue;
+      const usedQty = getUsedQtyForRAB(rab.id);
+      const remQty = Math.max(0, Number(rab.volume || 0) - usedQty);
+      if (remQty <= 0) continue;
+
+      const isExact = rab.planDate === distDate;
+      const qty = getDailyOperationalSliceQty(rab, remQty, isExact);
+      if (qty <= 0) continue;
+
+      const unitPrice = Number(rab.unitPrice || 0);
+      const sup = resolveOperationalSupplierMeta(rab.itemName);
+      opsItemsToAdd.push({
+        item: {
+          itemId: rab.id,
+          itemName: rab.itemName,
+          quantity: qty,
+          unit: rab.unit,
+          unitPrice,
+          subtotal: qty * unitPrice,
+          rabId: rab.id,
+          receivedQuantity: 0,
+          category: 'RAB Operasional',
+        },
+        supplierName: sup.supplierName,
+        supplierContact: sup.supplierContact,
+      });
+    }
+
+    if (opsItemsToAdd.length > 0) {
+      const items = sortPOItemsBahanThenOperasional(
+        opsItemsToAdd.map(entry => entry.item),
+        { poCategory: 'Operasional' },
+        rabItems
+      );
+      const totalAmount = items.reduce((s, it) => s + it.subtotal, 0);
+      nextSeq++;
+      nextPOs.push({
+        id: `po-auto-op-${distDate}-${nextSeq}`,
+        poNumber: `PO/SPPG-TMG2/OPS/${compactDist}-${String(nextSeq).slice(-2)}`,
+        date: hMinus1,
+        supplierName: 'Mitra Energi & Sanitasi Operasional SPPG',
+        supplierContact: 'Koordinator Operasional Dapur - 0813-4455-7700',
+        deliveryDate: hMinus1,
+        distributionDate: distDate,
+        poCategory: 'Operasional',
+        rabId: items[0]?.rabId,
+        items,
+        totalAmount,
+        status: 'Menunggu persetujuan',
+        qcStatus: 'Belum QC',
+        notes: `Daftar Belanja Operasional Harian (Gas LPG, BBM Armada, Sabun Sanitasi & APD Relawan) untuk menu ${menuCodesLabel} (${distDate}). Target kirim H-1 (${hMinus1}).`,
+        supplierDeliveryStatus: 'Menunggu Konfirmasi',
+      });
+      createdCount++;
+    }
+  }
+
+  return {
+    purchaseOrders: nextPOs,
+    createdCount,
+    updatedCount,
+  };
 }
 
 // =============================================================================
@@ -642,7 +1357,9 @@ export function reconcilePurchaseOrdersWithQC(
       };
     });
 
-    const totalOrdered = updatedItems.reduce((s, it) => s + Number(it.quantity || 0), 0);
+    const totalOrdered = updatedItems
+      .filter(it => it.approvalStatus !== 'Ditolak')
+      .reduce((s, it) => s + Number(it.quantity || 0), 0);
     const totalReceived = updatedItems.reduce(
       (s, it) => s + Number(it.receivedQuantity || 0),
       0

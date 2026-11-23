@@ -732,9 +732,11 @@ export function exportTextDocumentToWord(options: {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${fileName}_${new Date().toISOString().slice(0, 10)}.doc`;
+  const outName = `${fileName}_${new Date().toISOString().slice(0, 10)}.doc`;
+  link.download = outName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  dispatchPrintToast('success', 'Ekspor Word Berhasil', `Dokumen ${outName} berhasil diunduh.`);
 }

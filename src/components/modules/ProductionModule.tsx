@@ -1327,7 +1327,7 @@ export const ProductionModule: React.FC = () => {
 
       {/* 5-Division Responsive Pill Tab Navigation */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveTab('prep')}
@@ -1414,14 +1414,14 @@ export const ProductionModule: React.FC = () => {
       {/* TAB A: DIVISI PERSIAPAN                                  */}
       {/* ========================================================= */}
       {activeTab === 'prep' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+        <div key="prep" className="space-y-6 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Scissors className="w-4 h-4 text-sky-600" />
+                <Scissors className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
                 Standar CCP, Inspeksi Bahan Rusak, Suhu Ruang &amp; Pendingin Divisi Persiapan
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 Pencatatan suhu &amp; foto bahan rusak, suhu &amp; kelembapan ruangan (Ruang Pengolahan, Ruang Pemorsian, Gudang Basah, Gudang Kering), serta Freezer 1–2 &amp; Chiller 1–4.
               </p>
             </div>
@@ -1432,14 +1432,14 @@ export const ProductionModule: React.FC = () => {
                   onClick={() => openEditPrepModal(prepRecords[0])}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
                 >
-                  <Edit3 className="w-3.5 h-3.5 text-sky-600" />
+                  <Edit3 className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400" />
                   <span>Edit Data &amp; Foto Persiapan</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={openNewPrepModal}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 <Plus className="w-4 h-4" />
                 <span>Input Data & Foto Persiapan</span>
@@ -1448,25 +1448,25 @@ export const ProductionModule: React.FC = () => {
           </div>
 
           {/* Damaged Materials Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
             {prepRecords[0] && (
               <>
                 {/* Damaged Veg */}
-                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
                   <div>
                     <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-100 mb-2">
-                      <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+                      <span className="flex items-center gap-1.5 text-[#0D9488] dark:text-teal-400">
                         <AlertTriangle className="w-4 h-4" />
                         Bahan Rusak: Sayuran
                       </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-[#D97706] border border-amber-200 dark:bg-amber-950 dark:text-amber-300">
                         {prepRecords[0].damagedVegetable.temp}°C
                       </span>
                     </div>
                     <div className="text-sm font-bold text-slate-900 dark:text-white">
                       {prepRecords[0].damagedVegetable.name}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       Kuantitas: <strong>{prepRecords[0].damagedVegetable.quantity} {prepRecords[0].damagedVegetable.unit}</strong>
                     </p>
                   </div>
@@ -1476,28 +1476,28 @@ export const ProductionModule: React.FC = () => {
                         src={prepRecords[0].damagedVegetable.photoUrl}
                         alt="Bahan Rusak Sayur"
                         onClick={() => setViewPhotoUrl(prepRecords[0].damagedVegetable.photoUrl || null)}
-                        className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                        className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                   )}
                 </div>
 
                 {/* Damaged Animal */}
-                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
                   <div>
                     <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-100 mb-2">
-                      <span className="flex items-center gap-1.5 text-rose-700 dark:text-rose-400">
+                      <span className="flex items-center gap-1.5 text-[#E11D48] dark:text-rose-400">
                         <AlertTriangle className="w-4 h-4" />
                         Bahan Rusak: Lauk Hewani
                       </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950 dark:text-rose-300">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-50 text-[#E11D48] border border-rose-200 dark:bg-rose-950 dark:text-rose-300">
                         {prepRecords[0].damagedAnimal.temp}°C
                       </span>
                     </div>
                     <div className="text-sm font-bold text-slate-900 dark:text-white">
                       {prepRecords[0].damagedAnimal.name}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       Kuantitas: <strong>{prepRecords[0].damagedAnimal.quantity} {prepRecords[0].damagedAnimal.unit}</strong>
                     </p>
                   </div>
@@ -1507,28 +1507,28 @@ export const ProductionModule: React.FC = () => {
                         src={prepRecords[0].damagedAnimal.photoUrl}
                         alt="Bahan Rusak Hewani"
                         onClick={() => setViewPhotoUrl(prepRecords[0].damagedAnimal.photoUrl || null)}
-                        className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                        className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                   )}
                 </div>
 
                 {/* Damaged Fruit */}
-                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
                   <div>
                     <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-100 mb-2">
-                      <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                      <span className="flex items-center gap-1.5 text-[#D97706] dark:text-amber-400">
                         <AlertTriangle className="w-4 h-4" />
                         Bahan Rusak: Buah
                       </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-[#D97706] border border-amber-200 dark:bg-amber-950 dark:text-amber-300">
                         {prepRecords[0].damagedFruit.temp}°C
                       </span>
                     </div>
                     <div className="text-sm font-bold text-slate-900 dark:text-white">
                       {prepRecords[0].damagedFruit.name}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       Kuantitas: <strong>{prepRecords[0].damagedFruit.quantity} {prepRecords[0].damagedFruit.unit}</strong>
                     </p>
                   </div>
@@ -1538,7 +1538,7 @@ export const ProductionModule: React.FC = () => {
                         src={prepRecords[0].damagedFruit.photoUrl}
                         alt="Bahan Rusak Buah"
                         onClick={() => setViewPhotoUrl(prepRecords[0].damagedFruit.photoUrl || null)}
-                        className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                        className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                       />
                     </div>
                   )}
@@ -1627,14 +1627,14 @@ export const ProductionModule: React.FC = () => {
           : [];
 
         return (
-          <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div key="cooking" className="space-y-6 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <CookingPot className="w-4 h-4 text-amber-600" />
+                  <CookingPot className="w-4 h-4 text-[#D97706]" />
                   Input Data Pengolahan, Suhu Item Menu, Suhu Ruang &amp; Pendingin
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                   Nama item menu terhubung otomatis dari PLOG, dilengkapi pencatatan suhu &amp; foto Ruang Pengolahan, Ruang Pemorsian, Gudang Basah/Kering, Freezer 1–2, dan Chiller 1–4.
                 </p>
               </div>
@@ -1645,14 +1645,14 @@ export const ProductionModule: React.FC = () => {
                     onClick={() => openEditCookingModal(activeCooking)}
                     className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
                   >
-                    <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                    <Edit3 className="w-3.5 h-3.5 text-[#D97706]" />
                     <span>Edit Data &amp; Foto Pengolahan</span>
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={openNewCookingModal}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-xs"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Input Data &amp; Foto Pengolahan</span>
@@ -1666,13 +1666,13 @@ export const ProductionModule: React.FC = () => {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-sky-50 dark:from-amber-950/30 dark:to-sky-950/30 p-4 rounded-xl border border-amber-200/80 dark:border-amber-800/50">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="px-2 py-0.5 rounded-md font-bold bg-blue-900 text-white">
+                      <span className="px-2 py-0.5 rounded-md font-bold bg-[#1E3A8A] text-white">
                         {linkedMenu ? `${linkedMenu.menuCode} • ${linkedMenu.dayName}` : 'Menu Harian'}
                       </span>
                       <span className="font-semibold text-slate-700 dark:text-slate-200">
                         Tanggal Olah: {formatIndonesianDate(activeCooking.date)} • Pukul {activeCooking.time}
                       </span>
-                      <span className="px-2 py-0.5 rounded-md font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 text-[11px]">
+                      <span className="px-2 py-0.5 rounded-md font-semibold bg-emerald-100 text-[#0D9488] dark:bg-emerald-950/60 dark:text-emerald-300 text-[11px]">
                         Terhubung PLOG ({liveItemEntries.length} Item Menu)
                       </span>
                     </div>
@@ -1700,7 +1700,7 @@ export const ProductionModule: React.FC = () => {
                 </div>
 
                 {/* Grid Kartu Per-Item Menu: Suhu & Foto Item Menu (Sinkron PLOG) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch">
                   {liveItemEntries.map((item, idx) => {
                     const isColdOrFresh = item.categoryKey === 'fruit' || item.categoryKey === 'milkOrExtra';
                     const safeS1Temp = typeof item.temp === 'number' && Number.isFinite(item.temp) ? item.temp : 0;
@@ -1711,7 +1711,7 @@ export const ProductionModule: React.FC = () => {
                     return (
                       <div
                         key={item.id}
-                        className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between gap-3"
+                        className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full gap-3"
                       >
                         <div>
                           <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -1726,10 +1726,10 @@ export const ProductionModule: React.FC = () => {
                             <span
                               className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${
                                 isColdOrFresh
-                                  ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                  ? 'bg-sky-100 text-[#1E3A8A] dark:bg-sky-950 dark:text-sky-300'
                                   : isSafeTemp
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                  ? 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  : 'bg-rose-100 text-[#E11D48] dark:bg-rose-950 dark:text-rose-300'
                               }`}
                             >
                               {isColdOrFresh ? 'Segar / Pendamping' : isSafeTemp ? 'CCP Aman ≥75°C' : 'Perlu Pantau'}
@@ -1739,20 +1739,20 @@ export const ProductionModule: React.FC = () => {
                           {/* Suhu Matang Item Menu */}
                           <div className="flex items-center justify-between pt-2">
                             <div>
-                              <span className="text-[10px] text-slate-500 block">Suhu Matang Sesi 1</span>
+                              <span className="text-[10px] text-slate-600 dark:text-slate-400 block">Suhu Matang Sesi 1</span>
                               <span
-                                className={`text-2xl font-black font-mono ${
+                                className={`text-2xl font-bold tracking-tight font-mono tabular-nums ${
                                   isColdOrFresh
-                                    ? 'text-blue-900 dark:text-sky-400'
+                                    ? 'text-[#1E3A8A] dark:text-sky-400'
                                     : isSafeTemp
-                                    ? 'text-emerald-600'
-                                    : 'text-rose-600'
+                                    ? 'text-[#0D9488]'
+                                    : 'text-[#E11D48]'
                                 }`}
                               >
                                 {safeS1Temp}°C
                               </span>
                             </div>
-                            <div className="text-right text-[10px] text-slate-500">
+                            <div className="text-right text-[10px] text-slate-600 dark:text-slate-400">
                               <span className="block font-semibold text-slate-700 dark:text-slate-300">
                                 {item.equipment || 'Peralatan Standar'}
                               </span>
@@ -1771,13 +1771,13 @@ export const ProductionModule: React.FC = () => {
                         {item.photoUrl && (
                           <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                             <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                              <Camera className="w-3 h-3 text-amber-600" /> Foto Item Menu ({item.itemName}):
+                              <Camera className="w-3 h-3 text-[#D97706]" /> Foto Item Menu ({item.itemName}):
                             </span>
                             <img
                               src={item.photoUrl}
                               alt={`Foto ${item.itemName}`}
                               onClick={() => setViewPhotoUrl(item.photoUrl || null)}
-                              className="w-full h-32 object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                              className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                             />
                           </div>
                         )}
@@ -1817,14 +1817,14 @@ export const ProductionModule: React.FC = () => {
       {/* TAB C: DIVISI PEMORSIAN                                   */}
       {/* ========================================================= */}
       {activeTab === 'portioning' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+        <div key="portioning" className="space-y-6 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Scale className="w-4 h-4 text-purple-600" />
+                <Scale className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
                 Standar Gramasi & Suhu Pemorsian Ompreng MBG
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 Sampling gramasi porsi kecil vs porsi besar, suhu makanan saat di-seal, dan dokumentasi foto ompreng lengkap.
               </p>
             </div>
@@ -1835,14 +1835,14 @@ export const ProductionModule: React.FC = () => {
                   onClick={() => openEditPortioningModal(portioningRecords[0])}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition shadow-xs"
                 >
-                  <Camera className="w-3.5 h-3.5 text-emerald-600" />
+                  <Camera className="w-3.5 h-3.5 text-[#0D9488]" />
                   <span>Edit Foto &amp; Suhu Aktif</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={openNewPortioningModal}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 <Plus className="w-4 h-4" />
                 <span>Input Data & Foto Pemorsian</span>
@@ -1852,30 +1852,30 @@ export const ProductionModule: React.FC = () => {
 
           {/* Gramasi & Ompreng Photos */}
           {portioningRecords[0] && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
               {/* Porsi Kecil */}
-              <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-[#1E3A8A] dark:bg-sky-950 dark:text-sky-300">
                       Porsi Kecil (PAUD/TK & SD Kelas 1-3)
                     </span>
-                    <span className="text-xs font-mono text-slate-500">
+                    <span className="text-xs font-mono text-slate-600 dark:text-slate-400">
                       Target: 380 - 410 gram
                     </span>
                   </div>
 
                   <div className="flex items-baseline gap-2 mt-2">
-                    <span className="text-3xl font-black font-mono text-blue-900 dark:text-sky-400">
+                    <span className="text-3xl font-bold tracking-tight font-mono tabular-nums text-[#1E3A8A] dark:text-sky-400">
                       {portioningRecords[0].smallPortionWeightGrams}
                     </span>
                     <span className="text-sm font-bold text-slate-600 dark:text-slate-400">gram / ompreng</span>
-                    <span className="ml-auto text-xs font-bold text-emerald-600 flex items-center gap-1">
+                    <span className="ml-auto text-xs font-bold text-[#0D9488] flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" /> Presisi Sesuai Standar
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-500 mt-2">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
                     Rincian: Nasi 130g, Daging Ayam 55g, Tempe 35g, Sayur 65g, Buah Pisang 110g.
                   </p>
                 </div>
@@ -1890,7 +1890,7 @@ export const ProductionModule: React.FC = () => {
                       onClick={() =>
                         setPortioningCameraTarget({ portionType: 'small', targetMode: 'active_record' })
                       }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
                     >
                       <Camera className="w-3.5 h-3.5" />
                       <span>Live Camera Landscape</span>
@@ -1901,35 +1901,35 @@ export const ProductionModule: React.FC = () => {
                       src={portioningRecords[0].smallPortionPhoto}
                       alt="Foto Ompreng Porsi Kecil"
                       onClick={() => setViewPhotoUrl(portioningRecords[0].smallPortionPhoto || null)}
-                      className="w-full h-44 object-cover rounded-xl cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                      className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                     />
                   )}
                 </div>
               </div>
 
               {/* Porsi Besar */}
-              <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 text-[#1E3A8A] dark:bg-blue-950 dark:text-blue-300">
                       Porsi Besar (SD Kelas 4-6, SMP, SMA, Santri)
                     </span>
-                    <span className="text-xs font-mono text-slate-500">
+                    <span className="text-xs font-mono text-slate-600 dark:text-slate-400">
                       Target: 560 - 600 gram
                     </span>
                   </div>
 
                   <div className="flex items-baseline gap-2 mt-2">
-                    <span className="text-3xl font-black font-mono text-blue-900 dark:text-sky-400">
+                    <span className="text-3xl font-bold tracking-tight font-mono tabular-nums text-[#1E3A8A] dark:text-sky-400">
                       {portioningRecords[0].largePortionWeightGrams}
                     </span>
                     <span className="text-sm font-bold text-slate-600 dark:text-slate-400">gram / ompreng</span>
-                    <span className="ml-auto text-xs font-bold text-emerald-600 flex items-center gap-1">
+                    <span className="ml-auto text-xs font-bold text-[#0D9488] flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" /> Presisi Sesuai Standar
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-500 mt-2">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
                     Rincian: Nasi 200g, Daging Ayam 80g, Tempe 45g, Sayur 90g, Buah Pisang 120g.
                   </p>
                 </div>
@@ -1944,7 +1944,7 @@ export const ProductionModule: React.FC = () => {
                       onClick={() =>
                         setPortioningCameraTarget({ portionType: 'large', targetMode: 'active_record' })
                       }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
                     >
                       <Camera className="w-3.5 h-3.5" />
                       <span>Live Camera Landscape</span>
@@ -1955,7 +1955,7 @@ export const ProductionModule: React.FC = () => {
                       src={portioningRecords[0].largePortionPhoto}
                       alt="Foto Ompreng Porsi Besar"
                       onClick={() => setViewPhotoUrl(portioningRecords[0].largePortionPhoto || null)}
-                      className="w-full h-44 object-cover rounded-xl cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
+                      className="w-full aspect-[4/3] object-cover rounded-lg cursor-pointer hover:opacity-90 transition border border-slate-200 dark:border-slate-700"
                     />
                   )}
                 </div>
@@ -2017,7 +2017,7 @@ export const ProductionModule: React.FC = () => {
       {/* TAB D: DIVISI DISTRIBUSI & ARMADA                         */}
       {/* ========================================================= */}
       {activeTab === 'distribution' && (
-        <div className="space-y-6">
+        <div key="distribution" className="space-y-6 animate-fadeIn">
           {/* Sub Action Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
             <div>
@@ -2303,7 +2303,7 @@ export const ProductionModule: React.FC = () => {
       {/* TAB E: DIVISI CUCI OMPRENG & FOOD WASTE                   */}
       {/* ========================================================= */}
       {activeTab === 'washing' && (
-        <div className="space-y-6">
+        <div key="washing" className="space-y-6 animate-fadeIn">
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
             <div>
@@ -2482,7 +2482,7 @@ export const ProductionModule: React.FC = () => {
               <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
                 <thead className="bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="py-2.5 px-4">Tanggal & Waktu</th>
+                    <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-2.5 px-4 min-w-[155px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal & Waktu</th>
                     <th className="py-2.5 px-4 text-right">Nasi (kg)</th>
                     <th className="py-2.5 px-4 text-right">Hewani (kg)</th>
                     <th className="py-2.5 px-4 text-right">Nabati (kg)</th>
@@ -2510,8 +2510,8 @@ export const ProductionModule: React.FC = () => {
                     const customFields = getCustomTableFields(dynamicFormSchemas.production_waste_form);
 
                     return (
-                      <tr key={w.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                        <td className="py-2.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                      <tr key={w.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-2.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           {w.date} <span className="text-[11px] font-normal text-slate-500">({w.time})</span>
                         </td>
                         <td className="py-2.5 px-4 text-right font-mono">{w.wasteRice.weight}</td>
@@ -2578,13 +2578,13 @@ export const ProductionModule: React.FC = () => {
           </div>
 
           {/* Section: Rekap Bulanan Food Waste */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm">
             <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <span className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-blue-900 dark:text-sky-400" />
+                <Calendar className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
                 Rekapitulasi Bulanan Food Waste & Program Zero Waste SPPG
               </span>
-              <span className="text-xs font-mono text-emerald-600 font-bold">
+              <span className="text-xs font-mono text-[#0D9488] font-bold">
                 Target: &lt; 2.5% Food Waste BGN
               </span>
             </div>
@@ -2593,7 +2593,7 @@ export const ProductionModule: React.FC = () => {
               <table className="w-full text-xs text-left text-slate-600 dark:text-slate-300">
                 <thead className="bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="py-2.5 px-4">Bulan Operasional</th>
+                    <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-2.5 px-4 min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Bulan Operasional</th>
                     <th className="py-2.5 px-4 text-right">Total Porsi MBG</th>
                     <th className="py-2.5 px-4 text-right">Total Food Waste (kg)</th>
                     <th className="py-2.5 px-4 text-right">Rata-rata Sisa/Siswa</th>
@@ -2604,8 +2604,8 @@ export const ProductionModule: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-mono">
                   {monthlyWasteSummary.map((m, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="py-2.5 px-4 font-sans font-bold text-slate-900 dark:text-white">{m.month}</td>
+                    <tr key={idx} className="group hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-2.5 px-4 font-sans font-bold text-slate-900 dark:text-white shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{m.month}</td>
                       <td className="py-2.5 px-4 text-right">{formatNumber(m.totalPortions)}</td>
                       <td className="py-2.5 px-4 text-right">{m.totalWasteKg} kg</td>
                       <td className="py-2.5 px-4 text-right">{m.avgWastePerStudentGrams} gram</td>

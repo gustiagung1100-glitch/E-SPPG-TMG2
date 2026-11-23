@@ -661,7 +661,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Settings Responsive Pill Tabs */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar items-center gap-1.5 text-xs font-semibold pb-1 sm:pb-0">
           <button
             type="button"
             onClick={() => setActiveTab('profil')}
@@ -744,7 +744,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab 1: Organization Profile Form */}
       {activeTab === 'profil' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div key="profil" className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm animate-fadeIn">
           <form onSubmit={handleSaveProfile} className="space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
               <div>
@@ -917,7 +917,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab 1.5: Pengaturan Akses Login Web Manual (Admin Utama) */}
       {activeTab === 'access' && (
-        <div className="space-y-6">
+        <div key="access" className="space-y-6 animate-fadeIn">
           {/* Header Banner & Role Info */}
           <div className="bg-gradient-to-r from-[#071D49] via-[#102D63] to-[#164E91] text-white p-6 rounded-2xl border border-[#164E91]/60 shadow-md">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1154,7 +1154,7 @@ export const SettingsModule: React.FC = () => {
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
                   <tr>
-                    <th className="p-3">Pengguna & Catatan</th>
+                    <th className="p-3 sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Pengguna & Catatan</th>
                     <th className="p-3">Email Login</th>
                     <th className="p-3">Peran RBAC</th>
                     <th className="p-3 text-center">Metode Login</th>
@@ -1176,8 +1176,8 @@ export const SettingsModule: React.FC = () => {
                         u.isProtectedAdmin || isProtectedSuperAdminEmail(u.email)
                       );
                       return (
-                        <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                          <td className="p-3">
+                        <tr key={u.id} className="group hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                          <td className="p-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                             <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                               <span>{u.name}</span>
                               {isProtected && (
@@ -1716,7 +1716,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab 2: RBAC Matrix (Module Access + Action Permissions) */}
       {activeTab === 'rbac' && (
-        <div className="space-y-6">
+        <div key="rbac" className="space-y-6 animate-fadeIn">
           {/* Section A: Matriks Hak Akses Modul / Menu per Peran */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -1990,7 +1990,7 @@ export const SettingsModule: React.FC = () => {
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
                   <tr>
-                    <th className="p-3">Peran / Jabatan</th>
+                    <th className="p-3 sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Peran / Jabatan</th>
                     {actions.map(a => (
                       <th key={a.key} className="p-3 text-center">
                         {a.label}
@@ -2004,9 +2004,9 @@ export const SettingsModule: React.FC = () => {
                     return (
                       <tr
                         key={r}
-                        className={isAdmin ? 'bg-indigo-50/30 dark:bg-indigo-950/20 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}
+                        className={`group ${isAdmin ? 'bg-indigo-50/30 dark:bg-indigo-950/20 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}
                       >
-                        <td className="p-3 text-slate-900 dark:text-white">
+                        <td className={`p-3 sticky left-0 z-10 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)] text-slate-900 dark:text-white ${isAdmin ? 'bg-indigo-50/90 dark:bg-slate-900' : 'bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800'}`}>
                           <span>{r}</span>
                           {isAdmin && (
                             <span className="block text-[10px] text-indigo-600 font-normal">
@@ -2052,7 +2052,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab 3: Database & Backup (39 Koleksi Terhubung) */}
       {activeTab === 'database' && (
-        <div className="space-y-6">
+        <div key="database" className="space-y-6 animate-fadeIn">
           {/* Top Banner: Status Koneksi & Arsitektur */}
           <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 text-white p-6 rounded-2xl border border-blue-900 shadow-md">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2090,13 +2090,13 @@ export const SettingsModule: React.FC = () => {
           </div>
 
           {/* Quick Filter Categories */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar gap-2 pb-1 sm:pb-0">
             <button
               onClick={() => setSelectedCategory('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ${
                 selectedCategory === 'ALL'
-                  ? 'bg-blue-900 text-white'
-                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                  ? 'bg-[#1E3A8A] text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
               }`}
             >
               Semua Domain (39 Koleksi)
@@ -2105,10 +2105,10 @@ export const SettingsModule: React.FC = () => {
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ${
                   selectedCategory === cat
-                    ? 'bg-blue-900 text-white'
-                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                    ? 'bg-[#1E3A8A] text-white'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
                 }`}
               >
                 {cat}
@@ -2121,7 +2121,7 @@ export const SettingsModule: React.FC = () => {
             {filteredCategories.map(([catName, catData]) => (
               <div
                 key={catName}
-                className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col justify-between"
+                className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
               >
                 <div>
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 mb-3">
@@ -2182,7 +2182,7 @@ export const SettingsModule: React.FC = () => {
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
                   <tr>
-                    <th className="p-3">ID Dokumen</th>
+                    <th className="p-3 sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">ID Dokumen</th>
                     <th className="p-3">Koleksi</th>
                     <th className="p-3">Uraian Dokumen</th>
                     <th className="p-3">Dihapus Oleh & Waktu</th>
@@ -2199,8 +2199,8 @@ export const SettingsModule: React.FC = () => {
                     </tr>
                   ) : (
                     softDeletedRecords.map(item => (
-                      <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                        <td className="p-3 font-mono font-bold text-blue-900 dark:text-sky-400">
+                      <tr key={item.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="p-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)] font-mono font-bold text-[#1E3A8A] dark:text-sky-400">
                           {item.id}
                         </td>
                         <td className="p-3">
@@ -2341,7 +2341,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab 4: Security & Audit Log Trail */}
       {activeTab === 'audit' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div key="audit" className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm animate-fadeIn">
           <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 mb-4">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
@@ -2360,7 +2360,7 @@ export const SettingsModule: React.FC = () => {
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-50 dark:bg-slate-800 font-bold uppercase text-[11px] text-slate-600 dark:text-slate-300">
                 <tr>
-                  <th className="p-2.5">Waktu</th>
+                  <th className="p-2.5 sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Waktu</th>
                   <th className="p-2.5">Pengguna & Peran</th>
                   <th className="p-2.5 text-center">Tindakan</th>
                   <th className="p-2.5">Modul</th>
@@ -2380,8 +2380,8 @@ export const SettingsModule: React.FC = () => {
                     EXPORT: 'bg-sky-100 text-sky-800',
                   };
                   return (
-                    <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                      <td className="p-2.5 font-mono text-slate-500 whitespace-nowrap">
+                    <tr key={log.id} className="group hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="p-2.5 sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)] font-mono text-slate-500 whitespace-nowrap">
                         {log.timestamp}
                       </td>
                       <td className="p-2.5">
@@ -2414,7 +2414,7 @@ export const SettingsModule: React.FC = () => {
 
       {/* Tab Dashboard Layout & Granular Visibility Settings */}
       {activeTab === 'dashboard' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div key="dashboard" className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm animate-fadeIn">
           <DashboardSettingsPanel />
         </div>
       )}

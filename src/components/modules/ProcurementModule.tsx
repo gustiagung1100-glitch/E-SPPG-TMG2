@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
@@ -14,10 +15,12 @@ import {
 } from '../../lib/exportUtils';
 import {
   RABItem,
+  RABRincianItem,
   RABCategory,
   RABApprovalStatus,
   PurchaseOrder,
   PurchaseOrderItem,
+  POItemApprovalStatus,
   POStatusPLOK,
   QCStatusPLOK,
   QualityControlRecord,
@@ -76,9 +79,24 @@ import {
   ChevronRight,
   RefreshCw,
   Link2,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
 import { processMultipleImageUploads } from '../common/FacilityTempUploadSection';
-import { computeMenuAggregatedNeeds } from '../../lib/supplyChainSync';
+import {
+  computeMenuAggregatedNeeds,
+  resolveAutoRincianForRAB,
+  getDishLabelFromMenu,
+  formatIndonesianPeriodMonth,
+  shiftIsoDate,
+  resolveRABDistributionDate,
+  resolvePODistributionDate,
+  isOperasionalPOItem,
+  sortPOItemsBahanThenOperasional,
+  getPODisplayCategoryRank,
+  resolvePOItemApprovalStatus,
+  isMatchingMaterialNameShared,
+} from '../../lib/supplyChainSync';
 
 type SubModuleTab = 'rab' | 'purchase_order' | 'quality_control';
 
@@ -90,6 +108,10 @@ const getQCPhotos = (record: { photoUrl?: string; photoUrls?: string[] }): strin
 
 interface QCModalItemDraft {
   key: string;
+  poId: string;
+  poNumber: string;
+  supplierName: string;
+  categoryLabel: 'Bahan Pangan' | 'Operasional Harian';
   itemName: string;
   unit: string;
   orderedQuantity: number;
@@ -101,6 +123,7 @@ interface QCModalItemDraft {
   photoUrls: string[];
   notes: string;
   status: QCStatusPLOK;
+  existingQcId?: string;
 }
 
 const QCManualNotesCell: React.FC<{
@@ -155,6 +178,306 @@ const QCManualNotesCell: React.FC<{
   );
 };
 
+const areRincianLinesEqual = (a: RABRincianItem[], b: RABRincianItem[]): boolean => {
+  if (a.length !== b.length) return false;
+  return a.every((item, idx) => {
+    const other = b[idx];
+    return (
+      item.id === other.id &&
+      item.menuName === other.menuName &&
+      item.ingredientName === other.ingredientName &&
+      Number(item.quantity) === Number(other.quantity) &&
+      item.unit === other.unit
+    );
+  });
+};
+
+const RABRincianCell: React.FC<{
+  rab: RABItem;
+  autoRincian: RABRincianItem[];
+  canEdit: boolean;
+  onSaveRincian: (rab: RABItem, lines: RABRincianItem[], isManual: boolean) => Promise<void> | void;
+  onDeleteRABRow: (rab: RABItem) => void;
+  onSyncVolumeFromRincian: (rab: RABItem, totalQty: number, unit: string) => Promise<void> | void;
+}> = ({
+  rab,
+  autoRincian,
+  canEdit,
+  onSaveRincian,
+  onDeleteRABRow,
+  onSyncVolumeFromRincian,
+}) => {
+  const baselineLines = useMemo<RABRincianItem[]>(() => {
+    if (Array.isArray(rab.rincianItems) && (rab.rincianItems.length > 0 || rab.isRincianManual)) {
+      return rab.rincianItems;
+    }
+    return autoRincian;
+  }, [rab.rincianItems, rab.isRincianManual, autoRincian]);
+
+  const [draftLines, setDraftLines] = useState<RABRincianItem[]>(baselineLines);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  React.useEffect(() => {
+    setDraftLines(baselineLines);
+  }, [baselineLines]);
+
+  const isDirty = useMemo(
+    () => !areRincianLinesEqual(draftLines, baselineLines),
+    [draftLines, baselineLines]
+  );
+
+  const totalDraftQty = useMemo(
+    () => draftLines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0),
+    [draftLines]
+  );
+
+  const uniformUnit = useMemo(() => {
+    if (draftLines.length === 0) return rab.unit;
+    const first = (draftLines[0].unit || rab.unit || '').trim();
+    const allSame = draftLines.every(l => (l.unit || '').trim().toLowerCase() === first.toLowerCase());
+    return allSame ? first : null;
+  }, [draftLines, rab.unit]);
+
+  const handleFieldChange = (
+    idx: number,
+    field: 'menuName' | 'ingredientName' | 'quantity' | 'unit',
+    value: string
+  ) => {
+    setDraftLines(prev =>
+      prev.map((line, i) => {
+        if (i !== idx) return line;
+        if (field === 'quantity') {
+          const parsed = value === '' ? 0 : Math.max(0, Number(value));
+          return { ...line, quantity: Number.isFinite(parsed) ? parsed : 0, isManual: true };
+        }
+        return { ...line, [field]: value, isManual: true };
+      })
+    );
+  };
+
+  const handleAddLine = () => {
+    setDraftLines(prev => [
+      ...prev,
+      {
+        id: `rin-man-${rab.id}-${Date.now()}-${prev.length}`,
+        menuName: rab.sourceMenuLabel || rab.sourceMenuCode || '',
+        ingredientName: rab.itemName || '',
+        quantity: prev.length === 0 ? Number(rab.volume) || 0 : 0,
+        unit: rab.unit || 'kg',
+        sourceMenuId: rab.sourceMenuId,
+        sourceMenuCode: rab.sourceMenuCode,
+        isManual: true,
+      },
+    ]);
+  };
+
+  const handleRemoveLine = (idx: number) => {
+    setDraftLines(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleCommitSave = async () => {
+    const cleaned = draftLines.map(l => ({
+      ...l,
+      menuName: l.menuName.trim() || '-',
+      ingredientName: l.ingredientName.trim() || rab.itemName,
+      quantity: Math.max(0, Number(l.quantity) || 0),
+      unit: l.unit.trim() || rab.unit || 'kg',
+      isManual: true,
+    }));
+    await onSaveRincian(rab, cleaned, true);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1800);
+  };
+
+  const handleResetAuto = async () => {
+    setDraftLines(autoRincian);
+    await onSaveRincian(rab, autoRincian, false);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1800);
+  };
+
+  const isAutoSynced = !rab.isRincianManual && autoRincian.length > 0;
+
+  return (
+    <div className="min-w-[320px] max-w-[430px] space-y-2 py-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <div className="flex items-center gap-1.5">
+          {rab.isRincianManual ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              Diedit Manual
+            </span>
+          ) : isAutoSynced ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300">
+              <Link2 className="w-2.5 h-2.5" />
+              Otomatis PLOG
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              Input Rincian
+            </span>
+          )}
+          {savedFlash && !isDirty && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#0D9488]">
+              <CheckCircle2 className="w-3 h-3" /> Tersimpan
+            </span>
+          )}
+        </div>
+
+        {canEdit && rab.isRincianManual && autoRincian.length > 0 && (
+          <button
+            type="button"
+            onClick={handleResetAuto}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#0D9488] hover:bg-teal-50 dark:hover:bg-teal-950/60 transition"
+            title="Sinkronkan ulang rincian dari data Perencanaan Menu PLOG"
+          >
+            <RotateCcw className="w-2.5 h-2.5" />
+            <span>Ambil Ulang PLOG</span>
+          </button>
+        )}
+      </div>
+
+      {draftLines.length === 0 ? (
+        <div className="text-[11px] text-slate-400 italic bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2">
+          Belum ada rincian menu/bahan. Klik "+ Baris" untuk mengisi manual.
+        </div>
+      ) : (
+        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+          {draftLines.map((line, idx) => (
+            <div
+              key={line.id || idx}
+              className="p-2 rounded-lg border border-slate-200/90 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 space-y-1.5"
+            >
+              <div className="grid grid-cols-1 gap-1">
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-bold uppercase text-slate-400 w-11 shrink-0">
+                    Menu
+                  </span>
+                  <input
+                    type="text"
+                    value={line.menuName}
+                    disabled={!canEdit}
+                    list="rab-rincian-menu-options"
+                    onChange={e => handleFieldChange(idx, 'menuName', e.target.value)}
+                    placeholder="Kode & nama menu PLOG..."
+                    className="flex-1 min-w-0 px-2 py-1 text-[11px] font-semibold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-bold uppercase text-slate-400 w-11 shrink-0">
+                    Bahan
+                  </span>
+                  <input
+                    type="text"
+                    value={line.ingredientName}
+                    disabled={!canEdit}
+                    onChange={e => handleFieldChange(idx, 'ingredientName', e.target.value)}
+                    placeholder="Nama bahan..."
+                    className="flex-1 min-w-0 px-2 py-1 text-[11px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-bold uppercase text-slate-400 w-11 shrink-0">
+                    Qty
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={line.quantity}
+                    disabled={!canEdit}
+                    onChange={e => handleFieldChange(idx, 'quantity', e.target.value)}
+                    className="w-20 px-2 py-1 text-[11px] font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+                  />
+                  <input
+                    type="text"
+                    value={line.unit}
+                    disabled={!canEdit}
+                    list="rab-rincian-unit-options"
+                    onChange={e => handleFieldChange(idx, 'unit', e.target.value)}
+                    placeholder="Satuan"
+                    className="w-16 px-2 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+                  />
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveLine(idx)}
+                      className="ml-auto inline-flex items-center gap-0.5 px-1.5 py-1 rounded text-[10px] font-bold text-[#E11D48] hover:bg-rose-50 dark:hover:bg-rose-950/60 transition"
+                      title="Hapus baris rincian ini"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {draftLines.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-600 dark:text-slate-300 px-0.5">
+          <span className="font-mono font-bold">
+            Total Rincian: {formatNumber(totalDraftQty)} {uniformUnit || rab.unit}
+          </span>
+          {canEdit &&
+            uniformUnit &&
+            totalDraftQty > 0 &&
+            Math.abs(totalDraftQty - rab.volume) > 0.001 &&
+            totalDraftQty >= (rab.poCreatedQuantity || 0) && (
+              <button
+                type="button"
+                onClick={() => onSyncVolumeFromRincian(rab, totalDraftQty, uniformUnit)}
+                className="text-[10px] font-bold text-[#1E3A8A] dark:text-sky-300 hover:underline"
+                title="Terapkan total kuantiti rincian ke Volume RAB"
+              >
+                Terapkan ke Volume RAB
+              </button>
+            )}
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
+          <button
+            type="button"
+            onClick={handleAddLine}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition active:scale-[0.98]"
+          >
+            <Plus className="w-3 h-3" />
+            <span>Baris</span>
+          </button>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleCommitSave}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition active:scale-[0.98] ${
+                isDirty
+                  ? 'bg-[#1E3A8A] hover:bg-blue-900 text-white shadow-xs'
+                  : 'bg-blue-50 hover:bg-blue-100 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-300 border border-blue-200 dark:border-sky-800'
+              }`}
+              title="Simpan rincian RAB"
+            >
+              <Save className="w-3 h-3" />
+              <span>Simpan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteRABRow(rab)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition active:scale-[0.98]"
+              title="Hapus item RAB beserta rinciannya"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Hapus</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ProcurementModule: React.FC = () => {
   const {
     purchaseOrders,
@@ -171,12 +494,14 @@ export const ProcurementModule: React.FC = () => {
     rabItems,
     addRABItem,
     updateRABItem,
+    deleteRABItem,
     approveRABItem,
     syncCriticalInventoryToRAB,
     qualityControlRecords,
     addQualityControlRecord,
     updateQualityControlRecord,
     syncAllMenuNeedsToRAB,
+    syncDailyPOsFromRAB,
     menuItems,
     menuIngredientsMap,
     institutions,
@@ -221,8 +546,99 @@ export const ProcurementModule: React.FC = () => {
   const rabList = rabItems;
   const [filterRABCategory, setFilterRABCategory] = useState<string>('ALL');
   const [filterRABPeriod, setFilterRABPeriod] = useState<string>('ALL');
+  const [filterRABDate, setFilterRABDate] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return sortedDates[0] || 'ALL';
+  });
+  const [rabSearchTerm, setRabSearchTerm] = useState<string>('');
   const [isRABModalOpen, setIsRABModalOpen] = useState(false);
   const [selectedRAB, setSelectedRAB] = useState<RABItem | null>(null);
+  const [rabDeleteConfirm, setRabDeleteConfirm] = useState<RABItem | null>(null);
+  const [paguHarianConfig, setPaguHarianConfig] = useState<{
+    pangan?: number | null;
+    operasional?: number | null;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_rab_pagu_harian_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+  const [editingPaguTarget, setEditingPaguTarget] = useState<'pangan' | 'operasional' | null>(null);
+  const [paguDraftInput, setPaguDraftInput] = useState<string>('');
+  const [panganSasaranOverrides, setPanganSasaranOverrides] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('esppg_rab_pangan_sasaran_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+  const [panganRowDrafts, setPanganRowDrafts] = useState<
+    Record<
+      string,
+      {
+        itemName: string;
+        sasaran: number;
+        volume: number;
+        unit: string;
+        unitPrice: number;
+        totalBudget: number;
+      }
+    >
+  >({});
+  const [newPanganRows, setNewPanganRows] = useState<
+    Array<{
+      tempId: string;
+      itemName: string;
+      sasaran: number;
+      volume: number;
+      unit: string;
+      unitPrice: number;
+      totalBudget: number;
+    }>
+  >([]);
+  const [operasionalSasaranOverrides, setOperasionalSasaranOverrides] = useState<
+    Record<string, number>
+  >(() => {
+    try {
+      const saved = localStorage.getItem('esppg_rab_operasional_sasaran_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {};
+  });
+  const [operasionalRowDrafts, setOperasionalRowDrafts] = useState<
+    Record<
+      string,
+      {
+        itemName: string;
+        sasaran: number;
+        volume: number;
+        unit: string;
+        unitPrice: number;
+        totalBudget: number;
+      }
+    >
+  >({});
+  const [newOperasionalRows, setNewOperasionalRows] = useState<
+    Array<{
+      tempId: string;
+      itemName: string;
+      sasaran: number;
+      volume: number;
+      unit: string;
+      unitPrice: number;
+      totalBudget: number;
+    }>
+  >([]);
 
   // Form State for RAB
   const [rabForm, setRabForm] = useState<Omit<RABItem, 'id' | 'totalBudget'>>({
@@ -239,6 +655,8 @@ export const ProcurementModule: React.FC = () => {
     poCreatedQuantity: 0,
     poCreatedAmount: 0,
     sourceType: 'menu_planning',
+    rincianItems: [],
+    isRincianManual: false,
     customFields: {},
   });
 
@@ -247,6 +665,50 @@ export const ProcurementModule: React.FC = () => {
   const [selectedPOForDetail, setSelectedPOForDetail] = useState<PurchaseOrder | null>(null);
   const [isPODetailOpen, setIsPODetailOpen] = useState(false);
   const [filterPOStatus, setFilterPOStatus] = useState<string>('ALL');
+  const [filterPODate, setFilterPODate] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return sortedDates[0] || 'ALL';
+  });
+  const [filterPODateField, setFilterPODateField] = useState<
+    'distribution' | 'delivery' | 'issue' | 'any'
+  >('distribution');
+  const [isPODatePickerOpen, setIsPODatePickerOpen] = useState(false);
+  const [poCalendarMonth, setPoCalendarMonth] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return (sortedDates[0] || '2026-11-08').slice(0, 7);
+  });
+  const poDatePickerRef = React.useRef<HTMLDivElement | null>(null);
+  const [poSearchTerm, setPoSearchTerm] = useState<string>('');
+
+  React.useEffect(() => {
+    if (filterPODate !== 'ALL' && /^\d{4}-\d{2}-\d{2}$/.test(filterPODate)) {
+      setPoCalendarMonth(filterPODate.slice(0, 7));
+    }
+  }, [filterPODate]);
+
+  React.useEffect(() => {
+    if (!isPODatePickerOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (poDatePickerRef.current && !poDatePickerRef.current.contains(e.target as Node)) {
+        setIsPODatePickerOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsPODatePickerOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isPODatePickerOpen]);
 
   // Multi-item Form State for Creating PO strictly from Approved RAB
   interface PODraftLine {
@@ -257,7 +719,20 @@ export const ProcurementModule: React.FC = () => {
   }
   const [poDraftLines, setPoDraftLines] = useState<PODraftLine[]>([]);
   const [poFormSupplierName, setPoFormSupplierName] = useState<string>('');
-  const [poFormDeliveryDate, setPoFormDeliveryDate] = useState<string>('2026-11-10');
+  const [poFormDistributionDate, setPoFormDistributionDate] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return sortedDates[0] || '2026-11-08';
+  });
+  const [poFormDeliveryDate, setPoFormDeliveryDate] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return shiftIsoDate(sortedDates[0] || '2026-11-08', -1);
+  });
   const [poFormNotes, setPoFormNotes] = useState<string>('');
 
   // --- STATE SUBMODUL C: QUALITY CONTROL (QC) (Wajib Terikat Purchase Order) ---
@@ -265,7 +740,19 @@ export const ProcurementModule: React.FC = () => {
   const [isQCModalOpen, setIsQCModalOpen] = useState(false);
   const [editingQCRecord, setEditingQCRecord] = useState<QualityControlRecord | null>(null);
   const [selectedPOForQC, setSelectedPOForQC] = useState<PurchaseOrder | null>(null);
-  const [qcSelectedPOId, setQcSelectedPOId] = useState<string>('');
+  const [qcSelectedPOId, setQcSelectedPOId] = useState<string>('ALL_DAILY');
+  const [qcModalDate, setQcModalDate] = useState<string>(() => {
+    const sortedDates = [...menuItems]
+      .map(m => m.date)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return sortedDates[0] || '2026-11-08';
+  });
+  const [qcModalCategoryFilter, setQcModalCategoryFilter] = useState<
+    'ALL' | 'Bahan Pangan' | 'Operasional Harian'
+  >('ALL');
+  const [qcTabDateFilter, setQcTabDateFilter] = useState<string>('ALL');
+  const [qcPendingSyncReload, setQcPendingSyncReload] = useState(false);
   const [qcItemDrafts, setQcItemDrafts] = useState<QCModalItemDraft[]>([]);
   const [qcFormInspector, setQcFormInspector] = useState<string>(currentUser.name);
 
@@ -279,7 +766,63 @@ export const ProcurementModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   // FILTERED & COMPUTED VALUES
   // ---------------------------------------------------------------------------
-  // Filtered RAB
+  const plogMenuDays = useMemo(() => {
+    const byDate = new Map<
+      string,
+      {
+        date: string;
+        dayName: string;
+        menuCodes: string[];
+        menusSummary: string[];
+        ingredientCount: number;
+      }
+    >();
+    const sortedMenus = [...menuItems].sort((a, b) =>
+      (a.date || '').localeCompare(b.date || '')
+    );
+    sortedMenus.forEach(m => {
+      if (!m.date) return;
+      const ings = menuIngredientsMap[m.id] || m.ingredients || [];
+      const existing = byDate.get(m.date);
+      const dishSummary = [m.stapleFood, m.animalProtein, m.plantProtein, m.vegetable, m.fruit]
+        .filter(Boolean)
+        .join(', ');
+      if (existing) {
+        if (m.menuCode && !existing.menuCodes.includes(m.menuCode)) {
+          existing.menuCodes.push(m.menuCode);
+        }
+        if (dishSummary) existing.menusSummary.push(dishSummary);
+        existing.ingredientCount += ings.length;
+      } else {
+        byDate.set(m.date, {
+          date: m.date,
+          dayName: m.dayName || '',
+          menuCodes: m.menuCode ? [m.menuCode] : [],
+          menusSummary: dishSummary ? [dishSummary] : [],
+          ingredientCount: ings.length,
+        });
+      }
+    });
+    return Array.from(byDate.values());
+  }, [menuItems, menuIngredientsMap]);
+
+  const activePlogDayInfo = useMemo(
+    () =>
+      filterRABDate !== 'ALL'
+        ? plogMenuDays.find(d => d.date === filterRABDate) || null
+        : null,
+    [plogMenuDays, filterRABDate]
+  );
+
+  const activePOPlogDayInfo = useMemo(
+    () =>
+      filterPODate !== 'ALL'
+        ? plogMenuDays.find(d => d.date === filterPODate) || null
+        : null,
+    [plogMenuDays, filterPODate]
+  );
+
+  // Filtered RAB (base category + period)
   const filteredRAB = useMemo(() => {
     return rabList.filter(item => {
       const matchCat = filterRABCategory === 'ALL' || item.category === filterRABCategory;
@@ -312,6 +855,706 @@ export const ProcurementModule: React.FC = () => {
       remainingBudget,
     };
   }, [rabList]);
+
+  const rabTargetMetrics = useMemo(() => {
+    const smallSasaran = institutions.reduce((sum, inst) => sum + (inst.smallPortions || 0), 0);
+    const largeSasaran = institutions.reduce((sum, inst) => sum + (inst.largePortions || 0), 0);
+    const totalSasaran = smallSasaran + largeSasaran || sppgConfig.dailyPortionTarget || 2850;
+    const defaultPaguPangan =
+      smallSasaran + largeSasaran > 0
+        ? smallSasaran * (sppgConfig.smallPortionBudget || 8000) +
+          largeSasaran * (sppgConfig.largePortionBudget || 10000)
+        : totalSasaran * (sppgConfig.largePortionBudget || 10000);
+    const defaultPaguOperasional = totalSasaran * 3000;
+    const paguPangan =
+      typeof paguHarianConfig.pangan === 'number' && Number.isFinite(paguHarianConfig.pangan)
+        ? paguHarianConfig.pangan
+        : defaultPaguPangan;
+    const paguOperasional =
+      typeof paguHarianConfig.operasional === 'number' &&
+      Number.isFinite(paguHarianConfig.operasional)
+        ? paguHarianConfig.operasional
+        : defaultPaguOperasional;
+    return {
+      totalSasaran,
+      defaultPaguPangan,
+      defaultPaguOperasional,
+      paguPangan,
+      paguOperasional,
+    };
+  }, [institutions, sppgConfig, paguHarianConfig]);
+
+  const searchedRAB = useMemo(() => {
+    const term = rabSearchTerm.trim().toLowerCase();
+    if (!term) return filteredRAB;
+    return filteredRAB.filter(item => {
+      const baseMatch = [
+        item.budgetCode,
+        item.itemName,
+        item.category,
+        item.notes,
+        item.periodMonth,
+        item.sourceMenuCode,
+        item.sourceMenuLabel,
+      ].some(v => v && String(v).toLowerCase().includes(term));
+      if (baseMatch) return true;
+      return (item.rincianItems || []).some(
+        r =>
+          (r.menuName && r.menuName.toLowerCase().includes(term)) ||
+          (r.ingredientName && r.ingredientName.toLowerCase().includes(term))
+      );
+    });
+  }, [filteredRAB, rabSearchTerm]);
+
+  // RAB Bahan Pangan strictly follows daily filter (filterRABDate) when a date is chosen
+  const rabPanganRows = useMemo(() => {
+    const allPangan = searchedRAB.filter(r => r.category === 'RAB Bahan Pangan');
+    if (filterRABDate === 'ALL') return allPangan;
+    return allPangan.filter(r => r.planDate === filterRABDate);
+  }, [searchedRAB, filterRABDate]);
+
+  // RAB Operasional filters by date when exact-date entries exist; otherwise keeps active operational items visible
+  const rabOperasionalResult = useMemo(() => {
+    const allOps = searchedRAB.filter(r => r.category === 'RAB Operasional');
+    if (filterRABDate === 'ALL') {
+      return { rows: allOps, isFallbackAllDates: false };
+    }
+    const exactDateOps = allOps.filter(r => r.planDate === filterRABDate);
+    if (exactDateOps.length > 0) {
+      return { rows: exactDateOps, isFallbackAllDates: false };
+    }
+    return { rows: allOps, isFallbackAllDates: allOps.length > 0 };
+  }, [searchedRAB, filterRABDate]);
+  const rabOperasionalRows = rabOperasionalResult.rows;
+
+  const dynamicRabColumns = useMemo(
+    () =>
+      buildDynamicTableColumns<RABItem>(dynamicFormSchemas.procurement_rab_form, (url, label) =>
+        setViewGallery({ urls: [url], index: 0, title: label })
+      ),
+    [dynamicFormSchemas.procurement_rab_form]
+  );
+
+  const savePaguHarian = (target: 'pangan' | 'operasional', value: number | null) => {
+    const next = { ...paguHarianConfig, [target]: value };
+    setPaguHarianConfig(next);
+    try {
+      localStorage.setItem('esppg_rab_pagu_harian_v1', JSON.stringify(next));
+    } catch {
+      // ignore storage failure
+    }
+    setEditingPaguTarget(null);
+    addToast(
+      'success',
+      'Pagu Harian Diperbarui',
+      value === null
+        ? 'Pagu harga belanja harian dikembalikan ke perhitungan standar BGN.'
+        : `Pagu harga belanja harian diperbarui menjadi ${formatRupiah(value)}.`
+    );
+  };
+
+  const panganIngredientOptions = useMemo(() => {
+    const names = new Set<string>();
+    masterBahan.forEach(b => {
+      if (b.name && b.name.trim()) names.add(b.name.trim());
+    });
+    inventory.forEach(inv => {
+      if (inv.name && inv.name.trim()) names.add(inv.name.trim());
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'id'));
+  }, [masterBahan, inventory]);
+
+  const getPanganEffectiveRowValues = (row: RABItem) => {
+    const draft = panganRowDrafts[row.id];
+    const savedSasaran =
+      typeof panganSasaranOverrides[row.id] === 'number' &&
+      Number.isFinite(panganSasaranOverrides[row.id])
+        ? panganSasaranOverrides[row.id]
+        : typeof panganSasaranOverrides[row.budgetCode] === 'number' &&
+          Number.isFinite(panganSasaranOverrides[row.budgetCode])
+        ? panganSasaranOverrides[row.budgetCode]
+        : rabTargetMetrics.totalSasaran;
+    if (draft) return draft;
+    return {
+      itemName: row.itemName,
+      sasaran: savedSasaran,
+      volume: Number(row.volume) || 0,
+      unit: row.unit,
+      unitPrice: Number(row.unitPrice) || 0,
+      totalBudget: Number(row.totalBudget) || 0,
+    };
+  };
+
+  const updatePanganCellDraft = (
+    row: RABItem,
+    field: 'itemName' | 'sasaran' | 'volume' | 'unit' | 'unitPrice' | 'totalBudget',
+    rawValue: string
+  ) => {
+    setPanganRowDrafts(prev => {
+      const currentSavedSasaran =
+        typeof panganSasaranOverrides[row.id] === 'number' &&
+        Number.isFinite(panganSasaranOverrides[row.id])
+          ? panganSasaranOverrides[row.id]
+          : typeof panganSasaranOverrides[row.budgetCode] === 'number' &&
+            Number.isFinite(panganSasaranOverrides[row.budgetCode])
+          ? panganSasaranOverrides[row.budgetCode]
+          : rabTargetMetrics.totalSasaran;
+      const base = prev[row.id] || {
+        itemName: row.itemName,
+        sasaran: currentSavedSasaran,
+        volume: Number(row.volume) || 0,
+        unit: row.unit,
+        unitPrice: Number(row.unitPrice) || 0,
+        totalBudget: Number(row.totalBudget) || 0,
+      };
+
+      const next = { ...base };
+      if (field === 'itemName') {
+        next.itemName = rawValue;
+      } else if (field === 'unit') {
+        next.unit = rawValue;
+      } else if (field === 'sasaran') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        next.sasaran = Number.isFinite(parsed) ? parsed : 0;
+      } else if (field === 'volume') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safeVol = Number.isFinite(parsed) ? parsed : 0;
+        next.volume = safeVol;
+        next.totalBudget = safeVol * next.unitPrice;
+      } else if (field === 'unitPrice') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safePrice = Number.isFinite(parsed) ? parsed : 0;
+        next.unitPrice = safePrice;
+        next.totalBudget = next.volume * safePrice;
+      } else if (field === 'totalBudget') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safeTotal = Number.isFinite(parsed) ? parsed : 0;
+        next.totalBudget = safeTotal;
+        if (next.volume > 0) {
+          next.unitPrice = Math.round(safeTotal / next.volume);
+        }
+      }
+
+      return { ...prev, [row.id]: next };
+    });
+  };
+
+  const handleSavePanganRowDraft = async (row: RABItem) => {
+    const draft = panganRowDrafts[row.id];
+    if (!draft) return;
+
+    const cleanVolume = Math.max(0, Number(draft.volume) || 0);
+    const cleanPrice = Math.max(0, Number(draft.unitPrice) || 0);
+    const cleanTotal = Math.max(0, Number(draft.totalBudget) || 0);
+    const syncedUnitPrice =
+      cleanVolume > 0 && Math.abs(cleanVolume * cleanPrice - cleanTotal) > 0.5
+        ? cleanTotal / cleanVolume
+        : cleanPrice;
+
+    const nextSasaranOverrides = {
+      ...panganSasaranOverrides,
+      [row.id]: Math.max(0, Number(draft.sasaran) || 0),
+    };
+    setPanganSasaranOverrides(nextSasaranOverrides);
+    try {
+      localStorage.setItem('esppg_rab_pangan_sasaran_v1', JSON.stringify(nextSasaranOverrides));
+    } catch {
+      // ignore storage error
+    }
+
+    await updateRABItem(row.id, {
+      itemName: draft.itemName.trim() || row.itemName,
+      volume: cleanVolume,
+      unit: draft.unit.trim() || row.unit || 'kg',
+      unitPrice: syncedUnitPrice,
+      totalBudget: cleanTotal,
+    });
+
+    setPanganRowDrafts(prev => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+  };
+
+  const handleDiscardPanganRowDraft = (rowId: string) => {
+    setPanganRowDrafts(prev => {
+      const next = { ...prev };
+      delete next[rowId];
+      return next;
+    });
+  };
+
+  const handleAddNewPanganRow = () => {
+    setNewPanganRows(prev => [
+      ...prev,
+      {
+        tempId: `new-pangan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        itemName: '',
+        sasaran: rabTargetMetrics.totalSasaran,
+        volume: 0,
+        unit: 'kg',
+        unitPrice: 0,
+        totalBudget: 0,
+      },
+    ]);
+  };
+
+  const updateNewPanganRowField = (
+    tempId: string,
+    field: 'itemName' | 'sasaran' | 'volume' | 'unit' | 'unitPrice' | 'totalBudget',
+    rawValue: string
+  ) => {
+    setNewPanganRows(prev =>
+      prev.map(row => {
+        if (row.tempId !== tempId) return row;
+        const next = { ...row };
+        if (field === 'itemName') {
+          next.itemName = rawValue;
+          const normalized = rawValue.trim().toLowerCase();
+          if (normalized && next.unitPrice === 0) {
+            const matchedMaster = masterBahan.find(
+              b => b.name.trim().toLowerCase() === normalized
+            );
+            if (matchedMaster) {
+              if (!next.unit || next.unit === 'kg') {
+                next.unit = matchedMaster.unit || next.unit || 'kg';
+              }
+              const refPrice = matchedMaster.actualPrice || matchedMaster.referencePrice || 0;
+              if (refPrice > 0) {
+                next.unitPrice = refPrice;
+                next.totalBudget = next.volume * refPrice;
+              }
+            }
+          }
+        } else if (field === 'unit') {
+          next.unit = rawValue;
+        } else if (field === 'sasaran') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          next.sasaran = Number.isFinite(parsed) ? parsed : 0;
+        } else if (field === 'volume') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safeVol = Number.isFinite(parsed) ? parsed : 0;
+          next.volume = safeVol;
+          next.totalBudget = safeVol * next.unitPrice;
+        } else if (field === 'unitPrice') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safePrice = Number.isFinite(parsed) ? parsed : 0;
+          next.unitPrice = safePrice;
+          next.totalBudget = next.volume * safePrice;
+        } else if (field === 'totalBudget') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safeTotal = Number.isFinite(parsed) ? parsed : 0;
+          next.totalBudget = safeTotal;
+          if (next.volume > 0) {
+            next.unitPrice = Math.round(safeTotal / next.volume);
+          }
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleSaveNewPanganRow = async (tempId: string, seqOffset = 0): Promise<boolean> => {
+    const draft = newPanganRows.find(r => r.tempId === tempId);
+    if (!draft) return false;
+
+    const cleanName = draft.itemName.trim();
+    if (!cleanName) {
+      addToast(
+        'warning',
+        'Nama Bahan Wajib Diisi',
+        'Isi nama bahan pangan pada kolom BAHAN PANGAN sebelum menyimpan baris.'
+      );
+      return false;
+    }
+
+    const targetPlanDate =
+      filterRABDate !== 'ALL'
+        ? filterRABDate
+        : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+    const compactDate = targetPlanDate.replace(/-/g, '').slice(2);
+    const usedCodes = new Set(rabList.map(r => r.budgetCode));
+    let seqIdx = rabList.length + 1 + seqOffset;
+    let budgetCode = `RAB-BP-${compactDate}-${String(seqIdx).padStart(3, '0')}`;
+    while (usedCodes.has(budgetCode)) {
+      seqIdx += 1;
+      budgetCode = `RAB-BP-${compactDate}-${String(seqIdx).padStart(3, '0')}`;
+    }
+
+    const cleanVolume = Math.max(0, Number(draft.volume) || 0);
+    const cleanPrice = Math.max(0, Number(draft.unitPrice) || 0);
+    const cleanTotal = Math.max(0, Number(draft.totalBudget) || 0);
+    const syncedUnitPrice =
+      cleanVolume > 0 && Math.abs(cleanVolume * cleanPrice - cleanTotal) > 0.5
+        ? cleanTotal / cleanVolume
+        : cleanPrice;
+    const cleanSasaran = Math.max(0, Number(draft.sasaran) || 0);
+
+    if (cleanSasaran !== rabTargetMetrics.totalSasaran) {
+      const nextSasaranOverrides = {
+        ...panganSasaranOverrides,
+        [budgetCode]: cleanSasaran,
+      };
+      setPanganSasaranOverrides(nextSasaranOverrides);
+      try {
+        localStorage.setItem('esppg_rab_pangan_sasaran_v1', JSON.stringify(nextSasaranOverrides));
+      } catch {
+        // ignore storage error
+      }
+    }
+
+    await addRABItem({
+      category: 'RAB Bahan Pangan',
+      budgetCode,
+      planDate: targetPlanDate,
+      periodMonth: formatIndonesianPeriodMonth(targetPlanDate),
+      itemName: cleanName,
+      volume: cleanVolume,
+      unit: draft.unit.trim() || 'kg',
+      unitPrice: syncedUnitPrice,
+      notes: 'Ditambahkan langsung pada Rincian Daftar Belanja (RAB) Bahan Pangan',
+      status: 'Menunggu Persetujuan',
+      poCreatedQuantity: 0,
+      poCreatedAmount: 0,
+      sourceType: 'manual',
+      rincianItems: [],
+      isRincianManual: false,
+      isManualOverride: true,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form),
+    });
+
+    setNewPanganRows(prev => prev.filter(r => r.tempId !== tempId));
+    return true;
+  };
+
+  const handleRemoveNewPanganRow = (tempId: string) => {
+    setNewPanganRows(prev => prev.filter(r => r.tempId !== tempId));
+  };
+
+  const handleSaveAllPanganDrafts = async () => {
+    const draftIds = Object.keys(panganRowDrafts);
+    for (const id of draftIds) {
+      const row = rabPanganRows.find(r => r.id === id) || rabList.find(r => r.id === id);
+      if (row) {
+        await handleSavePanganRowDraft(row);
+      }
+    }
+    const pendingNewRows = [...newPanganRows];
+    for (let i = 0; i < pendingNewRows.length; i++) {
+      await handleSaveNewPanganRow(pendingNewRows[i].tempId, i);
+    }
+  };
+
+  const operasionalItemOptions = useMemo(() => {
+    const names = new Set<string>();
+    defaultRABItems
+      .filter(r => r.category === 'RAB Operasional')
+      .forEach(r => {
+        if (r.itemName && r.itemName.trim()) names.add(r.itemName.trim());
+      });
+    rabList
+      .filter(r => r.category === 'RAB Operasional')
+      .forEach(r => {
+        if (r.itemName && r.itemName.trim()) names.add(r.itemName.trim());
+      });
+    return Array.from(names).sort((a, b) => a.localeCompare(b, 'id'));
+  }, [rabList]);
+
+  const getOperasionalEffectiveRowValues = (row: RABItem) => {
+    const draft = operasionalRowDrafts[row.id];
+    const savedSasaran =
+      typeof operasionalSasaranOverrides[row.id] === 'number' &&
+      Number.isFinite(operasionalSasaranOverrides[row.id])
+        ? operasionalSasaranOverrides[row.id]
+        : typeof operasionalSasaranOverrides[row.budgetCode] === 'number' &&
+          Number.isFinite(operasionalSasaranOverrides[row.budgetCode])
+        ? operasionalSasaranOverrides[row.budgetCode]
+        : rabTargetMetrics.totalSasaran;
+    if (draft) return draft;
+    return {
+      itemName: row.itemName,
+      sasaran: savedSasaran,
+      volume: Number(row.volume) || 0,
+      unit: row.unit,
+      unitPrice: Number(row.unitPrice) || 0,
+      totalBudget: Number(row.totalBudget) || 0,
+    };
+  };
+
+  const updateOperasionalCellDraft = (
+    row: RABItem,
+    field: 'itemName' | 'sasaran' | 'volume' | 'unit' | 'unitPrice' | 'totalBudget',
+    rawValue: string
+  ) => {
+    setOperasionalRowDrafts(prev => {
+      const currentSavedSasaran =
+        typeof operasionalSasaranOverrides[row.id] === 'number' &&
+        Number.isFinite(operasionalSasaranOverrides[row.id])
+          ? operasionalSasaranOverrides[row.id]
+          : typeof operasionalSasaranOverrides[row.budgetCode] === 'number' &&
+            Number.isFinite(operasionalSasaranOverrides[row.budgetCode])
+          ? operasionalSasaranOverrides[row.budgetCode]
+          : rabTargetMetrics.totalSasaran;
+      const base = prev[row.id] || {
+        itemName: row.itemName,
+        sasaran: currentSavedSasaran,
+        volume: Number(row.volume) || 0,
+        unit: row.unit,
+        unitPrice: Number(row.unitPrice) || 0,
+        totalBudget: Number(row.totalBudget) || 0,
+      };
+
+      const next = { ...base };
+      if (field === 'itemName') {
+        next.itemName = rawValue;
+      } else if (field === 'unit') {
+        next.unit = rawValue;
+      } else if (field === 'sasaran') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        next.sasaran = Number.isFinite(parsed) ? parsed : 0;
+      } else if (field === 'volume') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safeVol = Number.isFinite(parsed) ? parsed : 0;
+        next.volume = safeVol;
+        next.totalBudget = safeVol * next.unitPrice;
+      } else if (field === 'unitPrice') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safePrice = Number.isFinite(parsed) ? parsed : 0;
+        next.unitPrice = safePrice;
+        next.totalBudget = next.volume * safePrice;
+      } else if (field === 'totalBudget') {
+        const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+        const safeTotal = Number.isFinite(parsed) ? parsed : 0;
+        next.totalBudget = safeTotal;
+        if (next.volume > 0) {
+          next.unitPrice = Math.round(safeTotal / next.volume);
+        }
+      }
+
+      return { ...prev, [row.id]: next };
+    });
+  };
+
+  const handleSaveOperasionalRowDraft = async (row: RABItem) => {
+    const draft = operasionalRowDrafts[row.id];
+    if (!draft) return;
+
+    const cleanVolume = Math.max(0, Number(draft.volume) || 0);
+    const cleanPrice = Math.max(0, Number(draft.unitPrice) || 0);
+    const cleanTotal = Math.max(0, Number(draft.totalBudget) || 0);
+    const syncedUnitPrice =
+      cleanVolume > 0 && Math.abs(cleanVolume * cleanPrice - cleanTotal) > 0.5
+        ? cleanTotal / cleanVolume
+        : cleanPrice;
+
+    const nextSasaranOverrides = {
+      ...operasionalSasaranOverrides,
+      [row.id]: Math.max(0, Number(draft.sasaran) || 0),
+    };
+    setOperasionalSasaranOverrides(nextSasaranOverrides);
+    try {
+      localStorage.setItem(
+        'esppg_rab_operasional_sasaran_v1',
+        JSON.stringify(nextSasaranOverrides)
+      );
+    } catch {
+      // ignore storage error
+    }
+
+    await updateRABItem(row.id, {
+      itemName: draft.itemName.trim() || row.itemName,
+      volume: cleanVolume,
+      unit: draft.unit.trim() || row.unit || 'paket',
+      unitPrice: syncedUnitPrice,
+      totalBudget: cleanTotal,
+    });
+
+    setOperasionalRowDrafts(prev => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+  };
+
+  const handleDiscardOperasionalRowDraft = (rowId: string) => {
+    setOperasionalRowDrafts(prev => {
+      const next = { ...prev };
+      delete next[rowId];
+      return next;
+    });
+  };
+
+  const handleAddNewOperasionalRow = () => {
+    setNewOperasionalRows(prev => [
+      ...prev,
+      {
+        tempId: `new-ops-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        itemName: '',
+        sasaran: rabTargetMetrics.totalSasaran,
+        volume: 0,
+        unit: 'paket',
+        unitPrice: 0,
+        totalBudget: 0,
+      },
+    ]);
+  };
+
+  const updateNewOperasionalRowField = (
+    tempId: string,
+    field: 'itemName' | 'sasaran' | 'volume' | 'unit' | 'unitPrice' | 'totalBudget',
+    rawValue: string
+  ) => {
+    setNewOperasionalRows(prev =>
+      prev.map(row => {
+        if (row.tempId !== tempId) return row;
+        const next = { ...row };
+        if (field === 'itemName') {
+          next.itemName = rawValue;
+          const normalized = rawValue.trim().toLowerCase();
+          if (normalized && next.unitPrice === 0) {
+            const matchedOps =
+              rabList.find(
+                r =>
+                  r.category === 'RAB Operasional' &&
+                  r.itemName.trim().toLowerCase() === normalized
+              ) ||
+              defaultRABItems.find(
+                r =>
+                  r.category === 'RAB Operasional' &&
+                  r.itemName.trim().toLowerCase() === normalized
+              );
+            if (matchedOps) {
+              if (!next.unit || next.unit === 'paket') {
+                next.unit = matchedOps.unit || next.unit || 'paket';
+              }
+              if (matchedOps.unitPrice > 0) {
+                next.unitPrice = matchedOps.unitPrice;
+                next.totalBudget = next.volume * matchedOps.unitPrice;
+              }
+            }
+          }
+        } else if (field === 'unit') {
+          next.unit = rawValue;
+        } else if (field === 'sasaran') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          next.sasaran = Number.isFinite(parsed) ? parsed : 0;
+        } else if (field === 'volume') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safeVol = Number.isFinite(parsed) ? parsed : 0;
+          next.volume = safeVol;
+          next.totalBudget = safeVol * next.unitPrice;
+        } else if (field === 'unitPrice') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safePrice = Number.isFinite(parsed) ? parsed : 0;
+          next.unitPrice = safePrice;
+          next.totalBudget = next.volume * safePrice;
+        } else if (field === 'totalBudget') {
+          const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
+          const safeTotal = Number.isFinite(parsed) ? parsed : 0;
+          next.totalBudget = safeTotal;
+          if (next.volume > 0) {
+            next.unitPrice = Math.round(safeTotal / next.volume);
+          }
+        }
+        return next;
+      })
+    );
+  };
+
+  const handleSaveNewOperasionalRow = async (tempId: string, seqOffset = 0): Promise<boolean> => {
+    const draft = newOperasionalRows.find(r => r.tempId === tempId);
+    if (!draft) return false;
+
+    const cleanName = draft.itemName.trim();
+    if (!cleanName) {
+      addToast(
+        'warning',
+        'Uraian Operasional Wajib Diisi',
+        'Isi uraian biaya operasional pada kolom URAIAN sebelum menyimpan baris.'
+      );
+      return false;
+    }
+
+    const targetPlanDate =
+      filterRABDate !== 'ALL'
+        ? filterRABDate
+        : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+    const compactDate = targetPlanDate.replace(/-/g, '').slice(2);
+    const usedCodes = new Set(rabList.map(r => r.budgetCode));
+    let seqIdx = rabList.length + 1 + seqOffset;
+    let budgetCode = `RAB-OP-${compactDate}-${String(seqIdx).padStart(3, '0')}`;
+    while (usedCodes.has(budgetCode)) {
+      seqIdx += 1;
+      budgetCode = `RAB-OP-${compactDate}-${String(seqIdx).padStart(3, '0')}`;
+    }
+
+    const cleanVolume = Math.max(0, Number(draft.volume) || 0);
+    const cleanPrice = Math.max(0, Number(draft.unitPrice) || 0);
+    const cleanTotal = Math.max(0, Number(draft.totalBudget) || 0);
+    const syncedUnitPrice =
+      cleanVolume > 0 && Math.abs(cleanVolume * cleanPrice - cleanTotal) > 0.5
+        ? cleanTotal / cleanVolume
+        : cleanPrice;
+    const cleanSasaran = Math.max(0, Number(draft.sasaran) || 0);
+
+    if (cleanSasaran !== rabTargetMetrics.totalSasaran) {
+      const nextSasaranOverrides = {
+        ...operasionalSasaranOverrides,
+        [budgetCode]: cleanSasaran,
+      };
+      setOperasionalSasaranOverrides(nextSasaranOverrides);
+      try {
+        localStorage.setItem(
+          'esppg_rab_operasional_sasaran_v1',
+          JSON.stringify(nextSasaranOverrides)
+        );
+      } catch {
+        // ignore storage error
+      }
+    }
+
+    await addRABItem({
+      category: 'RAB Operasional',
+      budgetCode,
+      planDate: targetPlanDate,
+      periodMonth: formatIndonesianPeriodMonth(targetPlanDate),
+      itemName: cleanName,
+      volume: cleanVolume,
+      unit: draft.unit.trim() || 'paket',
+      unitPrice: syncedUnitPrice,
+      notes: 'Ditambahkan langsung pada Rincian Daftar Belanja (RAB) Operasional',
+      status: 'Menunggu Persetujuan',
+      poCreatedQuantity: 0,
+      poCreatedAmount: 0,
+      sourceType: 'manual',
+      rincianItems: [],
+      isRincianManual: false,
+      isManualOverride: true,
+      customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form),
+    });
+
+    setNewOperasionalRows(prev => prev.filter(r => r.tempId !== tempId));
+    return true;
+  };
+
+  const handleRemoveNewOperasionalRow = (tempId: string) => {
+    setNewOperasionalRows(prev => prev.filter(r => r.tempId !== tempId));
+  };
+
+  const handleSaveAllOperasionalDrafts = async () => {
+    const draftIds = Object.keys(operasionalRowDrafts);
+    for (const id of draftIds) {
+      const row = rabOperasionalRows.find(r => r.id === id) || rabList.find(r => r.id === id);
+      if (row) {
+        await handleSaveOperasionalRowDraft(row);
+      }
+    }
+    const pendingNewRows = [...newOperasionalRows];
+    for (let i = 0; i < pendingNewRows.length; i++) {
+      await handleSaveNewOperasionalRow(pendingNewRows[i].tempId, i);
+    }
+  };
 
   // Approved RAB items eligible for PO creation
   const approvedRABItems = useMemo(() => {
@@ -400,23 +1643,261 @@ export const ProcurementModule: React.FC = () => {
     });
   }, [purchaseOrders]);
 
-  // Filtered POs
+  const qcAvailableDates = useMemo(() => {
+    const dateSet = new Set<string>();
+    plogMenuDays.forEach(d => {
+      if (d.date) dateSet.add(d.date);
+    });
+    eligiblePOsForQC.forEach(po => {
+      const dist = resolvePODistributionDate(po, rabList, menuItems);
+      const effectiveDate = dist || po.deliveryDate || po.date;
+      if (effectiveDate) dateSet.add(effectiveDate);
+    });
+    return Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+  }, [plogMenuDays, eligiblePOsForQC, rabList, menuItems]);
+
+  const getPOsForDailyQCDate = React.useCallback(
+    (targetDate: string): PurchaseOrder[] => {
+      if (!targetDate || targetDate === 'ALL') return eligiblePOsForQC;
+      const matched = eligiblePOsForQC.filter(po => {
+        const distDate = resolvePODistributionDate(po, rabList, menuItems);
+        if (distDate) return distDate === targetDate;
+        return po.deliveryDate === targetDate || po.date === targetDate;
+      });
+      return [...matched].sort((a, b) => {
+        const rankA = getPODisplayCategoryRank(a, rabList);
+        const rankB = getPODisplayCategoryRank(b, rabList);
+        if (rankA !== rankB) return rankA - rankB;
+        return (a.poNumber || '').localeCompare(b.poNumber || '');
+      });
+    },
+    [eligiblePOsForQC, rabList, menuItems]
+  );
+
+  const qcDailyPOs = useMemo(
+    () => getPOsForDailyQCDate(qcModalDate),
+    [getPOsForDailyQCDate, qcModalDate]
+  );
+
+  const filteredQCLogList = useMemo(() => {
+    if (qcTabDateFilter === 'ALL') return qcList;
+    const poIdsForDate = new Set(
+      purchaseOrders
+        .filter(po => {
+          const dist = resolvePODistributionDate(po, rabList, menuItems);
+          return dist
+            ? dist === qcTabDateFilter
+            : po.deliveryDate === qcTabDateFilter || po.date === qcTabDateFilter;
+        })
+        .map(po => po.id)
+    );
+    return qcList.filter(
+      q => poIdsForDate.has(q.poId) || (q.inspectedAt || '').startsWith(qcTabDateFilter)
+    );
+  }, [qcList, qcTabDateFilter, purchaseOrders, rabList, menuItems]);
+
+  // Filtered POs (berdasarkan status, tanggal spesifik & basis tanggal PO)
+  const matchesPODateByField = React.useCallback(
+    (
+      po: PurchaseOrder,
+      targetDate: string,
+      field: 'distribution' | 'delivery' | 'issue' | 'any'
+    ): boolean => {
+      const distDate = resolvePODistributionDate(po, rabList, menuItems);
+      if (field === 'distribution') return distDate === targetDate;
+      if (field === 'delivery') return po.deliveryDate === targetDate;
+      if (field === 'issue') return po.date === targetDate;
+      return (
+        distDate === targetDate ||
+        po.deliveryDate === targetDate ||
+        po.date === targetDate
+      );
+    },
+    [rabList, menuItems]
+  );
+
+  const poDateCountsMap = useMemo(() => {
+    const map = new Map<string, number>();
+    const statusMatched =
+      filterPOStatus === 'ALL'
+        ? purchaseOrders
+        : purchaseOrders.filter(p => p.status === filterPOStatus);
+    for (const po of statusMatched) {
+      const dates = new Set<string>();
+      const distDate = resolvePODistributionDate(po, rabList, menuItems);
+      if (filterPODateField === 'distribution' && distDate) dates.add(distDate);
+      else if (filterPODateField === 'delivery' && po.deliveryDate) dates.add(po.deliveryDate);
+      else if (filterPODateField === 'issue' && po.date) dates.add(po.date);
+      else if (filterPODateField === 'any') {
+        if (distDate) dates.add(distDate);
+        if (po.deliveryDate) dates.add(po.deliveryDate);
+        if (po.date) dates.add(po.date);
+      }
+      dates.forEach(d => map.set(d, (map.get(d) || 0) + 1));
+    }
+    return map;
+  }, [purchaseOrders, filterPOStatus, filterPODateField, rabList, menuItems]);
+
+  const poCalendarCells = useMemo(() => {
+    const match = /^(\d{4})-(\d{2})$/.exec(poCalendarMonth);
+    const year = match ? Number(match[1]) : 2026;
+    const month = match ? Number(match[2]) - 1 : 10;
+    const firstDayUtc = new Date(Date.UTC(year, month, 1));
+    const startOffset = firstDayUtc.getUTCDay(); // 0 = Minggu
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const cells: Array<{ iso: string; day: number; inMonth: boolean }> = [];
+
+    for (let i = startOffset - 1; i >= 0; i--) {
+      const dt = new Date(Date.UTC(year, month, -i));
+      cells.push({
+        iso: dt.toISOString().slice(0, 10),
+        day: dt.getUTCDate(),
+        inMonth: false,
+      });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(Date.UTC(year, month, d));
+      cells.push({
+        iso: dt.toISOString().slice(0, 10),
+        day: d,
+        inMonth: true,
+      });
+    }
+    while (cells.length % 7 !== 0) {
+      const last = cells[cells.length - 1];
+      const nextIso = shiftIsoDate(last.iso, 1);
+      cells.push({
+        iso: nextIso,
+        day: Number(nextIso.slice(8, 10)),
+        inMonth: false,
+      });
+    }
+    return {
+      monthLabel: formatIndonesianPeriodMonth(`${poCalendarMonth}-01`),
+      cells,
+    };
+  }, [poCalendarMonth]);
+
+  const shiftPOCalendarMonth = (deltaMonths: number) => {
+    const match = /^(\d{4})-(\d{2})$/.exec(poCalendarMonth);
+    const year = match ? Number(match[1]) : 2026;
+    const month = match ? Number(match[2]) - 1 : 10;
+    const next = new Date(Date.UTC(year, month + deltaMonths, 1));
+    setPoCalendarMonth(next.toISOString().slice(0, 7));
+  };
+
   const filteredPOs = useMemo(() => {
-    if (filterPOStatus === 'ALL') return purchaseOrders;
-    return purchaseOrders.filter(p => p.status === filterPOStatus);
-  }, [purchaseOrders, filterPOStatus]);
+    return purchaseOrders.filter(p => {
+      const matchStatus = filterPOStatus === 'ALL' || p.status === filterPOStatus;
+      if (!matchStatus) return false;
+      if (filterPODate === 'ALL') return true;
+      return matchesPODateByField(p, filterPODate, filterPODateField);
+    });
+  }, [purchaseOrders, filterPOStatus, filterPODate, filterPODateField, matchesPODateByField]);
+
+  const searchedPOs = useMemo(() => {
+    const term = poSearchTerm.trim().toLowerCase();
+    const matched = !term
+      ? filteredPOs
+      : filteredPOs.filter(po => {
+          const baseMatch = [po.poNumber, po.supplierName, po.status, po.qcStatus, po.notes].some(
+            v => v && String(v).toLowerCase().includes(term)
+          );
+          if (baseMatch) return true;
+          return (po.items || []).some(it => {
+            const linkedRab = rabList.find(r => r.id === (it.rabId || po.rabId));
+            return (
+              (it.itemName && it.itemName.toLowerCase().includes(term)) ||
+              (linkedRab?.budgetCode && linkedRab.budgetCode.toLowerCase().includes(term)) ||
+              (linkedRab?.category && linkedRab.category.toLowerCase().includes(term))
+            );
+          });
+        });
+
+    // Otomatiskan urutan: Nama Bahan Pangan terlebih dahulu, lalu dilanjutkan Nama Bahan Operasional
+    return [...matched].sort((a, b) => {
+      const rankA = getPODisplayCategoryRank(a, rabList);
+      const rankB = getPODisplayCategoryRank(b, rabList);
+      if (rankA !== rankB) return rankA - rankB;
+      const distA = resolvePODistributionDate(a, rabList, menuItems);
+      const distB = resolvePODistributionDate(b, rabList, menuItems);
+      if (distA !== distB) return distA.localeCompare(distB);
+      return (a.poNumber || '').localeCompare(b.poNumber || '');
+    });
+  }, [filteredPOs, poSearchTerm, rabList, menuItems]);
 
   // ---------------------------------------------------------------------------
   // HANDLERS: SUBMODUL A (RAB)
   // ---------------------------------------------------------------------------
+  const getAutoRincianForRAB = (rab: RABItem): RABRincianItem[] =>
+    resolveAutoRincianForRAB(rab, menuPlannedNeeds.perMenuItems, menuItems);
+
+  const getEffectiveRincianForRAB = (rab: RABItem): RABRincianItem[] => {
+    if (Array.isArray(rab.rincianItems) && (rab.rincianItems.length > 0 || rab.isRincianManual)) {
+      return rab.rincianItems;
+    }
+    return getAutoRincianForRAB(rab);
+  };
+
+  const handleSaveInlineRincian = async (
+    rab: RABItem,
+    lines: RABRincianItem[],
+    isManual: boolean
+  ) => {
+    await updateRABItem(rab.id, {
+      rincianItems: lines,
+      isRincianManual: isManual,
+    });
+  };
+
+  const handleSyncVolumeFromRincian = async (rab: RABItem, totalQty: number, unit: string) => {
+    if (totalQty < (rab.poCreatedQuantity || 0)) {
+      addToast(
+        'warning',
+        'Volume Tidak Valid',
+        `Volume RAB tidak boleh lebih kecil dari realisasi PO (${formatNumber(rab.poCreatedQuantity || 0)} ${rab.unit}).`
+      );
+      return;
+    }
+    await updateRABItem(rab.id, {
+      volume: totalQty,
+      unit: unit || rab.unit,
+    });
+  };
+
+  const handleRequestDeleteRAB = (rab: RABItem) => {
+    if ((rab.poCreatedQuantity || 0) > 0) {
+      addToast(
+        'warning',
+        'Item RAB Sudah Memiliki PO',
+        `${rab.budgetCode} sudah memiliki realisasi PO sebesar ${formatNumber(rab.poCreatedQuantity || 0)} ${rab.unit}. Batalkan atau selesaikan PO terkait terlebih dahulu jika ingin menghapus RAB.`
+      );
+      return;
+    }
+    setRabDeleteConfirm(rab);
+  };
+
+  const handleConfirmDeleteRAB = async () => {
+    if (!rabDeleteConfirm) return;
+    await deleteRABItem(rabDeleteConfirm.id);
+    if (selectedRAB?.id === rabDeleteConfirm.id) {
+      setIsRABModalOpen(false);
+      setSelectedRAB(null);
+    }
+    setRabDeleteConfirm(null);
+  };
+
   const handleOpenCreateRAB = () => {
     setSelectedRAB(null);
     const nextNum = rabList.length + 1;
+    const targetPlanDate =
+      filterRABDate !== 'ALL' ? filterRABDate : plogMenuDays[0]?.date || '2026-11-08';
+    const compactDate = targetPlanDate.replace(/-/g, '').slice(2);
     setRabForm({
       category: 'RAB Bahan Pangan',
-      budgetCode: `RAB-BP-2026-11-00${nextNum}`,
-      planDate: '2026-11-08',
-      periodMonth: 'November 2026',
+      budgetCode: `RAB-BP-${compactDate}-${String(nextNum).padStart(3, '0')}`,
+      planDate: targetPlanDate,
+      periodMonth: formatIndonesianPeriodMonth(targetPlanDate),
       itemName: '',
       volume: 200,
       unit: 'kg',
@@ -425,7 +1906,9 @@ export const ProcurementModule: React.FC = () => {
       status: 'Menunggu Persetujuan',
       poCreatedQuantity: 0,
       poCreatedAmount: 0,
-      sourceType: 'menu_planning',
+      sourceType: 'manual',
+      rincianItems: [],
+      isRincianManual: false,
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form),
     });
     setIsRABModalOpen(true);
@@ -433,6 +1916,7 @@ export const ProcurementModule: React.FC = () => {
 
   const handleOpenEditRAB = (rab: RABItem) => {
     setSelectedRAB(rab);
+    const effectiveRincian = getEffectiveRincianForRAB(rab);
     setRabForm({
       category: rab.category,
       budgetCode: rab.budgetCode,
@@ -451,6 +1935,8 @@ export const ProcurementModule: React.FC = () => {
       sourceMenuId: rab.sourceMenuId,
       sourceMenuCode: rab.sourceMenuCode,
       sourceMenuLabel: rab.sourceMenuLabel,
+      rincianItems: effectiveRincian.map(l => ({ ...l })),
+      isRincianManual: Boolean(rab.isRincianManual),
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.procurement_rab_form, rab.customFields),
     });
     setIsRABModalOpen(true);
@@ -467,11 +1953,21 @@ export const ProcurementModule: React.FC = () => {
       return;
     }
 
+    const sanitizedRincian = (rabForm.rincianItems || []).map(l => ({
+      ...l,
+      menuName: l.menuName.trim() || '-',
+      ingredientName: l.ingredientName.trim() || rabForm.itemName,
+      quantity: Math.max(0, Number(l.quantity) || 0),
+      unit: l.unit.trim() || rabForm.unit || 'kg',
+    }));
+
     if (selectedRAB) {
       await updateRABItem(selectedRAB.id, {
         ...rabForm,
         volume: Number(rabForm.volume),
         unitPrice: Number(rabForm.unitPrice),
+        rincianItems: sanitizedRincian,
+        isRincianManual: Boolean(rabForm.isRincianManual),
         customFields: rabForm.customFields || {},
       });
     } else {
@@ -479,6 +1975,8 @@ export const ProcurementModule: React.FC = () => {
         ...rabForm,
         volume: Number(rabForm.volume),
         unitPrice: Number(rabForm.unitPrice),
+        rincianItems: sanitizedRincian,
+        isRincianManual: Boolean(rabForm.isRincianManual),
         customFields: rabForm.customFields || {},
       });
     }
@@ -495,6 +1993,21 @@ export const ProcurementModule: React.FC = () => {
     addToast('info', 'RAB Ditolak', 'Item anggaran ditolak dan dikembalikan untuk revisi.');
   };
 
+  const resolveDefaultPODatesForRAB = (rab?: RABItem) => {
+    const menuDatesSet = new Set(plogMenuDays.map(d => d.date));
+    const activeFilterDate = filterPODate !== 'ALL' ? filterPODate : '';
+    const rabResolved = resolveRABDistributionDate(rab, menuItems, '');
+    const distDate =
+      (rabResolved && menuDatesSet.has(rabResolved) ? rabResolved : '') ||
+      activeFilterDate ||
+      plogMenuDays[0]?.date ||
+      '2026-11-08';
+    return {
+      distributionDate: distDate,
+      deliveryDate: shiftIsoDate(distDate, -1),
+    };
+  };
+
   // Quick Action: Terbitkan PO langsung dari baris RAB yang disetujui
   const handleStartPOFromRAB = (rab: RABItem) => {
     const remQty = Math.max(0, rab.volume - (rab.poCreatedQuantity || 0));
@@ -506,6 +2019,7 @@ export const ProcurementModule: React.FC = () => {
       );
       return;
     }
+    const { distributionDate, deliveryDate } = resolveDefaultPODatesForRAB(rab);
     setPoDraftLines([
       {
         key: `po-line-${Date.now()}-0`,
@@ -515,8 +2029,11 @@ export const ProcurementModule: React.FC = () => {
       },
     ]);
     setPoFormSupplierName(masterSuppliers[0]?.name || 'PT Unggas Barokah Probolinggo');
-    setPoFormDeliveryDate('2026-11-10');
-    setPoFormNotes(`PO pengadaan bersumber dari kode anggaran ${rab.budgetCode}`);
+    setPoFormDistributionDate(distributionDate);
+    setPoFormDeliveryDate(deliveryDate);
+    setPoFormNotes(
+      `PO pengadaan bersumber dari kode anggaran ${rab.budgetCode} (menu ${distributionDate}, target kirim H-1: ${deliveryDate})`
+    );
     setIsCreatePOOpen(true);
   };
 
@@ -533,7 +2050,13 @@ export const ProcurementModule: React.FC = () => {
       return;
     }
     const targetList = eligibleRABItemsForPO.length > 0 ? eligibleRABItemsForPO : approvedRABItems;
-    const firstApproved = targetList[0];
+    const preferredForDay =
+      filterPODate !== 'ALL'
+        ? targetList.find(
+            r => resolveRABDistributionDate(r, menuItems, r.planDate) === filterPODate
+          )
+        : undefined;
+    const firstApproved = preferredForDay || targetList[0];
     const remQty = Math.max(0, firstApproved.volume - (firstApproved.poCreatedQuantity || 0));
     if (remQty <= 0) {
       addToast(
@@ -543,6 +2066,7 @@ export const ProcurementModule: React.FC = () => {
       );
       return;
     }
+    const { distributionDate, deliveryDate } = resolveDefaultPODatesForRAB(firstApproved);
     setPoDraftLines([
       {
         key: `po-line-${Date.now()}-0`,
@@ -552,8 +2076,11 @@ export const ProcurementModule: React.FC = () => {
       },
     ]);
     setPoFormSupplierName(masterSuppliers[0]?.name || 'Koperasi Tani Makmur Krejengan');
-    setPoFormDeliveryDate('2026-11-10');
-    setPoFormNotes(`PO diajukan berdasarkan otorisasi RAB ${firstApproved.budgetCode}`);
+    setPoFormDistributionDate(distributionDate);
+    setPoFormDeliveryDate(deliveryDate);
+    setPoFormNotes(
+      `PO diajukan berdasarkan otorisasi RAB ${firstApproved.budgetCode} (target kirim H-1 sebelum distribusi ${distributionDate})`
+    );
     setIsCreatePOOpen(true);
   };
 
@@ -606,14 +2133,14 @@ export const ProcurementModule: React.FC = () => {
       return;
     }
 
-    const poItems: PurchaseOrderItem[] = [];
+    const rawPOItems: PurchaseOrderItem[] = [];
     const linkedBudgetCodes: string[] = [];
     for (const line of poDraftLines) {
       const rab = rabList.find(r => r.id === line.rabId);
       if (!rab) continue;
       const qty = Number(line.quantity);
       const price = Number(line.unitPrice) || rab.unitPrice;
-      poItems.push({
+      rawPOItems.push({
         itemId: rab.id,
         itemName: rab.itemName,
         quantity: qty,
@@ -622,13 +2149,26 @@ export const ProcurementModule: React.FC = () => {
         subtotal: qty * price,
         rabId: rab.id,
         receivedQuantity: 0,
+        category: rab.category,
       });
       if (!linkedBudgetCodes.includes(rab.budgetCode)) {
         linkedBudgetCodes.push(rab.budgetCode);
       }
     }
 
-    if (poItems.length === 0) return;
+    if (rawPOItems.length === 0) return;
+
+    // Otomatis urutkan item PO: Bahan Pangan terlebih dahulu lalu Operasional
+    const poItems = sortPOItemsBahanThenOperasional(rawPOItems, {}, rabList);
+    const hasBahan = poItems.some(it => it.category === 'RAB Bahan Pangan');
+    const hasOps = poItems.some(it => it.category === 'RAB Operasional');
+    const poCategory: PurchaseOrder['poCategory'] =
+      hasBahan && hasOps ? 'Gabungan' : hasOps ? 'Operasional' : 'Bahan Pangan';
+
+    const effectiveDistDate =
+      poFormDistributionDate || shiftIsoDate(poFormDeliveryDate, 1);
+    const effectiveDeliveryDate =
+      poFormDeliveryDate || shiftIsoDate(effectiveDistDate, -1);
 
     const totalAmount = poItems.reduce((sum, it) => sum + it.subtotal, 0);
     const seq = String(purchaseOrders.length + 1).padStart(3, '0');
@@ -639,7 +2179,9 @@ export const ProcurementModule: React.FC = () => {
       date: new Date().toISOString().slice(0, 10),
       supplierName: poFormSupplierName || 'Supplier Mitra Terdaftar',
       supplierContact: '0812-3456-7890 (PIC Pengiriman)',
-      deliveryDate: poFormDeliveryDate,
+      deliveryDate: effectiveDeliveryDate,
+      distributionDate: effectiveDistDate,
+      poCategory,
       items: poItems,
       totalAmount,
       status: 'Menunggu persetujuan',
@@ -653,12 +2195,42 @@ export const ProcurementModule: React.FC = () => {
     addToast(
       'success',
       'PO Berhasil Diterbitkan',
-      `Nomor ${generatedPONumber} (${poItems.length} item, ${formatRupiah(totalAmount)}) berhasil diajukan dari RAB ${linkedBudgetCodes.join(', ')}.`
+      `Nomor ${generatedPONumber} (${poItems.length} item, ${formatRupiah(totalAmount)}) berhasil diajukan dengan target kirim H-1 (${formatIndonesianDate(effectiveDeliveryDate)}).`
     );
     setIsCreatePOOpen(false);
   };
 
   const handleUpdatePOStatus = async (poId: string, newStatus: POStatusPLOK) => {
+    const targetPO = purchaseOrders.find(p => p.id === poId);
+    if (newStatus === 'Disetujui' && targetPO) {
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      const approverLabel = `${currentUser.name} (${currentUser.role})`;
+      const nextItems = (targetPO.items || []).map(it => {
+        const currentItemStatus = resolvePOItemApprovalStatus(it, targetPO);
+        if (currentItemStatus === 'Ditolak') return { ...it, approvalStatus: 'Ditolak' as const };
+        return {
+          ...it,
+          approvalStatus: 'Disetujui' as const,
+          approvedBy: approverLabel,
+          approvedAt: stamp,
+        };
+      });
+      const nextTotal = nextItems
+        .filter(it => it.approvalStatus !== 'Ditolak')
+        .reduce(
+          (sum, it) => sum + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)),
+          0
+        );
+      await updatePurchaseOrder(poId, {
+        status: newStatus,
+        approvedBy: approverLabel,
+        items: nextItems,
+        totalAmount: nextTotal,
+      });
+      addToast('success', 'PO Disetujui', `Seluruh item aktif pada PO ${targetPO.poNumber} disetujui.`);
+      return;
+    }
+
     await updatePurchaseOrder(poId, {
       status: newStatus,
       approvedBy: newStatus === 'Disetujui' ? `${currentUser.name} (${currentUser.role})` : undefined,
@@ -666,40 +2238,180 @@ export const ProcurementModule: React.FC = () => {
     addToast('success', 'Status PO Diperbarui', `Status PO diubah menjadi: ${newStatus}`);
   };
 
-  // ---------------------------------------------------------------------------
-  // HANDLERS: SUBMODUL C (QUALITY CONTROL TERIKAT PO -> STOK GUDANG)
-  // ---------------------------------------------------------------------------
-  const buildDraftsFromPO = (po: PurchaseOrder): QCModalItemDraft[] => {
-    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
-    return (po.items || []).map((item, idx) => {
-      const lowerName = item.itemName.toLowerCase();
-      const isCold =
-        lowerName.includes('ayam') ||
-        lowerName.includes('daging') ||
-        lowerName.includes('ikan') ||
-        lowerName.includes('fillet');
+  const handleUpdatePOItemApproval = async (
+    po: PurchaseOrder,
+    targetSortedIndex: number,
+    decision: POItemApprovalStatus
+  ) => {
+    const rawItems =
+      po.items && po.items.length > 0
+        ? po.items
+        : [
+            {
+              itemId: po.id,
+              itemName: po.notes || 'Pesanan PO',
+              quantity: 1,
+              unit: 'paket',
+              unitPrice: po.totalAmount,
+              subtotal: po.totalAmount,
+              rabId: po.rabId,
+            },
+          ];
+    const sortedItems = sortPOItemsBahanThenOperasional(rawItems, po, rabList);
+    const targetItem = sortedItems[targetSortedIndex];
+    if (!targetItem) return;
+
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const approverLabel = `${currentUser.name} (${currentUser.role})`;
+    const nextItems: PurchaseOrderItem[] = sortedItems.map((it, idx) => {
+      if (idx === targetSortedIndex) {
+        return {
+          ...it,
+          approvalStatus: decision,
+          approvedBy: decision === 'Menunggu persetujuan' ? undefined : approverLabel,
+          approvedAt: decision === 'Menunggu persetujuan' ? undefined : stamp,
+        };
+      }
       return {
-        key: `draft-${Date.now()}-${idx}`,
-        itemName: item.itemName,
-        unit: item.unit || 'kg',
-        orderedQuantity: item.quantity,
-        receivedQuantity: item.quantity,
-        condition: 'Baik',
-        qualityGrade: 'Grade A (Sangat Baik)',
-        receivingTemp: isCold ? 2.5 : 24.0,
-        expiryDate: defaultExp,
-        photoUrls: [],
-        notes: '',
-        status: 'Diterima',
+        ...it,
+        approvalStatus: resolvePOItemApprovalStatus(it, po),
       };
     });
+
+    const approvedCount = nextItems.filter(it => it.approvalStatus === 'Disetujui').length;
+    const rejectedCount = nextItems.filter(it => it.approvalStatus === 'Ditolak').length;
+    const pendingCount = nextItems.filter(
+      it => it.approvalStatus === 'Menunggu persetujuan'
+    ).length;
+
+    let nextPOStatus: POStatusPLOK = po.status;
+    if (rejectedCount === nextItems.length) {
+      nextPOStatus = 'Ditolak';
+    } else if (pendingCount === 0 && approvedCount > 0) {
+      nextPOStatus = 'Disetujui';
+    } else {
+      nextPOStatus = 'Menunggu persetujuan';
+    }
+
+    const nextTotalAmount = nextItems
+      .filter(it => it.approvalStatus !== 'Ditolak')
+      .reduce(
+        (sum, it) => sum + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)),
+        0
+      );
+
+    await updatePurchaseOrder(po.id, {
+      items: nextItems,
+      totalAmount: nextTotalAmount,
+      status: nextPOStatus,
+      approvedBy: nextPOStatus === 'Disetujui' ? approverLabel : undefined,
+    });
+
+    const isOps = isOperasionalPOItem(targetItem, po, rabList);
+    const catLabel = isOps ? 'Operasional' : 'Bahan Pangan';
+    if (decision === 'Disetujui') {
+      addToast(
+        'success',
+        'Item PO Disetujui',
+        `${targetItem.itemName} (${catLabel}) disetujui. Status PO: ${nextPOStatus}.`
+      );
+    } else if (decision === 'Ditolak') {
+      addToast(
+        'warning',
+        'Item PO Ditolak',
+        `${targetItem.itemName} (${catLabel}) ditolak & kuota RAB dilepaskan.`
+      );
+    } else {
+      addToast(
+        'info',
+        'Status Item Direset',
+        `${targetItem.itemName} (${catLabel}) dikembalikan ke Menunggu Persetujuan.`
+      );
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // HANDLERS: SUBMODUL C (QUALITY CONTROL TERIKAT PO HARIAN -> STOK GUDANG)
+  // ---------------------------------------------------------------------------
+  const buildDraftsFromPOList = (poList: PurchaseOrder[]): QCModalItemDraft[] => {
+    const defaultExp = new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10);
+    const orderedPOs = [...poList].sort((a, b) => {
+      const rankA = getPODisplayCategoryRank(a, rabList);
+      const rankB = getPODisplayCategoryRank(b, rabList);
+      if (rankA !== rankB) return rankA - rankB;
+      return (a.poNumber || '').localeCompare(b.poNumber || '');
+    });
+
+    const drafts: QCModalItemDraft[] = [];
+    for (const po of orderedPOs) {
+      const sortedItems = sortPOItemsBahanThenOperasional(po.items || [], po, rabList);
+      sortedItems
+        .filter(item => resolvePOItemApprovalStatus(item, po) !== 'Ditolak')
+        .forEach((item, idx) => {
+          const isOps = isOperasionalPOItem(item, po, rabList);
+          const categoryLabel: QCModalItemDraft['categoryLabel'] = isOps
+            ? 'Operasional Harian'
+            : 'Bahan Pangan';
+          const existingQC = qualityControlRecords.find(
+            q =>
+              (q.poId === po.id || (q.poNumber && q.poNumber === po.poNumber)) &&
+              isMatchingMaterialNameShared(q.itemName, item.itemName)
+          );
+          const lowerName = item.itemName.toLowerCase();
+          const isCold =
+            !isOps &&
+            (lowerName.includes('ayam') ||
+              lowerName.includes('daging') ||
+              lowerName.includes('ikan') ||
+              lowerName.includes('fillet'));
+
+          drafts.push({
+            key: `draft-${po.id}-${idx}-${Date.now()}`,
+            poId: po.id,
+            poNumber: po.poNumber,
+            supplierName: po.supplierName,
+            categoryLabel,
+            itemName: item.itemName,
+            unit: item.unit || 'kg',
+            orderedQuantity: item.quantity,
+            receivedQuantity: existingQC ? existingQC.receivedQuantity : item.quantity,
+            condition: existingQC ? existingQC.condition : 'Baik',
+            qualityGrade: existingQC ? existingQC.qualityGrade : 'Grade A (Sangat Baik)',
+            receivingTemp: existingQC?.receivingTemp ?? (isCold ? 2.5 : 24.0),
+            expiryDate: existingQC?.expiryDate || defaultExp,
+            photoUrls: existingQC ? getQCPhotos(existingQC) : [],
+            notes: existingQC?.notes || '',
+            status: existingQC ? existingQC.status : 'Diterima',
+            existingQcId: existingQC?.id,
+          });
+        });
+    }
+
+    // Pastikan urutan akhir selalu menampilkan semua Bahan Pangan dahulu, lalu Operasional Harian
+    return drafts
+      .map((d, idx) => ({
+        d,
+        idx,
+        rank: d.categoryLabel === 'Operasional Harian' ? 1 : 0,
+      }))
+      .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx))
+      .map(entry => entry.d);
   };
 
   const handleOpenQCModal = (po: PurchaseOrder) => {
+    const resolvedDay =
+      resolvePODistributionDate(po, rabList, menuItems) ||
+      po.deliveryDate ||
+      po.date ||
+      qcModalDate;
+    const dayPOsRaw = getPOsForDailyQCDate(resolvedDay);
+    const dayPOs = dayPOsRaw.some(p => p.id === po.id) ? dayPOsRaw : [po, ...dayPOsRaw];
     setEditingQCRecord(null);
+    setQcModalDate(resolvedDay);
+    setQcSelectedPOId('ALL_DAILY');
+    setQcModalCategoryFilter('ALL');
     setSelectedPOForQC(po);
-    setQcSelectedPOId(po.id);
-    setQcItemDrafts(buildDraftsFromPO(po));
+    setQcItemDrafts(buildDraftsFromPOList(dayPOs));
     setQcFormInspector(currentUser.name);
     setIsQCModalOpen(true);
   };
@@ -707,6 +2419,9 @@ export const ProcurementModule: React.FC = () => {
   const handleOpenEditQCRecord = (record: QualityControlRecord) => {
     const linkedPO =
       purchaseOrders.find(p => p.id === record.poId || p.poNumber === record.poNumber) || null;
+    const isOps = linkedPO
+      ? isOperasionalPOItem({ itemName: record.itemName }, linkedPO, rabList)
+      : false;
     setEditingQCRecord(record);
     setSelectedPOForQC(linkedPO);
     setQcSelectedPOId(linkedPO?.id || record.poId);
@@ -714,6 +2429,10 @@ export const ProcurementModule: React.FC = () => {
     setQcItemDrafts([
       {
         key: `edit-${record.id}`,
+        poId: linkedPO?.id || record.poId,
+        poNumber: linkedPO?.poNumber || record.poNumber,
+        supplierName: linkedPO?.supplierName || record.supplierName,
+        categoryLabel: isOps ? 'Operasional Harian' : 'Bahan Pangan',
         itemName: record.itemName,
         unit: record.unit,
         orderedQuantity: record.orderedQuantity,
@@ -725,13 +2444,23 @@ export const ProcurementModule: React.FC = () => {
         photoUrls: getQCPhotos(record),
         notes: record.notes || '',
         status: record.status,
+        existingQcId: record.id,
       },
     ]);
     setIsQCModalOpen(true);
   };
 
   const handleOpenDirectQCModal = () => {
-    if (eligiblePOsForQC.length === 0) {
+    const preferredDate =
+      (filterPODate !== 'ALL'
+        ? filterPODate
+        : qcTabDateFilter !== 'ALL'
+        ? qcTabDateFilter
+        : '') ||
+      qcAvailableDates[0] ||
+      qcModalDate;
+    const dayPOs = getPOsForDailyQCDate(preferredDate);
+    if (eligiblePOsForQC.length === 0 && qcAvailableDates.length === 0) {
       addToast(
         'warning',
         'Belum Ada Purchase Order (PO)',
@@ -739,15 +2468,37 @@ export const ProcurementModule: React.FC = () => {
       );
       return;
     }
-    handleOpenQCModal(eligiblePOsForQC[0]);
+    setEditingQCRecord(null);
+    setQcModalDate(preferredDate);
+    setQcSelectedPOId('ALL_DAILY');
+    setQcModalCategoryFilter('ALL');
+    setSelectedPOForQC(dayPOs[0] || eligiblePOsForQC[0] || null);
+    setQcItemDrafts(buildDraftsFromPOList(dayPOs));
+    setQcFormInspector(currentUser.name);
+    setIsQCModalOpen(true);
+  };
+
+  const handleSelectQCDateInModal = (nextDate: string) => {
+    setQcModalDate(nextDate);
+    setQcSelectedPOId('ALL_DAILY');
+    setQcModalCategoryFilter('ALL');
+    const dayPOs = getPOsForDailyQCDate(nextDate);
+    setSelectedPOForQC(dayPOs[0] || null);
+    setQcItemDrafts(buildDraftsFromPOList(dayPOs));
   };
 
   const handleSelectPOSourceInQCModal = (val: string) => {
     setQcSelectedPOId(val);
+    if (val === 'ALL_DAILY') {
+      const dayPOs = getPOsForDailyQCDate(qcModalDate);
+      setSelectedPOForQC(dayPOs[0] || null);
+      setQcItemDrafts(buildDraftsFromPOList(dayPOs));
+      return;
+    }
     const foundPO = purchaseOrders.find(p => p.id === val);
     if (foundPO) {
       setSelectedPOForQC(foundPO);
-      setQcItemDrafts(buildDraftsFromPO(foundPO));
+      setQcItemDrafts(buildDraftsFromPOList([foundPO]));
     }
   };
 
@@ -798,9 +2549,29 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const handleReloadPOItemsInQC = () => {
+    if (qcSelectedPOId === 'ALL_DAILY') {
+      const dayPOs = getPOsForDailyQCDate(qcModalDate);
+      setSelectedPOForQC(dayPOs[0] || null);
+      setQcItemDrafts(buildDraftsFromPOList(dayPOs));
+      return;
+    }
     if (!selectedPOForQC) return;
-    setQcItemDrafts(buildDraftsFromPO(selectedPOForQC));
+    setQcItemDrafts(buildDraftsFromPOList([selectedPOForQC]));
   };
+
+  const handleSyncAndReloadQCModal = async () => {
+    setQcPendingSyncReload(true);
+    await syncDailyPOsFromRAB(qcModalDate);
+  };
+
+  React.useEffect(() => {
+    if (!qcPendingSyncReload || !isQCModalOpen || editingQCRecord) return;
+    const dayPOs = getPOsForDailyQCDate(qcModalDate);
+    setSelectedPOForQC(dayPOs[0] || null);
+    setQcSelectedPOId('ALL_DAILY');
+    setQcItemDrafts(buildDraftsFromPOList(dayPOs));
+    setQcPendingSyncReload(false);
+  }, [qcPendingSyncReload, purchaseOrders, isQCModalOpen, editingQCRecord, qcModalDate, getPOsForDailyQCDate]);
 
   const handleRemoveQCItemRow = (key: string) => {
     if (qcItemDrafts.length <= 1) return;
@@ -840,18 +2611,13 @@ export const ProcurementModule: React.FC = () => {
       return;
     }
 
-    if (!selectedPOForQC) {
-      addToast(
-        'error',
-        'Sumber PO Wajib Dipilih',
-        'Quality Control hanya dapat dilakukan terhadap Purchase Order (PO) yang sudah diterbitkan.'
-      );
-      return;
-    }
-
     const validDrafts = qcItemDrafts.filter(d => d.itemName.trim().length > 0);
     if (validDrafts.length === 0) {
-      addToast('error', 'Data Bahan Kosong', 'PO terpilih tidak memiliki item untuk diinspeksi.');
+      addToast(
+        'error',
+        'Data Bahan & Operasional Kosong',
+        'Tidak ada item Purchase Order harian pada tanggal terpilih untuk diinspeksi.'
+      );
       return;
     }
 
@@ -867,28 +2633,45 @@ export const ProcurementModule: React.FC = () => {
           draft.status === 'Lolos Penuh') &&
         receivedQty > 0;
 
-      const newQCRecord: Omit<QualityControlRecord, 'id' | 'inspectedAt'> = {
-        poId: selectedPOForQC.id,
-        poNumber: selectedPOForQC.poNumber,
-        supplierName: selectedPOForQC.supplierName,
-        itemName: draft.itemName.trim(),
-        orderedQuantity: orderedQty,
-        unit: draft.unit.trim() || 'kg',
-        receivedQuantity: receivedQty,
-        differenceQuantity: diffQty,
-        condition: draft.condition,
-        qualityGrade: draft.qualityGrade,
-        receivingTemp: Number(draft.receivingTemp),
-        expiryDate: draft.expiryDate,
-        photoUrl: draft.photoUrls[0] || undefined,
-        photoUrls: draft.photoUrls,
-        notes: draft.notes.trim(),
-        inspectorName: qcFormInspector,
-        status: draft.status,
-        inventoryAdded: shouldAddStock,
-      };
+      if (draft.existingQcId) {
+        await updateQualityControlRecord(draft.existingQcId, {
+          receivedQuantity: receivedQty,
+          differenceQuantity: diffQty,
+          condition: draft.condition,
+          qualityGrade: draft.qualityGrade,
+          receivingTemp: Number(draft.receivingTemp),
+          expiryDate: draft.expiryDate,
+          photoUrl: draft.photoUrls[0] || undefined,
+          photoUrls: draft.photoUrls,
+          notes: draft.notes.trim(),
+          inspectorName: qcFormInspector,
+          status: draft.status,
+          inventoryAdded: shouldAddStock,
+        });
+      } else {
+        const newQCRecord: Omit<QualityControlRecord, 'id' | 'inspectedAt'> = {
+          poId: draft.poId || selectedPOForQC?.id || '',
+          poNumber: draft.poNumber || selectedPOForQC?.poNumber || '-',
+          supplierName: draft.supplierName || selectedPOForQC?.supplierName || '-',
+          itemName: draft.itemName.trim(),
+          orderedQuantity: orderedQty,
+          unit: draft.unit.trim() || 'kg',
+          receivedQuantity: receivedQty,
+          differenceQuantity: diffQty,
+          condition: draft.condition,
+          qualityGrade: draft.qualityGrade,
+          receivingTemp: Number(draft.receivingTemp),
+          expiryDate: draft.expiryDate,
+          photoUrl: draft.photoUrls[0] || undefined,
+          photoUrls: draft.photoUrls,
+          notes: draft.notes.trim(),
+          inspectorName: qcFormInspector,
+          status: draft.status,
+          inventoryAdded: shouldAddStock,
+        };
 
-      await addQualityControlRecord(newQCRecord);
+        await addQualityControlRecord(newQCRecord);
+      }
     }
 
     setIsQCModalOpen(false);
@@ -897,12 +2680,30 @@ export const ProcurementModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   // EXPORTS
   // ---------------------------------------------------------------------------
+  const formatRincianExportText = (rab: RABItem): string => {
+    const lines = getEffectiveRincianForRAB(rab);
+    if (lines.length === 0) return '-';
+    return lines
+      .map(l => `${l.menuName}: ${l.ingredientName} (${formatNumber(l.quantity)} ${l.unit})`)
+      .join(' | ');
+  };
+
   const handleExportRABPDF = () => {
-    const baseHeaders = ['Kode Anggaran', 'Kategori', 'Nama Barang', 'Volume', 'Harga Satuan', 'Total Anggaran', 'Status', 'Sisa Kuota PO'];
-    const baseRows = filteredRAB.map(r => [
+    const exportRowsSource = [
+      ...(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Bahan Pangan'
+        ? rabPanganRows
+        : []),
+      ...(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Operasional'
+        ? rabOperasionalRows
+        : []),
+    ];
+    const baseHeaders = ['Kode Anggaran', 'Tanggal', 'Kategori', 'Nama Barang', 'Rincian RAB', 'Volume', 'Harga Satuan', 'Total Anggaran', 'Status', 'Sisa Kuota PO'];
+    const baseRows = exportRowsSource.map(r => [
       r.budgetCode,
+      r.planDate,
       r.category,
       r.itemName,
+      formatRincianExportText(r),
       `${formatNumber(r.volume)} ${r.unit}`,
       formatRupiah(r.unitPrice),
       formatRupiah(r.totalBudget),
@@ -913,14 +2714,19 @@ export const ProcurementModule: React.FC = () => {
       dynamicFormSchemas.procurement_rab_form,
       baseHeaders,
       baseRows,
-      filteredRAB
+      exportRowsSource
     );
+    const dateLabel =
+      filterRABDate !== 'ALL' ? `Tanggal ${formatIndonesianDate(filterRABDate)}` : 'Semua Tanggal';
     exportTableToPDF({
-      title: 'Rencana Anggaran Belanja (RAB) SPPG TMG2',
+      title: `Rencana Anggaran Belanja (RAB) Harian SPPG TMG2 — ${dateLabel}`,
       subtitle: 'Satuan Pelayanan Pemenuhan Gizi - Yayasan Hafshawaty Probolinggo',
       headers,
       rows,
-      fileName: 'RAB_Operasional_SPPG_TMG2',
+      fileName:
+        filterRABDate !== 'ALL'
+          ? `RAB_Harian_${filterRABDate}_SPPG_TMG2`
+          : 'RAB_Operasional_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.financeOfficer,
       signerRole: 'Pengawas Keuangan SPPG',
@@ -928,7 +2734,15 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const handleExportRABExcel = () => {
-    const data = filteredRAB.map(r =>
+    const exportRowsSource = [
+      ...(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Bahan Pangan'
+        ? rabPanganRows
+        : []),
+      ...(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Operasional'
+        ? rabOperasionalRows
+        : []),
+    ];
+    const data = exportRowsSource.map(r =>
       appendDynamicExcelFields(
         dynamicFormSchemas.procurement_rab_form,
         {
@@ -937,6 +2751,7 @@ export const ProcurementModule: React.FC = () => {
           'Periode': r.periodMonth,
           'Tanggal Rencana': r.planDate,
           'Nama Barang': r.itemName,
+          'Rincian RAB (Menu, Bahan, Kuantiti, Satuan)': formatRincianExportText(r),
           'Volume': r.volume,
           'Satuan': r.unit,
           'Harga Satuan (Rp)': r.unitPrice,
@@ -951,7 +2766,13 @@ export const ProcurementModule: React.FC = () => {
         r
       )
     );
-    exportToExcel(data, 'RAB_Operasional_Bahan_SPPG_TMG2', 'RAB SPPG');
+    exportToExcel(
+      data,
+      filterRABDate !== 'ALL'
+        ? `RAB_Harian_${filterRABDate}_SPPG_TMG2`
+        : 'RAB_Operasional_Bahan_SPPG_TMG2',
+      'RAB SPPG'
+    );
   };
 
   const handleExportQCPDF = () => {
@@ -970,7 +2791,7 @@ export const ProcurementModule: React.FC = () => {
         'Keterangan',
         'Status QC',
       ],
-      rows: qcList.map(q => {
+      rows: filteredQCLogList.map(q => {
         const diff = q.receivedQuantity - q.orderedQuantity;
         const diffText =
           diff === 0
@@ -989,7 +2810,10 @@ export const ProcurementModule: React.FC = () => {
           q.status,
         ];
       }),
-      fileName: 'Laporan_QC_Penerimaan_Bahan_SPPG_TMG2',
+      fileName:
+        qcTabDateFilter !== 'ALL'
+          ? `Laporan_QC_PO_${qcTabDateFilter}_SPPG_TMG2`
+          : 'Laporan_QC_Penerimaan_Bahan_SPPG_TMG2',
       sppgConfig,
       signerName: sppgConfig.nutritionOfficer,
       signerRole: 'Pengawas Gizi Dietisien SPPG',
@@ -997,7 +2821,7 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const handleExportQCExcel = () => {
-    const data = qcList.map(q => {
+    const data = filteredQCLogList.map(q => {
       const diff = q.receivedQuantity - q.orderedQuantity;
       const pct = q.orderedQuantity > 0 ? ((q.receivedQuantity / q.orderedQuantity) * 100).toFixed(1) : '0';
       const photos = getQCPhotos(q);
@@ -1024,14 +2848,14 @@ export const ProcurementModule: React.FC = () => {
   };
 
   const qcTotals = useMemo(() => {
-    const ordered = qcList.reduce((acc, q) => acc + (Number(q.orderedQuantity) || 0), 0);
-    const received = qcList.reduce((acc, q) => acc + (Number(q.receivedQuantity) || 0), 0);
+    const ordered = filteredQCLogList.reduce((acc, q) => acc + (Number(q.orderedQuantity) || 0), 0);
+    const received = filteredQCLogList.reduce((acc, q) => acc + (Number(q.receivedQuantity) || 0), 0);
     const diff = received - ordered;
     const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
-    const photoCount = qcList.filter(q => getQCPhotos(q).length > 0).length;
-    const totalPhotos = qcList.reduce((acc, q) => acc + getQCPhotos(q).length, 0);
+    const photoCount = filteredQCLogList.filter(q => getQCPhotos(q).length > 0).length;
+    const totalPhotos = filteredQCLogList.reduce((acc, q) => acc + getQCPhotos(q).length, 0);
     return { ordered, received, diff, pct, photoCount, totalPhotos };
-  }, [qcList]);
+  }, [filteredQCLogList]);
 
   return (
     <div className="space-y-6">
@@ -1069,12 +2893,16 @@ export const ProcurementModule: React.FC = () => {
             <>
               <button
                 type="button"
-                onClick={() => syncAllMenuNeedsToRAB()}
+                onClick={() => syncAllMenuNeedsToRAB(filterRABDate)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/70 text-[#0D9488] dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-xl text-xs font-bold shadow-xs transition-all duration-200 ease-in-out"
-                title="Ambil & sinkronkan kebutuhan bahan otomatis dari Perencanaan Menu (PLOG) ke RAB Bahan Pangan"
+                title="Ambil & sinkronkan kebutuhan bahan harian otomatis dari Perencanaan Menu (PLOG) ke RAB Bahan Pangan"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Sinkron dari Perencanaan Menu ({menuPlannedNeeds.aggregated.length})</span>
+                <span>
+                  {filterRABDate !== 'ALL'
+                    ? `Sinkron Harian (${formatIndonesianDate(filterRABDate)})`
+                    : `Sinkron Menu PLOG (${menuPlannedNeeds.aggregated.length})`}
+                </span>
               </button>
               <button
                 type="button"
@@ -1150,55 +2978,63 @@ export const ProcurementModule: React.FC = () => {
       </div>
 
       {/* KPI Cards: High-level PLOK Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-stretch">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>Total Anggaran RAB</span>
-            <Coins className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Coins className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-xl font-black text-slate-900 dark:text-white font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white font-mono tabular-nums mt-2">
             {formatRupiah(rabSummary.totalAll)}
           </div>
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Pangan: {formatRupiah(rabSummary.totalPangan)} • Ops: {formatRupiah(rabSummary.totalOperasional)}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>RAB Telah Disetujui</span>
-            <ShieldCheck className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-xl font-black text-[#0D9488] font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-[#0D9488] font-mono tabular-nums mt-2">
             {formatRupiah(rabSummary.totalApproved)}
           </div>
-          <div className="text-[11px] text-[#0D9488] font-semibold mt-0.5">
+          <div className="text-[11px] text-[#0D9488] font-semibold mt-1">
             Otorisasi Sah Kepala SPPG
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>PO Terbit & Teralokasi</span>
-            <ShoppingCart className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <ShoppingCart className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-xl font-black text-[#1E3A8A] dark:text-sky-400 font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-[#1E3A8A] dark:text-sky-400 font-mono tabular-nums mt-2">
             {formatRupiah(rabSummary.totalPOAmountCreated)}
           </div>
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Sisa Pagu RAB: {formatRupiah(rabSummary.remainingBudget)}
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 uppercase font-bold flex items-center justify-between gap-2">
             <span>Inspeksi QC Masuk Gudang</span>
-            <PackageCheck className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <PackageCheck className="w-4 h-4" />
+            </span>
           </div>
-          <div className="text-xl font-black text-[#1E3A8A] dark:text-sky-400 font-mono mt-1">
+          <div className="text-2xl font-bold tracking-tight text-[#1E3A8A] dark:text-sky-400 font-mono tabular-nums mt-2">
             {qcList.length} Batch QC
           </div>
-          <div className="text-[11px] text-[#0D9488] font-semibold mt-0.5">
+          <div className="text-[11px] text-[#0D9488] font-semibold mt-1">
             Stok Terverifikasi Higienis
           </div>
         </div>
@@ -1206,7 +3042,7 @@ export const ProcurementModule: React.FC = () => {
 
       {/* 3 Main PLOK Responsive Pill Tabs */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar text-xs font-semibold">
           {[
             {
               key: 'rab' as SubModuleTab,
@@ -1233,7 +3069,7 @@ export const ProcurementModule: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`min-h-[38px] inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`min-h-[38px] inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 ease-out whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
@@ -1258,7 +3094,7 @@ export const ProcurementModule: React.FC = () => {
       {/* SUBMODUL A: RENCANA ANGGARAN BELANJA (RAB) */}
       {/* ========================================================================= */}
       {activeTab === 'rab' && (
-        <div className="space-y-4">
+        <div key="rab" className="space-y-4 animate-fadeIn">
           {isEditingRabSchema && (
             <DynamicFormBuilderPanel
               formId="procurement_rab_form"
@@ -1267,264 +3103,1823 @@ export const ProcurementModule: React.FC = () => {
           )}
 
           {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-bold text-slate-400 uppercase text-[10px]">Filter Kategori:</span>
-              {['ALL', 'RAB Bahan Pangan', 'RAB Operasional'].map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setFilterRABCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition ${
-                    filterRABCategory === cat
-                      ? 'bg-blue-900 text-white dark:bg-sky-600'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                  }`}
+          <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-slate-400 uppercase text-[10px]">Filter Kategori:</span>
+                {['ALL', 'RAB Bahan Pangan', 'RAB Operasional'].map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setFilterRABCategory(cat)}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                      filterRABCategory === cat
+                        ? 'bg-blue-900 text-white dark:bg-sky-600'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    {cat === 'ALL' ? 'Semua Kategori' : cat}
+                  </button>
+                ))}
+
+                <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
+
+                <span className="font-bold text-slate-400 uppercase text-[10px]">Periode:</span>
+                <select
+                  value={filterRABPeriod}
+                  onChange={e => setFilterRABPeriod(e.target.value)}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white font-semibold"
                 >
-                  {cat === 'ALL' ? 'Semua Kategori' : cat}
+                  <option value="ALL">Semua Periode</option>
+                  <option value="November 2026">November 2026</option>
+                  <option value="Oktober 2026">Oktober 2026</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportRABPDF}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>PDF RAB</span>
                 </button>
-              ))}
-
-              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block" />
-
-              <span className="font-bold text-slate-400 uppercase text-[10px]">Periode:</span>
-              <select
-                value={filterRABPeriod}
-                onChange={e => setFilterRABPeriod(e.target.value)}
-                className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white font-semibold"
-              >
-                <option value="ALL">Semua Periode</option>
-                <option value="November 2026">November 2026</option>
-                <option value="Oktober 2026">Oktober 2026</option>
-              </select>
+                <button
+                  onClick={handleExportRABExcel}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Excel</span>
+                </button>
+                <button
+                  onClick={triggerPrint}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleExportRABPDF}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-bold transition shadow-2xs"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>PDF RAB</span>
-              </button>
-              <button
-                onClick={handleExportRABExcel}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Excel</span>
-              </button>
-              <button
-                onClick={triggerPrint}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Cetak</span>
-              </button>
+            {/* Daily Selector matching PLOG Menus */}
+            <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="inline-flex items-center gap-1 font-bold text-[#1E3A8A] dark:text-sky-300 uppercase text-[10px] mr-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>RAB Harian (Menu PLOG):</span>
+                </span>
+                {plogMenuDays.map(day => {
+                  const isActive = filterRABDate === day.date;
+                  return (
+                    <button
+                      key={day.date}
+                      type="button"
+                      onClick={() => setFilterRABDate(day.date)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                        isActive
+                          ? 'bg-[#0D9488] text-white border-[#0D9488] shadow-2xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-teal-50 hover:border-teal-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      {formatIndonesianDate(day.date)}
+                      {day.menuCodes.length > 0 ? ` • ${day.menuCodes.join(', ')}` : ''}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setFilterRABDate('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                    filterRABDate === 'ALL'
+                      ? 'bg-[#1E3A8A] text-white border-[#1E3A8A] shadow-2xs'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  Semua Tanggal
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={filterRABDate === 'ALL' ? '' : filterRABDate}
+                  onChange={e => setFilterRABDate(e.target.value || 'ALL')}
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-white font-mono"
+                  title="Pilih tanggal RAB harian secara spesifik"
+                />
+                {hasPermission('procurement', 'create') && (
+                  <button
+                    type="button"
+                    onClick={() => syncAllMenuNeedsToRAB(filterRABDate)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold transition"
+                    title="Sesuaikan item RAB Bahan Pangan untuk tanggal ini berdasarkan Perencanaan Bahan Menu PLOG"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>
+                      {filterRABDate !== 'ALL' ? 'Sinkron Hari Ini dari PLOG' : 'Sinkron Semua Hari PLOG'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {activePlogDayInfo && (
+              <div className="px-3 py-2 rounded-lg bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/80 dark:border-teal-800/60 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <div className="text-slate-700 dark:text-slate-200">
+                  <span className="font-extrabold text-[#0D9488] dark:text-teal-300">
+                    Menu PLOG {activePlogDayInfo.menuCodes.join(', ')} ({activePlogDayInfo.dayName},{' '}
+                    {formatIndonesianDate(activePlogDayInfo.date)}):
+                  </span>{' '}
+                  <span>{activePlogDayInfo.menusSummary.join(' | ') || 'Menu harian terjadwal'}</span>
+                </div>
+                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                  Edit/hapus item di RAB tidak mengubah Menu PLOG &amp; Food Cost PLOG
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Datalist suggestions untuk Rincian RAB (Menu PLOG, Bahan Pangan & Satuan) */}
+          <datalist id="rab-rincian-menu-options">
+            {menuItems.map(m => (
+              <option key={m.id} value={getDishLabelFromMenu(m)} />
+            ))}
+          </datalist>
+          <datalist id="rab-pangan-master-options">
+            {panganIngredientOptions.map(name => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <datalist id="rab-operasional-master-options">
+            {operasionalItemOptions.map(name => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <datalist id="rab-rincian-unit-options">
+            {masterUnits.map(u => (
+              <option key={u.id} value={u.code} />
+            ))}
+          </datalist>
+
+          {/* Search & Header Card untuk Rincian Daftar Rencana Belanja (RAB) */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm p-4 sm:px-5 space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  Rincian Daftar Rencana Belanja (RAB){' '}
+                  {filterRABDate !== 'ALL' ? `— ${formatIndonesianDate(filterRABDate)}` : '(Semua Tanggal)'}
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                  Disesuaikan harian mengikuti Perencanaan Bahan Menu PLOG • Edit/hapus item di RAB aman &amp; tidak menghapus Menu PLOG maupun Food Cost PLOG
+                </p>
+              </div>
+              <div className="relative w-full lg:w-80 print:hidden">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={rabSearchTerm}
+                  onChange={e => setRabSearchTerm(e.target.value)}
+                  placeholder="Cari kode, bahan pangan, uraian, atau menu..."
+                  className="w-full h-9 pl-9 pr-8 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/70 text-slate-800 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+                {rabSearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setRabSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1 cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* DataTable RAB */}
-          <DataTable
-            title="Daftar Rencana Anggaran Belanja (RAB)"
-            subtitle="Kalkulasi otomatis: Total Anggaran = Volume × Harga Satuan • Otorisasi persetujuan belanja"
-            data={filteredRAB}
-            keyExtractor={item => item.id}
-            searchPlaceholder="Cari kode anggaran, barang, atau keterangan..."
-            searchKeys={['budgetCode', 'itemName', 'category', 'notes', 'periodMonth']}
-            onPrint={triggerPrint}
-            stickyFirstColumn
-            columns={[
-              {
-                key: 'budgetCode',
-                header: 'Kode & Tanggal',
-                render: row => (
-                  <div className="font-mono text-xs">
-                    <span className="font-bold text-blue-900 dark:text-sky-300">
-                      {row.budgetCode}
-                    </span>
-                    <div className="text-[10px] text-slate-400">
-                      {formatIndonesianDate(row.planDate)} • {row.periodMonth}
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'itemName',
-                header: 'Nama Barang, Kategori & Sumber Menu',
-                render: row => (
-                  <div>
-                    <div className="font-bold text-slate-900 dark:text-white text-xs">
-                      {row.itemName}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                      <span
-                        className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
-                          row.category === 'RAB Bahan Pangan'
-                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                        }`}
-                      >
-                        {row.category}
-                      </span>
-                      {row.sourceType === 'menu_planning' && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                          <Link2 className="w-2.5 h-2.5" />
-                          <span>Menu PLOG: {row.sourceMenuCode || row.sourceMenuLabel || 'Terhubung'}</span>
-                        </span>
-                      )}
-                      {row.sourceType === 'operasional' && (
-                        <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          Operasional SPPG
-                        </span>
-                      )}
-                    </div>
-                    {row.notes && (
-                      <div className="text-[10px] text-slate-500 italic mt-0.5 max-w-xs truncate">
-                        "{row.notes}"
-                      </div>
-                    )}
-                  </div>
-                ),
-              },
-              {
-                key: 'volume',
-                header: 'Volume & Satuan',
-                render: row => (
-                  <div className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">
-                    {formatNumber(row.volume)} {row.unit}
-                  </div>
-                ),
-              },
-              {
-                key: 'unitPrice',
-                header: 'Harga Satuan',
-                render: row => (
-                  <div className="font-mono text-xs text-slate-700 dark:text-slate-300">
-                    {formatRupiah(row.unitPrice)}
-                  </div>
-                ),
-              },
-              {
-                key: 'totalBudget',
-                header: 'Total Anggaran',
-                render: row => (
-                  <div className="font-mono text-xs font-black text-slate-900 dark:text-white">
-                    {formatRupiah(row.totalBudget)}
-                  </div>
-                ),
-              },
-              {
-                key: 'poTracking',
-                header: 'Alokasi Realisasi PO',
-                render: row => {
-                  const usedQty = row.poCreatedQuantity || 0;
-                  const remQty = Math.max(0, row.volume - usedQty);
-                  const percent = row.volume > 0 ? (usedQty / row.volume) * 100 : 0;
-                  return (
-                    <div className="text-xs font-mono">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span>PO: {formatNumber(usedQty)} {row.unit}</span>
-                        <span className="text-slate-400">({percent.toFixed(0)}%)</span>
-                      </div>
-                      <div className="w-24 bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-1 overflow-hidden">
-                        <div
-                          className="bg-sky-600 h-full rounded-full"
-                          style={{ width: `${Math.min(100, percent)}%` }}
-                        />
-                      </div>
-                      <div className="text-[10px] text-emerald-600 font-semibold mt-0.5">
-                        Sisa: {formatNumber(remQty)} {row.unit}
-                      </div>
-                    </div>
-                  );
-                },
-              },
-              {
-                key: 'status',
-                header: 'Status Persetujuan',
-                render: row => (
-                  <div className="space-y-0.5">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                        row.status === 'Disetujui'
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : row.status === 'Menunggu Persetujuan'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          : row.status === 'Ditolak'
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
-                    >
-                      {row.status === 'Disetujui' && <CheckCircle className="w-3 h-3" />}
-                      {row.status === 'Menunggu Persetujuan' && <Clock className="w-3 h-3" />}
-                      {row.status === 'Ditolak' && <XCircle className="w-3 h-3" />}
-                      <span>{row.status}</span>
-                    </span>
-                    {row.approvedBy && (
-                      <div className="text-[9px] text-slate-400 truncate max-w-[120px]">
-                        {row.approvedBy}
-                      </div>
-                    )}
-                  </div>
-                ),
-              },
-              ...buildDynamicTableColumns<RABItem>(
-                dynamicFormSchemas.procurement_rab_form,
-                (url, label) => setViewGallery({ urls: [url], index: 0, title: label })
-              ),
-              {
-                key: 'actions',
-                header: 'Aksi Otorisasi & PO',
-                align: 'right',
-                render: row => (
-                  <div className="flex items-center justify-end gap-1.5">
-                    {hasPermission('procurement', 'edit') && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditRAB(row)}
-                        className="p-1.5 text-blue-600 hover:text-blue-800 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
-                        title="Edit Item RAB"
-                      >
-                        <FileEdit className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+          {rabPanganRows.length === 0 &&
+          rabOperasionalRows.length === 0 &&
+          newPanganRows.length === 0 &&
+          newOperasionalRows.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm p-6">
+              <EmptyState
+                title="Data RAB tidak ditemukan"
+                description={
+                  filterRABDate !== 'ALL'
+                    ? `Belum ada item RAB untuk tanggal ${formatIndonesianDate(filterRABDate)}. Klik "Sinkron Hari Ini dari PLOG" atau tambahkan baris langsung.`
+                    : 'Belum ada item RAB yang cocok dengan filter kategori, periode, atau kata kunci pencarian.'
+                }
+                actionLabel={
+                  hasPermission('procurement', 'create') || hasPermission('procurement', 'edit')
+                    ? filterRABCategory === 'RAB Operasional'
+                      ? 'Tambah Baris Operasional'
+                      : 'Tambah Baris Bahan Pangan'
+                    : undefined
+                }
+                onAction={
+                  filterRABCategory === 'RAB Operasional'
+                    ? handleAddNewOperasionalRow
+                    : handleAddNewPanganRow
+                }
+              />
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* =============================================================== */}
+              {/* FORMAT 1: RAB BAHAN PANGAN                                      */}
+              {/* =============================================================== */}
+              {(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Bahan Pangan') && (() => {
+                const canEditRAB = hasPermission('procurement', 'edit');
+                const canAddPanganRow = hasPermission('procurement', 'create') || canEditRAB;
+                const totalKeseluruhanPangan =
+                  rabPanganRows.reduce(
+                    (acc, r) => acc + (Number(getPanganEffectiveRowValues(r).totalBudget) || 0),
+                    0
+                  ) +
+                  newPanganRows.reduce((acc, r) => acc + (Number(r.totalBudget) || 0), 0);
+                const totalPerSasaranPangan =
+                  rabTargetMetrics.totalSasaran > 0
+                    ? Math.round(totalKeseluruhanPangan / rabTargetMetrics.totalSasaran)
+                    : 0;
+                const sisaPangan = rabTargetMetrics.paguPangan - totalKeseluruhanPangan;
+                const trailingColsCount = 1 + dynamicRabColumns.length;
+                const dirtyPanganCount = Object.keys(panganRowDrafts).length + newPanganRows.length;
 
-                    {/* Approve button for Chief / Finance */}
-                    {row.status === 'Menunggu Persetujuan' && hasPermission('procurement', 'approve') && (
-                      <button
-                        onClick={() => handleApproveRAB(row.id)}
-                        className="p-1.5 text-emerald-600 hover:text-emerald-800 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
-                        title="Setujui Rencana Anggaran Belanja"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                      </button>
-                    )}
-                    {row.status === 'Menunggu Persetujuan' && hasPermission('procurement', 'approve') && (
-                      <button
-                        onClick={() => handleRejectRAB(row.id)}
-                        className="p-1.5 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
-                        title="Tolak Item Anggaran"
-                      >
-                        <Ban className="w-4 h-4" />
-                      </button>
-                    )}
+                return (
+                  <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm overflow-hidden print:shadow-none">
+                    <div className="px-4 py-2.5 bg-[#C6E0B4] dark:bg-emerald-950/70 border-b border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-emerald-100">
+                          BAHAN PANGAN ({rabPanganRows.length} Item)
+                          {filterRABDate !== 'ALL'
+                            ? ` — ${formatIndonesianDate(filterRABDate)}`
+                            : ''}
+                        </span>
+                        {canEditRAB && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                            Klik langsung tiap kolom untuk edit manual
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canAddPanganRow && (
+                          <button
+                            type="button"
+                            onClick={handleAddNewPanganRow}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] print:hidden cursor-pointer"
+                            title="Tambahkan baris bahan pangan baru langsung di tabel"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Tambah Baris</span>
+                          </button>
+                        )}
+                        {canAddPanganRow && dirtyPanganCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSaveAllPanganDrafts}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#1E3A8A] hover:bg-blue-900 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] print:hidden cursor-pointer"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>Simpan Semua ({dirtyPanganCount})</span>
+                          </button>
+                        )}
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-emerald-200 font-mono">
+                          Target Sasaran Aktif: {formatNumber(rabTargetMetrics.totalSasaran)} Porsi
+                        </span>
+                      </div>
+                    </div>
 
-                    {/* Quick PO Button: Only if Approved and has remaining quota */}
-                    {row.status === 'Disetujui' && (
-                      <button
-                        onClick={() => handleStartPOFromRAB(row)}
-                        className="px-2 py-1 bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 rounded text-[10px] font-bold flex items-center gap-1 border border-sky-200 dark:border-sky-800 transition"
-                        title="Terbitkan PO dari RAB ini"
-                      >
-                        <ShoppingCart className="w-3 h-3" />
-                        <span>Buat PO</span>
-                      </button>
-                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          {/* Numbered Spreadsheet Column Strip (1..7) */}
+                          <tr className="bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 text-center">
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 w-10">1</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 sticky left-0 z-10 bg-slate-100 dark:bg-slate-800">2</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">3</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">4</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">5</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">6</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">7</th>
+                            {dynamicRabColumns.map((col, idx) => (
+                              <th
+                                key={col.key}
+                                className="border border-slate-300 dark:border-slate-700 px-2 py-1"
+                              >
+                                {8 + idx}
+                              </th>
+                            ))}
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 print:hidden">
+                              Aksi
+                            </th>
+                          </tr>
+
+                          {/* Main Olive Green Column Headers */}
+                          <tr className="bg-[#548235] dark:bg-emerald-900 text-white text-[11px] font-extrabold tracking-wide">
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-2.5 py-2 text-center w-10">
+                              NO
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[230px] sticky left-0 z-10 bg-[#548235] dark:bg-emerald-900">
+                              BAHAN PANGAN
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              JUMLAH SASARAN
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              Jumlah
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              Satuan
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                              HARGA DASAR
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                              Jumlah
+                            </th>
+                            {dynamicRabColumns.map(col => (
+                              <th
+                                key={col.key}
+                                className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left whitespace-nowrap"
+                              >
+                                {col.header}
+                              </th>
+                            ))}
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap print:hidden">
+                              Status & Aksi Otorisasi / PO
+                            </th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {rabPanganRows.length === 0 && newPanganRows.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={8 + dynamicRabColumns.length}
+                                className="border border-slate-300 dark:border-slate-700 px-4 py-6 text-center text-xs text-slate-500 italic"
+                              >
+                                Belum ada item RAB Bahan Pangan untuk filter yang dipilih.
+                              </td>
+                            </tr>
+                          ) : (
+                            rabPanganRows.map((row, idx) => {
+                              const eff = getPanganEffectiveRowValues(row);
+                              const isDirty = Boolean(panganRowDrafts[row.id]);
+                              const usedQty = row.poCreatedQuantity || 0;
+                              const remQty = Math.max(0, eff.volume - usedQty);
+                              const percent = eff.volume > 0 ? (usedQty / eff.volume) * 100 : 0;
+
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className={`transition-colors ${
+                                    isDirty
+                                      ? 'bg-amber-50/50 dark:bg-amber-950/20'
+                                      : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/60'
+                                  }`}
+                                >
+                                  {/* Col 1: NO */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono text-slate-700 dark:text-slate-300 align-top">
+                                    {idx + 1}
+                                  </td>
+
+                                  {/* Col 2: BAHAN PANGAN (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
+                                    <input
+                                      type="text"
+                                      value={eff.itemName}
+                                      disabled={!canEditRAB}
+                                      onChange={e => updatePanganCellDraft(row, 'itemName', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      placeholder="Nama bahan pangan..."
+                                      className="w-full min-w-[190px] px-1.5 py-1 text-xs font-bold rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="flex flex-wrap items-center gap-1 mt-0.5 px-1.5">
+                                      <span className="font-mono text-[10px] font-bold text-[#1E3A8A] dark:text-sky-300">
+                                        {row.budgetCode}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400">
+                                        • {formatIndonesianDate(row.planDate)}
+                                      </span>
+                                    </div>
+                                    {row.sourceType === 'menu_planning' && (
+                                      <div className="mt-0.5 px-1.5">
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                          <Link2 className="w-2.5 h-2.5" />
+                                          <span>
+                                            Menu PLOG: {row.sourceMenuCode || row.sourceMenuLabel || 'Terhubung'}
+                                          </span>
+                                        </span>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Col 3: JUMLAH SASARAN (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="1"
+                                      value={eff.sasaran}
+                                      disabled={!canEditRAB}
+                                      onChange={e => updatePanganCellDraft(row, 'sasaran', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-24 mx-auto block px-1.5 py-1 text-center font-mono text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 4: Jumlah (QTY / volume, Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.volume}
+                                      disabled={!canEditRAB}
+                                      onChange={e => updatePanganCellDraft(row, 'volume', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-24 mx-auto block px-1.5 py-1 text-center font-mono font-bold text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 5: Satuan (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="text"
+                                      value={eff.unit}
+                                      disabled={!canEditRAB}
+                                      list="rab-rincian-unit-options"
+                                      onChange={e => updatePanganCellDraft(row, 'unit', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 6: HARGA DASAR (Editable, right before total Jumlah) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.unitPrice}
+                                      disabled={!canEditRAB}
+                                      onChange={e => updatePanganCellDraft(row, 'unitPrice', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-28 ml-auto block px-1.5 py-1 text-right font-mono text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="text-[10px] text-right text-slate-400 font-mono px-1.5">
+                                      {formatRupiah(eff.unitPrice)}
+                                    </div>
+                                  </td>
+
+                                  {/* Col 7: Jumlah (Total Harga, Editable & Auto-Calculated) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.totalBudget}
+                                      disabled={!canEditRAB}
+                                      onChange={e => updatePanganCellDraft(row, 'totalBudget', e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSavePanganRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-32 ml-auto block px-1.5 py-1 text-right font-mono font-bold text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="text-[10px] text-right font-bold text-slate-700 dark:text-slate-300 font-mono px-1.5">
+                                      {formatRupiah(eff.totalBudget)}
+                                    </div>
+                                  </td>
+
+                                  {dynamicRabColumns.map(col => (
+                                    <td
+                                      key={col.key}
+                                      className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top"
+                                    >
+                                      {col.render ? col.render(row) : '-'}
+                                    </td>
+                                  ))}
+
+                                  {/* Status & Actions */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top print:hidden">
+                                    <div className="space-y-1.5 min-w-[175px]">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span
+                                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                            row.status === 'Disetujui'
+                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                              : row.status === 'Menunggu Persetujuan'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                              : row.status === 'Ditolak'
+                                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                          }`}
+                                        >
+                                          {row.status === 'Disetujui' && <CheckCircle className="w-3 h-3" />}
+                                          {row.status === 'Menunggu Persetujuan' && <Clock className="w-3 h-3" />}
+                                          {row.status === 'Ditolak' && <XCircle className="w-3 h-3" />}
+                                          <span>{row.status}</span>
+                                        </span>
+                                      </div>
+
+                                      <div className="text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                                        <div className="flex items-center justify-between">
+                                          <span>PO: {formatNumber(usedQty)} {eff.unit}</span>
+                                          <span className="text-slate-400">({percent.toFixed(0)}%)</span>
+                                        </div>
+                                        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-0.5 overflow-hidden">
+                                          <div
+                                            className="bg-sky-600 h-full rounded-full"
+                                            style={{ width: `${Math.min(100, percent)}%` }}
+                                          />
+                                        </div>
+                                        <div className="text-[9px] text-emerald-600 font-semibold mt-0.5">
+                                          Sisa Kuota: {formatNumber(remQty)} {eff.unit}
+                                        </div>
+                                      </div>
+
+                                      {isDirty && canEditRAB && (
+                                        <div className="flex items-center justify-end gap-1 pt-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSavePanganRowDraft(row)}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#1E3A8A] hover:bg-blue-900 text-white text-[10px] font-bold shadow-xs transition active:scale-[0.98]"
+                                            title="Simpan perubahan baris ini"
+                                          >
+                                            <Save className="w-3 h-3" />
+                                            <span>Simpan</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDiscardPanganRowDraft(row.id)}
+                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold transition"
+                                            title="Batalkan perubahan belum tersimpan"
+                                          >
+                                            <RotateCcw className="w-3 h-3" />
+                                            <span>Batal</span>
+                                          </button>
+                                        </div>
+                                      )}
+
+                                      <div className="flex flex-wrap items-center justify-end gap-1 pt-0.5">
+                                        {canEditRAB && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenEditRAB(row)}
+                                            className="p-1 text-blue-600 hover:text-blue-800 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                                            title="Edit Detail Lengkap Item RAB"
+                                          >
+                                            <FileEdit className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {(canEditRAB || hasPermission('procurement', 'delete')) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRequestDeleteRAB(row)}
+                                            className="p-1 text-[#E11D48] hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                            title="Hapus Item RAB"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {row.status === 'Menunggu Persetujuan' && hasPermission('procurement', 'approve') && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleApproveRAB(row.id)}
+                                              className="p-1 text-emerald-600 hover:text-emerald-800 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
+                                              title="Setujui Rencana Anggaran Belanja"
+                                            >
+                                              <CheckCircle className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRejectRAB(row.id)}
+                                              className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                              title="Tolak Item Anggaran"
+                                            >
+                                              <Ban className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                        {row.status === 'Disetujui' && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleStartPOFromRAB(row)}
+                                            className="px-2 py-0.5 bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 rounded text-[10px] font-bold inline-flex items-center gap-1 border border-sky-200 dark:border-sky-800 transition"
+                                            title="Terbitkan PO dari RAB ini"
+                                          >
+                                            <ShoppingCart className="w-3 h-3" />
+                                            <span>Buat PO</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+
+                          {/* Inline Newly Added Editable Rows */}
+                          {newPanganRows.map((draft, newIdx) => {
+                            const targetPlanDate =
+                              filterRABDate !== 'ALL'
+                                ? filterRABDate
+                                : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+
+                            return (
+                              <tr
+                                key={draft.tempId}
+                                className="bg-teal-50/50 dark:bg-teal-950/20 transition-colors"
+                              >
+                                {/* Col 1: NO */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono font-bold text-[#0D9488] dark:text-teal-300 align-top">
+                                  {rabPanganRows.length + newIdx + 1}
+                                </td>
+
+                                {/* Col 2: BAHAN PANGAN */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 align-top sticky left-0 z-10 bg-teal-50/90 dark:bg-slate-900">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    list="rab-pangan-master-options"
+                                    value={draft.itemName}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'itemName', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    placeholder="Ketik / pilih nama bahan pangan..."
+                                    className="w-full min-w-[190px] px-2 py-1 text-xs font-bold rounded border border-teal-400 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1 px-0.5">
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300">
+                                      Baris Baru
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      • {formatIndonesianDate(targetPlanDate)}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Col 3: JUMLAH SASARAN */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="1"
+                                    value={draft.sasaran}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'sasaran', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-24 mx-auto block px-1.5 py-1 text-center font-mono text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 4: Jumlah (QTY / volume) */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.volume}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'volume', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-24 mx-auto block px-1.5 py-1 text-center font-mono font-bold text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 5: Satuan */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="text"
+                                    list="rab-rincian-unit-options"
+                                    value={draft.unit}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'unit', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    placeholder="kg/pcs"
+                                    className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 6: HARGA DASAR */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.unitPrice}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'unitPrice', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-28 ml-auto block px-1.5 py-1 text-right font-mono text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="text-[10px] text-right text-slate-400 font-mono px-1.5">
+                                    {formatRupiah(draft.unitPrice)}
+                                  </div>
+                                </td>
+
+                                {/* Col 7: Jumlah (Total Harga) */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.totalBudget}
+                                    onChange={e =>
+                                      updateNewPanganRowField(draft.tempId, 'totalBudget', e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewPanganRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-32 ml-auto block px-1.5 py-1 text-right font-mono font-bold text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="text-[10px] text-right font-bold text-slate-700 dark:text-slate-300 font-mono px-1.5">
+                                    {formatRupiah(draft.totalBudget)}
+                                  </div>
+                                </td>
+
+                                {dynamicRabColumns.map(col => (
+                                  <td
+                                    key={col.key}
+                                    className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top text-slate-400"
+                                  >
+                                    -
+                                  </td>
+                                ))}
+
+                                {/* Col Aksi */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top print:hidden">
+                                  <div className="flex items-center justify-end gap-1.5 min-w-[175px]">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveNewPanganRow(draft.tempId, newIdx)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#1E3A8A] hover:bg-blue-900 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] cursor-pointer"
+                                      title="Simpan baris bahan pangan baru"
+                                    >
+                                      <Save className="w-3 h-3" />
+                                      <span>Simpan</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveNewPanganRow(draft.tempId)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-bold transition active:scale-[0.98] cursor-pointer"
+                                      title="Batalkan & hapus baris baru ini"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Hapus</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* Inline "+ Tambah Baris" Row inside Rincian Daftar Belanja (RAB) Bahan Pangan */}
+                          {canAddPanganRow && (
+                            <tr className="bg-slate-50/70 dark:bg-slate-800/40 print:hidden">
+                              <td
+                                colSpan={8 + dynamicRabColumns.length}
+                                className="border border-slate-300 dark:border-slate-700 px-3 py-2"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={handleAddNewPanganRow}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-teal-50 dark:bg-slate-900 dark:hover:bg-teal-950/60 text-[#0D9488] dark:text-teal-300 border border-dashed border-teal-400 dark:border-teal-700 text-xs font-bold transition active:scale-[0.98] cursor-pointer shadow-2xs"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Tambah Baris Bahan Pangan</span>
+                                </button>
+                                <span className="ml-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  Tambahkan item bahan pangan langsung di tabel lalu isi &amp; klik Simpan
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+
+                        {/* Footer Summary Rows */}
+                        <tfoot>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              TOTAL KESELURUHAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {formatRupiah(totalKeseluruhanPangan)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30"
+                            />
+                          </tr>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              TOTAL PER SASARAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {formatRupiah(totalPerSasaranPangan)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              Kalkulasi: Total Keseluruhan ÷ {formatNumber(rabTargetMetrics.totalSasaran)} sasaran
+                            </td>
+                          </tr>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              PAGU HARGA BELANJA HARIAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {editingPaguTarget === 'pangan' ? (
+                                <div className="flex items-center justify-end gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={paguDraftInput}
+                                    onChange={e => setPaguDraftInput(e.target.value)}
+                                    className="w-28 px-2 py-1 text-xs font-mono font-bold rounded border border-blue-400 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      savePaguHarian('pangan', Math.max(0, Number(paguDraftInput) || 0))
+                                    }
+                                    className="p-1 rounded bg-[#1E3A8A] text-white"
+                                    title="Simpan Pagu Harian"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPaguTarget(null)}
+                                    className="p-1 rounded bg-slate-200 text-slate-700"
+                                    title="Batal"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center justify-end gap-1.5">
+                                  <span>{formatRupiah(rabTargetMetrics.paguPangan)}</span>
+                                  {canEditRAB && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPaguTarget('pangan');
+                                        setPaguDraftInput(String(rabTargetMetrics.paguPangan));
+                                      }}
+                                      className="p-0.5 text-slate-400 hover:text-[#1E3A8A] print:hidden"
+                                      title="Edit Pagu Harga Belanja Harian Bahan Pangan"
+                                    >
+                                      <FileEdit className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              {typeof paguHarianConfig.pangan === 'number' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => savePaguHarian('pangan', null)}
+                                  className="text-[10px] font-bold text-[#0D9488] hover:underline print:hidden"
+                                >
+                                  Reset ke Standar Pagu BGN ({formatRupiah(rabTargetMetrics.defaultPaguPangan)})
+                                </button>
+                              ) : (
+                                <span>Otomatis dari Pagu Porsi Kecil/Besar BGN</span>
+                              )}
+                            </td>
+                          </tr>
+                          <tr className="font-extrabold">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                            >
+                              SISA
+                            </td>
+                            <td
+                              className={`border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap ${
+                                sisaPangan >= 0
+                                  ? 'bg-[#92D050] text-slate-900'
+                                  : 'bg-rose-200 text-rose-900'
+                              }`}
+                            >
+                              {formatRupiah(sisaPangan)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              {sisaPangan >= 0
+                                ? 'Surplus / masih di bawah Pagu Belanja Harian'
+                                : 'Defisit / melebihi Pagu Belanja Harian'}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
                   </div>
-                ),
-              },
-            ]}
-          />
+                );
+              })()}
+
+              {/* =============================================================== */}
+              {/* FORMAT 2: RAB OPERASIONAL                                       */}
+              {/* =============================================================== */}
+              {(filterRABCategory === 'ALL' || filterRABCategory === 'RAB Operasional') && (() => {
+                const canEditRAB = hasPermission('procurement', 'edit');
+                const canAddOperasionalRow = hasPermission('procurement', 'create') || canEditRAB;
+                const totalKeseluruhanOperasional =
+                  rabOperasionalRows.reduce(
+                    (acc, r) => acc + (Number(getOperasionalEffectiveRowValues(r).totalBudget) || 0),
+                    0
+                  ) +
+                  newOperasionalRows.reduce((acc, r) => acc + (Number(r.totalBudget) || 0), 0);
+                const totalPerSasaranOperasional =
+                  rabTargetMetrics.totalSasaran > 0
+                    ? Math.round(totalKeseluruhanOperasional / rabTargetMetrics.totalSasaran)
+                    : 0;
+                const sisaOperasional =
+                  rabTargetMetrics.paguOperasional - totalKeseluruhanOperasional;
+                const trailingColsCount = 1 + dynamicRabColumns.length;
+                const dirtyOperasionalCount =
+                  Object.keys(operasionalRowDrafts).length + newOperasionalRows.length;
+
+                return (
+                  <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm overflow-hidden print:shadow-none">
+                    <div className="px-4 py-2.5 bg-[#C6E0B4] dark:bg-emerald-950/70 border-b border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-emerald-100">
+                          OPERASIONAL ({rabOperasionalRows.length} Item)
+                          {filterRABDate !== 'ALL' && !rabOperasionalResult.isFallbackAllDates
+                            ? ` — ${formatIndonesianDate(filterRABDate)}`
+                            : ''}
+                        </span>
+                        {rabOperasionalResult.isFallbackAllDates && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/70 dark:bg-slate-900/60 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                            Menampilkan daftar RAB Operasional aktif
+                          </span>
+                        )}
+                        {canEditRAB && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                            Klik langsung tiap kolom untuk edit manual
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canAddOperasionalRow && (
+                          <button
+                            type="button"
+                            onClick={handleAddNewOperasionalRow}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] print:hidden cursor-pointer"
+                            title="Tambahkan baris operasional baru langsung di tabel"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Tambah Baris</span>
+                          </button>
+                        )}
+                        {canAddOperasionalRow && dirtyOperasionalCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSaveAllOperasionalDrafts}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#1E3A8A] hover:bg-blue-900 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] print:hidden cursor-pointer"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span>Simpan Semua ({dirtyOperasionalCount})</span>
+                          </button>
+                        )}
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-emerald-200 font-mono">
+                          Target Sasaran Aktif: {formatNumber(rabTargetMetrics.totalSasaran)} Porsi
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          {/* Numbered Spreadsheet Column Strip (1..7) */}
+                          <tr className="bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 text-center">
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 w-10">1</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 sticky left-0 z-10 bg-slate-100 dark:bg-slate-800">2</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">3</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">4</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">5</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">6</th>
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">7</th>
+                            {dynamicRabColumns.map((col, idx) => (
+                              <th
+                                key={col.key}
+                                className="border border-slate-300 dark:border-slate-700 px-2 py-1"
+                              >
+                                {8 + idx}
+                              </th>
+                            ))}
+                            <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 print:hidden">
+                              Aksi
+                            </th>
+                          </tr>
+
+                          {/* Main Olive Green Column Headers Matching RAB Bahan Pangan */}
+                          <tr className="bg-[#548235] dark:bg-emerald-900 text-white text-[11px] font-extrabold tracking-wide">
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-2.5 py-2 text-center w-10">
+                              NO
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[230px] sticky left-0 z-10 bg-[#548235] dark:bg-emerald-900">
+                              URAIAN
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              JUMLAH SASARAN
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              Jumlah
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                              Satuan
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                              HARGA DASAR
+                            </th>
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                              Jumlah
+                            </th>
+                            {dynamicRabColumns.map(col => (
+                              <th
+                                key={col.key}
+                                className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left whitespace-nowrap"
+                              >
+                                {col.header}
+                              </th>
+                            ))}
+                            <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap print:hidden">
+                              Status & Aksi Otorisasi / PO
+                            </th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {rabOperasionalRows.length === 0 && newOperasionalRows.length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={8 + dynamicRabColumns.length}
+                                className="border border-slate-300 dark:border-slate-700 px-4 py-6 text-center text-xs text-slate-500 italic"
+                              >
+                                Belum ada item RAB Operasional untuk filter yang dipilih.
+                              </td>
+                            </tr>
+                          ) : (
+                            rabOperasionalRows.map((row, idx) => {
+                              const eff = getOperasionalEffectiveRowValues(row);
+                              const isDirty = Boolean(operasionalRowDrafts[row.id]);
+                              const usedQty = row.poCreatedQuantity || 0;
+                              const remQty = Math.max(0, eff.volume - usedQty);
+                              const percent = eff.volume > 0 ? (usedQty / eff.volume) * 100 : 0;
+
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className={`transition-colors ${
+                                    isDirty
+                                      ? 'bg-amber-50/50 dark:bg-amber-950/20'
+                                      : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/60'
+                                  }`}
+                                >
+                                  {/* Col 1: NO */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono text-slate-700 dark:text-slate-300 align-top">
+                                    {idx + 1}
+                                  </td>
+
+                                  {/* Col 2: URAIAN (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
+                                    <input
+                                      type="text"
+                                      list="rab-operasional-master-options"
+                                      value={eff.itemName}
+                                      disabled={!canEditRAB}
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(row, 'itemName', e.target.value)
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      placeholder="Uraian biaya operasional..."
+                                      className="w-full min-w-[190px] px-1.5 py-1 text-xs font-bold rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="flex flex-wrap items-center gap-1 mt-0.5 px-1.5">
+                                      <span className="font-mono text-[10px] font-bold text-[#1E3A8A] dark:text-sky-300">
+                                        {row.budgetCode}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400">
+                                        • {formatIndonesianDate(row.planDate)}
+                                      </span>
+                                    </div>
+                                    {row.notes && (
+                                      <div className="text-[10px] text-slate-500 italic mt-0.5 px-1.5 max-w-[260px] truncate">
+                                        "{row.notes}"
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Col 3: JUMLAH SASARAN (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="1"
+                                      value={eff.sasaran}
+                                      disabled={!canEditRAB}
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(row, 'sasaran', e.target.value)
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-24 mx-auto block px-1.5 py-1 text-center font-mono text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 4: Jumlah (QTY / volume, Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.volume}
+                                      disabled={!canEditRAB}
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(row, 'volume', e.target.value)
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-24 mx-auto block px-1.5 py-1 text-center font-mono font-bold text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 5: Satuan (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="text"
+                                      value={eff.unit}
+                                      disabled={!canEditRAB}
+                                      list="rab-rincian-unit-options"
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(row, 'unit', e.target.value)
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75"
+                                    />
+                                  </td>
+
+                                  {/* Col 6: HARGA DASAR (Editable) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.unitPrice}
+                                      disabled={!canEditRAB}
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(row, 'unitPrice', e.target.value)
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-28 ml-auto block px-1.5 py-1 text-right font-mono text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-800 dark:text-slate-200 focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="text-[10px] text-right text-slate-400 font-mono px-1.5">
+                                      {formatRupiah(eff.unitPrice)}
+                                    </div>
+                                  </td>
+
+                                  {/* Col 7: Jumlah (Total Harga, Editable & Auto-Calculated) */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={eff.totalBudget}
+                                      disabled={!canEditRAB}
+                                      onChange={e =>
+                                        updateOperasionalCellDraft(
+                                          row,
+                                          'totalBudget',
+                                          e.target.value
+                                        )
+                                      }
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter' && isDirty) {
+                                          e.preventDefault();
+                                          handleSaveOperasionalRowDraft(row);
+                                        }
+                                      }}
+                                      className="w-32 ml-auto block px-1.5 py-1 text-right font-mono font-bold text-xs tabular-nums rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-900 dark:text-white focus:outline-none disabled:opacity-75"
+                                    />
+                                    <div className="text-[10px] text-right font-bold text-slate-700 dark:text-slate-300 font-mono px-1.5">
+                                      {formatRupiah(eff.totalBudget)}
+                                    </div>
+                                  </td>
+
+                                  {dynamicRabColumns.map(col => (
+                                    <td
+                                      key={col.key}
+                                      className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top"
+                                    >
+                                      {col.render ? col.render(row) : '-'}
+                                    </td>
+                                  ))}
+
+                                  {/* Status & Actions */}
+                                  <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top print:hidden">
+                                    <div className="space-y-1.5 min-w-[175px]">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <span
+                                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                            row.status === 'Disetujui'
+                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                              : row.status === 'Menunggu Persetujuan'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                              : row.status === 'Ditolak'
+                                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                          }`}
+                                        >
+                                          {row.status === 'Disetujui' && <CheckCircle className="w-3 h-3" />}
+                                          {row.status === 'Menunggu Persetujuan' && <Clock className="w-3 h-3" />}
+                                          {row.status === 'Ditolak' && <XCircle className="w-3 h-3" />}
+                                          <span>{row.status}</span>
+                                        </span>
+                                      </div>
+
+                                      <div className="text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                                        <div className="flex items-center justify-between">
+                                          <span>PO: {formatNumber(usedQty)} {eff.unit}</span>
+                                          <span className="text-slate-400">({percent.toFixed(0)}%)</span>
+                                        </div>
+                                        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-0.5 overflow-hidden">
+                                          <div
+                                            className="bg-sky-600 h-full rounded-full"
+                                            style={{ width: `${Math.min(100, percent)}%` }}
+                                          />
+                                        </div>
+                                        <div className="text-[9px] text-emerald-600 font-semibold mt-0.5">
+                                          Sisa Kuota: {formatNumber(remQty)} {eff.unit}
+                                        </div>
+                                      </div>
+
+                                      {isDirty && canEditRAB && (
+                                        <div className="flex items-center justify-end gap-1 pt-0.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSaveOperasionalRowDraft(row)}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#1E3A8A] hover:bg-blue-900 text-white text-[10px] font-bold shadow-xs transition active:scale-[0.98]"
+                                            title="Simpan perubahan baris ini"
+                                          >
+                                            <Save className="w-3 h-3" />
+                                            <span>Simpan</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDiscardOperasionalRowDraft(row.id)}
+                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold transition"
+                                            title="Batalkan perubahan belum tersimpan"
+                                          >
+                                            <RotateCcw className="w-3 h-3" />
+                                            <span>Batal</span>
+                                          </button>
+                                        </div>
+                                      )}
+
+                                      <div className="flex flex-wrap items-center justify-end gap-1 pt-0.5">
+                                        {canEditRAB && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenEditRAB(row)}
+                                            className="p-1 text-blue-600 hover:text-blue-800 rounded hover:bg-blue-50 dark:hover:bg-blue-950 transition"
+                                            title="Edit Detail Lengkap Item RAB"
+                                          >
+                                            <FileEdit className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {(canEditRAB || hasPermission('procurement', 'delete')) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRequestDeleteRAB(row)}
+                                            className="p-1 text-[#E11D48] hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                            title="Hapus Item RAB"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {row.status === 'Menunggu Persetujuan' && hasPermission('procurement', 'approve') && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleApproveRAB(row.id)}
+                                              className="p-1 text-emerald-600 hover:text-emerald-800 rounded hover:bg-emerald-50 dark:hover:bg-emerald-950 transition"
+                                              title="Setujui Rencana Anggaran Belanja"
+                                            >
+                                              <CheckCircle className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRejectRAB(row.id)}
+                                              className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-50 dark:hover:bg-rose-950 transition"
+                                              title="Tolak Item Anggaran"
+                                            >
+                                              <Ban className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                        {row.status === 'Disetujui' && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleStartPOFromRAB(row)}
+                                            className="px-2 py-0.5 bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 rounded text-[10px] font-bold inline-flex items-center gap-1 border border-sky-200 dark:border-sky-800 transition"
+                                            title="Terbitkan PO dari RAB ini"
+                                          >
+                                            <ShoppingCart className="w-3 h-3" />
+                                            <span>Buat PO</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+
+                          {/* Inline Newly Added Editable Operasional Rows */}
+                          {newOperasionalRows.map((draft, newIdx) => {
+                            const targetPlanDate =
+                              filterRABDate !== 'ALL'
+                                ? filterRABDate
+                                : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+
+                            return (
+                              <tr
+                                key={draft.tempId}
+                                className="bg-teal-50/50 dark:bg-teal-950/20 transition-colors"
+                              >
+                                {/* Col 1: NO */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono font-bold text-[#0D9488] dark:text-teal-300 align-top">
+                                  {rabOperasionalRows.length + newIdx + 1}
+                                </td>
+
+                                {/* Col 2: URAIAN */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 align-top sticky left-0 z-10 bg-teal-50/90 dark:bg-slate-900">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    list="rab-operasional-master-options"
+                                    value={draft.itemName}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'itemName',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    placeholder="Ketik / pilih uraian operasional..."
+                                    className="w-full min-w-[190px] px-2 py-1 text-xs font-bold rounded border border-teal-400 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1 px-0.5">
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300">
+                                      Baris Baru
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      • {formatIndonesianDate(targetPlanDate)}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Col 3: JUMLAH SASARAN */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="1"
+                                    value={draft.sasaran}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'sasaran',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-24 mx-auto block px-1.5 py-1 text-center font-mono text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 4: Jumlah (QTY / volume) */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.volume}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'volume',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-24 mx-auto block px-1.5 py-1 text-center font-mono font-bold text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 5: Satuan */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="text"
+                                    list="rab-rincian-unit-options"
+                                    value={draft.unit}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'unit',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    placeholder="paket/pcs/hari"
+                                    className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                </td>
+
+                                {/* Col 6: HARGA DASAR */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.unitPrice}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'unitPrice',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-28 ml-auto block px-1.5 py-1 text-right font-mono text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="text-[10px] text-right text-slate-400 font-mono px-1.5">
+                                    {formatRupiah(draft.unitPrice)}
+                                  </div>
+                                </td>
+
+                                {/* Col 7: Jumlah (Total Harga) */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={draft.totalBudget}
+                                    onChange={e =>
+                                      updateNewOperasionalRowField(
+                                        draft.tempId,
+                                        'totalBudget',
+                                        e.target.value
+                                      )
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx);
+                                      }
+                                    }}
+                                    className="w-32 ml-auto block px-1.5 py-1 text-right font-mono font-bold text-xs tabular-nums rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                  />
+                                  <div className="text-[10px] text-right font-bold text-slate-700 dark:text-slate-300 font-mono px-1.5">
+                                    {formatRupiah(draft.totalBudget)}
+                                  </div>
+                                </td>
+
+                                {dynamicRabColumns.map(col => (
+                                  <td
+                                    key={col.key}
+                                    className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top text-slate-400"
+                                  >
+                                    -
+                                  </td>
+                                ))}
+
+                                {/* Col Aksi */}
+                                <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top print:hidden">
+                                  <div className="flex items-center justify-end gap-1.5 min-w-[175px]">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSaveNewOperasionalRow(draft.tempId, newIdx)
+                                      }
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#1E3A8A] hover:bg-blue-900 text-white text-[11px] font-bold shadow-xs transition active:scale-[0.98] cursor-pointer"
+                                      title="Simpan baris operasional baru"
+                                    >
+                                      <Save className="w-3 h-3" />
+                                      <span>Simpan</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveNewOperasionalRow(draft.tempId)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-[11px] font-bold transition active:scale-[0.98] cursor-pointer"
+                                      title="Batalkan & hapus baris baru ini"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Hapus</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          {/* Inline "+ Tambah Baris" Row inside Rincian Daftar Belanja (RAB) Operasional */}
+                          {canAddOperasionalRow && (
+                            <tr className="bg-slate-50/70 dark:bg-slate-800/40 print:hidden">
+                              <td
+                                colSpan={8 + dynamicRabColumns.length}
+                                className="border border-slate-300 dark:border-slate-700 px-3 py-2"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={handleAddNewOperasionalRow}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-teal-50 dark:bg-slate-900 dark:hover:bg-teal-950/60 text-[#0D9488] dark:text-teal-300 border border-dashed border-teal-400 dark:border-teal-700 text-xs font-bold transition active:scale-[0.98] cursor-pointer shadow-2xs"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Tambah Baris Operasional</span>
+                                </button>
+                                <span className="ml-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                  Tambahkan item biaya operasional langsung di tabel lalu isi &amp; klik Simpan
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+
+                        {/* Footer Summary Rows Matching Format Bahan Pangan */}
+                        <tfoot>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              TOTAL KESELURUHAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {formatRupiah(totalKeseluruhanOperasional)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30"
+                            />
+                          </tr>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              TOTAL PER SASARAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {formatRupiah(totalPerSasaranOperasional)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              Kalkulasi: Total Keseluruhan ÷ {formatNumber(rabTargetMetrics.totalSasaran)} sasaran
+                            </td>
+                          </tr>
+                          <tr className="bg-white dark:bg-slate-900 font-extrabold text-slate-900 dark:text-white">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs"
+                            >
+                              PAGU HARGA BELANJA HARIAN
+                            </td>
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
+                              {editingPaguTarget === 'operasional' ? (
+                                <div className="flex items-center justify-end gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={paguDraftInput}
+                                    onChange={e => setPaguDraftInput(e.target.value)}
+                                    className="w-28 px-2 py-1 text-xs font-mono font-bold rounded border border-blue-400 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      savePaguHarian(
+                                        'operasional',
+                                        Math.max(0, Number(paguDraftInput) || 0)
+                                      )
+                                    }
+                                    className="p-1 rounded bg-[#1E3A8A] text-white"
+                                    title="Simpan Pagu Operasional"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPaguTarget(null)}
+                                    className="p-1 rounded bg-slate-200 text-slate-700"
+                                    title="Batal"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center justify-end gap-1.5">
+                                  <span>{formatRupiah(rabTargetMetrics.paguOperasional)}</span>
+                                  {canEditRAB && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPaguTarget('operasional');
+                                        setPaguDraftInput(String(rabTargetMetrics.paguOperasional));
+                                      }}
+                                      className="p-0.5 text-slate-400 hover:text-[#1E3A8A] print:hidden"
+                                      title="Edit Pagu Harga Belanja Harian Operasional"
+                                    >
+                                      <FileEdit className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              {typeof paguHarianConfig.operasional === 'number' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => savePaguHarian('operasional', null)}
+                                  className="text-[10px] font-bold text-[#0D9488] hover:underline print:hidden"
+                                >
+                                  Reset ke Standar Operasional ({formatRupiah(rabTargetMetrics.defaultPaguOperasional)})
+                                </button>
+                              ) : (
+                                <span>
+                                  Kalkulasi standar operasional: {formatNumber(rabTargetMetrics.totalSasaran)} sasaran × Rp 3.000
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                          <tr className="font-extrabold">
+                            <td
+                              colSpan={6}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center uppercase text-xs bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                            >
+                              SISA
+                            </td>
+                            <td
+                              className={`border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap ${
+                                sisaOperasional >= 0
+                                  ? 'bg-[#92D050] text-slate-900'
+                                  : 'bg-rose-200 text-rose-900'
+                              }`}
+                            >
+                              {formatRupiah(sisaOperasional)}
+                            </td>
+                            <td
+                              colSpan={trailingColsCount}
+                              className="border border-slate-300 dark:border-slate-700 px-3 py-2 bg-slate-50/40 dark:bg-slate-800/30 text-[10px] font-normal text-slate-500"
+                            >
+                              {sisaOperasional >= 0
+                                ? 'Surplus / masih di bawah Pagu Belanja Harian'
+                                : 'Defisit / melebihi Pagu Belanja Harian'}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -1532,7 +4927,7 @@ export const ProcurementModule: React.FC = () => {
       {/* SUBMODUL B: PURCHASE ORDER (PO TERIKAT RAB) */}
       {/* ========================================================================= */}
       {activeTab === 'purchase_order' && (
-        <div className="space-y-4">
+        <div key="purchase_order" className="space-y-4 animate-fadeIn">
           {/* Rules Banner */}
           <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-800 flex items-start gap-3 text-xs text-sky-900 dark:text-sky-200">
             <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0 mt-0.5" />
@@ -1548,217 +4943,935 @@ export const ProcurementModule: React.FC = () => {
           </div>
 
           {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-2 text-xs overflow-x-auto pb-1">
-              <span className="font-bold text-slate-400 uppercase text-[10px]">Filter Status:</span>
-              {[
-                'ALL',
-                'Draft',
-                'Menunggu persetujuan',
-                'Disetujui',
-                'Dikirim ke supplier',
-                'Sebagian diterima',
-                'Selesai diterima',
-              ].map(st => (
-                <button
-                  key={st}
-                  onClick={() => setFilterPOStatus(st)}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition whitespace-nowrap text-[11px] ${
-                    filterPOStatus === st
-                      ? 'bg-blue-900 text-white dark:bg-sky-600'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                  }`}
-                >
-                  {st === 'ALL' ? 'Semua Status' : st}
-                </button>
-              ))}
+          <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs overflow-x-auto pb-1">
+                <span className="font-bold text-slate-400 uppercase text-[10px]">Filter Status:</span>
+                {[
+                  'ALL',
+                  'Draft',
+                  'Menunggu persetujuan',
+                  'Disetujui',
+                  'Dikirim ke supplier',
+                  'Sebagian diterima',
+                  'Selesai diterima',
+                ].map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setFilterPOStatus(st)}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition whitespace-nowrap text-[11px] ${
+                      filterPOStatus === st
+                        ? 'bg-blue-900 text-white dark:bg-sky-600'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                    }`}
+                  >
+                    {st === 'ALL' ? 'Semua Status' : st}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={triggerPrint}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition shrink-0"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Cetak Rekap PO</span>
+              </button>
             </div>
 
-            <button
-              onClick={triggerPrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>Cetak Rekap PO</span>
-            </button>
-          </div>
+            {/* Pilihan Hari, UI Date Picker Presisi & Basis Tanggal PO */}
+            <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+              {/* Baris Date Picker Interaktif + Stepper Harian + Basis Tanggal */}
+              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 bg-slate-50/80 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 font-bold text-[#1E3A8A] dark:text-sky-300 uppercase text-[10px]">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Filter Tanggal PO:</span>
+                  </span>
 
-          {/* DataTable PO */}
-          <DataTable
-            title="Daftar Purchase Order (PO) Bahan & Operasional"
-            subtitle="Status pengadaan dari penerbitan, otorisasi, pengiriman supplier, hingga verifikasi QC"
-            data={filteredPOs}
-            keyExtractor={item => item.id}
-            searchPlaceholder="Cari nomor PO, supplier, atau bahan..."
-            searchKeys={['poNumber', 'supplierName', 'status', 'qcStatus', 'notes']}
-            onPrint={triggerPrint}
-            stickyFirstColumn
-            columns={[
-              {
-                key: 'poNumber',
-                header: 'No. PO & Tanggal',
-                render: row => (
-                  <div className="font-mono text-xs">
-                    <span className="font-bold text-blue-900 dark:text-sky-300">
-                      {row.poNumber}
-                    </span>
-                    <div className="text-[10px] text-slate-400">
-                      Terbit: {formatIndonesianDate(row.date)}
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-sans">
-                      Target Kirim: <strong>{formatIndonesianDate(row.deliveryDate)}</strong>
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'supplierName',
-                header: 'Supplier / Rekanan',
-                render: row => (
-                  <div>
-                    <div className="font-bold text-slate-900 dark:text-white text-xs">
-                      {row.supplierName}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-mono">
-                      {row.supplierContact}
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                key: 'items',
-                header: 'Barang / Bahan Pesanan & Sumber RAB',
-                render: row => (
-                  <div className="space-y-1 text-xs">
-                    {row.items.map((it, idx) => {
-                      const linkedRab = rabList.find(r => r.id === (it.rabId || row.rabId));
-                      return (
-                        <div key={idx} className="space-y-0.5">
-                          <div className="font-semibold text-slate-800 dark:text-slate-200">
-                            {it.itemName} ({formatNumber(it.quantity)} {it.unit})
-                          </div>
-                          {linkedRab && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
-                              <Link2 className="w-2.5 h-2.5" />
-                              <span>RAB: {linkedRab.budgetCode}</span>
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ),
-              },
-              {
-                key: 'totalAmount',
-                header: 'Total Nilai (Rp)',
-                render: row => (
-                  <div className="font-mono text-xs font-black text-slate-900 dark:text-white">
-                    {formatRupiah(row.totalAmount)}
-                  </div>
-                ),
-              },
-              {
-                key: 'status',
-                header: 'Status PO',
-                render: row => (
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                      row.status === 'Selesai diterima' || row.status === 'Diterima di Gudang'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                        : row.status === 'Sebagian diterima'
-                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                        : row.status === 'Dikirim ke supplier'
-                        ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                        : row.status === 'Disetujui' || row.status === 'Disetujui Kepala'
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-sky-300'
-                        : row.status === 'Ditolak' || row.status === 'Dibatalkan'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                    }`}
-                  >
-                    <span>{row.status}</span>
-                  </span>
-                ),
-              },
-              {
-                key: 'qcStatus',
-                header: 'Status QC Bahan',
-                render: row => (
-                  <span
-                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                      row.qcStatus === 'Lolos Penuh' || row.qcStatus === 'Diterima'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                        : row.qcStatus === 'Lolos Sebagian' || row.qcStatus === 'Diterima sebagian'
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                        : row.qcStatus === 'Ditolak'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                    }`}
-                  >
-                    {row.qcStatus}
-                  </span>
-                ),
-              },
-              {
-                key: 'actions',
-                header: 'Aksi & Alur PO',
-                align: 'right',
-                render: row => (
-                  <div className="flex items-center justify-end gap-1.5">
-                    {/* Detail PO Modal */}
+                  {/* Interactive Date Picker Widget */}
+                  <div ref={poDatePickerRef} className="relative flex items-center gap-1">
                     <button
+                      type="button"
                       onClick={() => {
-                        setSelectedPOForDetail(row);
-                        setIsPODetailOpen(true);
+                        const base =
+                          filterPODate !== 'ALL'
+                            ? filterPODate
+                            : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+                        setFilterPODate(shiftIsoDate(base, -1));
                       }}
-                      className="p-1 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800"
-                      title="Lihat Detail & Cetak PO"
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                      title="Mundur 1 hari"
+                      aria-label="Tanggal sebelumnya"
                     >
-                      <Eye className="w-4 h-4" />
+                      <ChevronLeft className="w-3.5 h-3.5" />
                     </button>
 
-                    {/* Approve PO Button */}
-                    {(row.status === 'Menunggu persetujuan' || row.status === 'Menunggu Verifikasi Keuangan') &&
-                      hasPermission('procurement', 'approve') && (
-                        <button
-                          onClick={() => handleUpdatePOStatus(row.id, 'Disetujui')}
-                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
-                          title="Setujui PO"
-                        >
-                          <CheckCircle className="w-3 h-3" />
-                          <span>Setujui</span>
-                        </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPODatePickerOpen(v => !v)}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-2xs ${
+                        filterPODate !== 'ALL'
+                          ? 'bg-white dark:bg-slate-900 border-[#0D9488] text-slate-900 dark:text-white ring-1 ring-[#0D9488]/20'
+                          : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-blue-400'
+                      }`}
+                      title="Buka kalender Date Picker untuk memilih tanggal PO spesifik"
+                    >
+                      <Calendar className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
+                      <span className="font-mono">
+                        {filterPODate === 'ALL'
+                          ? 'Pilih Tanggal Spesifik...'
+                          : formatIndonesianDate(filterPODate)}
+                      </span>
+                      {filterPODate !== 'ALL' && (
+                        <span className="px-1.5 py-0.2 rounded bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300 text-[10px] font-mono">
+                          {poDateCountsMap.get(filterPODate) || 0} PO
+                        </span>
                       )}
+                    </button>
 
-                    {/* Send to Supplier */}
-                    {row.status === 'Disetujui' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const base =
+                          filterPODate !== 'ALL'
+                            ? filterPODate
+                            : plogMenuDays[0]?.date || new Date().toISOString().slice(0, 10);
+                        setFilterPODate(shiftIsoDate(base, 1));
+                      }}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                      title="Maju 1 hari"
+                      aria-label="Tanggal berikutnya"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    {filterPODate !== 'ALL' && (
                       <button
-                        onClick={() => handleUpdatePOStatus(row.id, 'Dikirim ke supplier')}
-                        className="px-2 py-1 bg-blue-900 hover:bg-blue-800 text-white rounded text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
-                        title="Kirim PO ke Supplier"
+                        type="button"
+                        onClick={() => setFilterPODate('ALL')}
+                        className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 transition cursor-pointer"
+                        title="Hapus filter tanggal (tampilkan semua tanggal)"
+                        aria-label="Reset filter tanggal"
                       >
-                        <Send className="w-3 h-3" />
-                        <span>Kirim Supplier</span>
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     )}
 
-                    {/* Quality Control Button: For arriving deliveries */}
-                    {(row.status === 'Dikirim ke supplier' || row.status === 'Sebagian diterima') && (
-                      <button
-                        onClick={() => handleOpenQCModal(row)}
-                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
-                        title="Input Inspeksi Quality Control"
-                      >
-                        <PackageCheck className="w-3 h-3" />
-                        <span>Inspeksi QC</span>
-                      </button>
+                    {/* Calendar Popover */}
+                    {isPODatePickerOpen && (
+                      <div className="absolute left-0 top-full mt-2 z-40 w-[300px] sm:w-[320px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-3 space-y-2.5 animate-fadeIn">
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => shiftPOCalendarMonth(-1)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer"
+                            title="Bulan sebelumnya"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <span className="text-xs font-extrabold text-slate-900 dark:text-white tracking-wide">
+                            {poCalendarCells.monthLabel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => shiftPOCalendarMonth(1)}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer"
+                            title="Bulan berikutnya"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400 uppercase">
+                          {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(d => (
+                            <div key={d} className="py-1">
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-7 gap-1">
+                          {poCalendarCells.cells.map(cell => {
+                            const count = poDateCountsMap.get(cell.iso) || 0;
+                            const isSelected = filterPODate === cell.iso;
+                            const isToday = cell.iso === new Date().toISOString().slice(0, 10);
+                            return (
+                              <button
+                                key={cell.iso}
+                                type="button"
+                                onClick={() => {
+                                  setFilterPODate(cell.iso);
+                                  setIsPODatePickerOpen(false);
+                                }}
+                                title={
+                                  count > 0
+                                    ? `${formatIndonesianDate(cell.iso)} • ${count} PO`
+                                    : formatIndonesianDate(cell.iso)
+                                }
+                                className={`relative h-9 rounded-lg flex flex-col items-center justify-center text-[11px] transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-[#0D9488] text-white font-extrabold shadow-xs'
+                                    : count > 0
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 font-bold border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                                    : cell.inMonth
+                                    ? 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                    : 'text-slate-300 dark:text-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                                } ${isToday && !isSelected ? 'ring-1 ring-blue-500' : ''}`}
+                              >
+                                <span>{cell.day}</span>
+                                {count > 0 && (
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
+                                      isSelected ? 'bg-white' : 'bg-[#0D9488]'
+                                    }`}
+                                  />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-500 shrink-0">
+                              Lompat ke:
+                            </span>
+                            <input
+                              type="date"
+                              value={filterPODate === 'ALL' ? '' : filterPODate}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val) {
+                                  setFilterPODate(val);
+                                  setIsPODatePickerOpen(false);
+                                }
+                              }}
+                              className="flex-1 min-w-0 px-2 py-1 text-[11px] rounded-md border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white font-mono"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const todayIso = new Date().toISOString().slice(0, 10);
+                                setFilterPODate(todayIso);
+                                setPoCalendarMonth(todayIso.slice(0, 7));
+                                setIsPODatePickerOpen(false);
+                              }}
+                              className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 text-blue-900 dark:text-sky-300 text-[11px] font-bold transition cursor-pointer"
+                            >
+                              Hari Ini
+                            </button>
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-[#0D9488] inline-block" />
+                              <span>Ada PO</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilterPODate('ALL');
+                                setIsPODatePickerOpen(false);
+                              }}
+                              className="px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold transition cursor-pointer"
+                            >
+                              Semua Tanggal
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
-                ),
-              },
-            ]}
-          />
+                </div>
+
+                {/* Basis Tanggal yang Difilter */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="font-bold text-slate-400 uppercase text-[10px] mr-0.5">
+                    Basis Tanggal:
+                  </span>
+                  {[
+                    { key: 'distribution' as const, label: 'Distribusi Menu' },
+                    { key: 'delivery' as const, label: 'Target Kirim (H-1)' },
+                    { key: 'issue' as const, label: 'Tanggal Terbit PO' },
+                    { key: 'any' as const, label: 'Semua Tanggal PO' },
+                  ].map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setFilterPODateField(opt.key)}
+                      className={`px-2 py-1 rounded-md font-bold transition border cursor-pointer ${
+                        filterPODateField === opt.key
+                          ? 'bg-[#1E3A8A] text-white border-[#1E3A8A] shadow-2xs dark:bg-sky-600 dark:border-sky-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pilihan Cepat Hari Menu PLOG & Tombol Sinkron PO Harian */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="inline-flex items-center gap-1 font-bold text-slate-500 dark:text-slate-400 uppercase text-[10px] mr-1">
+                    <span>Jadwal Menu Harian:</span>
+                  </span>
+                  {plogMenuDays.map(day => {
+                    const isActive =
+                      filterPODate === day.date && filterPODateField === 'distribution';
+                    return (
+                      <button
+                        key={day.date}
+                        type="button"
+                        onClick={() => {
+                          setFilterPODateField('distribution');
+                          setFilterPODate(day.date);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border cursor-pointer ${
+                          isActive
+                            ? 'bg-[#0D9488] text-white border-[#0D9488] shadow-2xs'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-teal-50 hover:border-teal-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                        }`}
+                      >
+                        {formatIndonesianDate(day.date)}
+                        {day.menuCodes.length > 0 ? ` • ${day.menuCodes.join(', ')}` : ''}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setFilterPODate('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border cursor-pointer ${
+                      filterPODate === 'ALL'
+                        ? 'bg-[#1E3A8A] text-white border-[#1E3A8A] shadow-2xs'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                    }`}
+                  >
+                    Semua Tanggal
+                  </button>
+                </div>
+
+                {hasPermission('procurement', 'create') && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      syncDailyPOsFromRAB(
+                        filterPODateField === 'delivery' && filterPODate !== 'ALL'
+                          ? shiftIsoDate(filterPODate, 1)
+                          : filterPODate
+                      )
+                    }
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold transition shrink-0 cursor-pointer"
+                    title="Sinkronkan daftar PO Bahan Pangan & Operasional Harian (urutan Bahan → Operasional, target kirim H-1)"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>
+                      {filterPODate !== 'ALL'
+                        ? 'Sinkron PO Harian (Bahan & Ops)'
+                        : 'Sinkron Semua PO Harian'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {filterPODate !== 'ALL' && (
+              <div className="px-3 py-2 rounded-lg bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/80 dark:border-teal-800/60 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <div className="text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-2">
+                  <span className="font-extrabold text-[#0D9488] dark:text-teal-300">
+                    {filterPODateField === 'delivery'
+                      ? `Filter Target Kirim H-1: ${formatIndonesianDate(filterPODate)}`
+                      : filterPODateField === 'issue'
+                      ? `Filter Tanggal Terbit PO: ${formatIndonesianDate(filterPODate)}`
+                      : filterPODateField === 'any'
+                      ? `Filter Semua Kriteria Tanggal PO: ${formatIndonesianDate(filterPODate)}`
+                      : activePOPlogDayInfo
+                      ? `Distribusi Menu ${activePOPlogDayInfo.menuCodes.join(', ')} (${formatIndonesianDate(activePOPlogDayInfo.date)})`
+                      : `Distribusi Menu Harian (${formatIndonesianDate(filterPODate)})`}
+                  </span>
+                  {filterPODateField === 'distribution' && (
+                    <>
+                      <ArrowRight className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/90 dark:bg-slate-900 border border-teal-300/70 dark:border-teal-700 font-bold text-blue-900 dark:text-sky-300">
+                        <Clock className="w-3 h-3" />
+                        Target Kirim Otomatis (H-1): {formatIndonesianDate(shiftIsoDate(filterPODate, -1))}
+                      </span>
+                    </>
+                  )}
+                  <span className="px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono font-bold text-slate-700 dark:text-slate-200">
+                    {searchedPOs.length} PO Ditemukan
+                  </span>
+                </div>
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                  Urutan Otomatis: 1. Nama Bahan Pangan → 2. Nama Bahan Operasional Harian
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Search & Header Card PO (selaras format RAB) */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm p-4 sm:px-5 space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  Daftar Purchase Order (PO) Bahan &amp; Operasional
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                  Urutan otomatis dari Nama Bahan Pangan dilanjut Nama Bahan Operasional Harian dengan target kirim H-1 sebelum distribusi menu
+                </p>
+              </div>
+              <div className="relative w-full lg:w-80 print:hidden">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={poSearchTerm}
+                  onChange={e => setPoSearchTerm(e.target.value)}
+                  placeholder="Cari nomor PO, supplier, atau bahan..."
+                  className="w-full h-9 pl-9 pr-8 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/70 text-slate-800 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+                {poSearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setPoSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs p-1 cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabel PO Berformat Kolom RAB (Tanpa Total Keseluruhan, Total per Sasaran, Pagu & Sisa) */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm overflow-hidden print:shadow-none">
+            <div className="px-4 py-2.5 bg-[#C6E0B4] dark:bg-emerald-950/70 border-b border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-emerald-100">
+                  PURCHASE ORDER (PO) BAHAN &amp; OPERASIONAL ({searchedPOs.length} PO)
+                </span>
+                {filterPODate !== 'ALL' && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/85 dark:bg-slate-900/75 text-[#0D9488] dark:text-teal-300 border border-teal-700/25">
+                    {filterPODateField === 'delivery'
+                      ? `Target Kirim H-1: ${formatIndonesianDate(filterPODate)}`
+                      : filterPODateField === 'issue'
+                      ? `Terbit PO: ${formatIndonesianDate(filterPODate)}`
+                      : filterPODateField === 'any'
+                      ? `Tanggal PO: ${formatIndonesianDate(filterPODate)}`
+                      : `Menu: ${formatIndonesianDate(filterPODate)} • Target Kirim H-1: ${formatIndonesianDate(shiftIsoDate(filterPODate, -1))}`}
+                  </span>
+                )}
+                {filterPOStatus !== 'ALL' && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                    Status: {filterPOStatus}
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] font-bold text-slate-700 dark:text-emerald-200 font-mono">
+                Total Baris Pesanan:{' '}
+                {searchedPOs.reduce((sum, po) => sum + Math.max(1, (po.items || []).length), 0)} Item (Bahan → Operasional)
+              </span>
+            </div>
+
+            {searchedPOs.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  variant={poSearchTerm ? 'search' : 'data'}
+                  title="Data Purchase Order tidak ditemukan"
+                  description={
+                    poSearchTerm
+                      ? 'Tidak ada Purchase Order yang cocok dengan kata kunci pencarian Anda.'
+                      : filterPODate !== 'ALL'
+                      ? `Belum ada Purchase Order pada tanggal ${formatIndonesianDate(filterPODate)} (${
+                          filterPODateField === 'delivery'
+                            ? 'Target Kirim H-1'
+                            : filterPODateField === 'issue'
+                            ? 'Tanggal Terbit PO'
+                            : filterPODateField === 'any'
+                            ? 'Semua Tanggal PO'
+                            : 'Distribusi Menu'
+                        }).`
+                      : 'Belum ada Purchase Order untuk status filter yang dipilih.'
+                  }
+                  actionLabel={
+                    poSearchTerm
+                      ? 'Reset Pencarian'
+                      : filterPODate !== 'ALL'
+                      ? 'Tampilkan Semua Tanggal'
+                      : undefined
+                  }
+                  onAction={
+                    poSearchTerm
+                      ? () => setPoSearchTerm('')
+                      : filterPODate !== 'ALL'
+                      ? () => setFilterPODate('ALL')
+                      : undefined
+                  }
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    {/* Numbered Spreadsheet Column Strip */}
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 text-center">
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 w-10">1</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 sticky left-0 z-10 bg-slate-100 dark:bg-slate-800">2</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">3</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">4</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">5</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">6</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">7</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">8</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">9</th>
+                      <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 print:hidden">
+                        Aksi
+                      </th>
+                    </tr>
+
+                    {/* Main Olive Green Column Headers matching RAB format */}
+                    <tr className="bg-[#548235] dark:bg-emerald-900 text-white text-[11px] font-extrabold tracking-wide">
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-2.5 py-2 text-center w-10">
+                        NO
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[240px] sticky left-0 z-10 bg-[#548235] dark:bg-emerald-900">
+                        NAMA BAHAN &amp; OPERASIONAL HARIAN
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[215px] whitespace-nowrap">
+                        NO. PO, SUPPLIER &amp; TARGET H-1
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                        Jumlah
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                        Satuan
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                        HARGA DASAR
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                        Jumlah
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                        Status PO
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                        Status QC Bahan
+                      </th>
+                      <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap print:hidden">
+                        Aksi &amp; Alur PO
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {searchedPOs.map((row, poIdx) => {
+                      const rawItemsList =
+                        row.items && row.items.length > 0
+                          ? row.items
+                          : [
+                              {
+                                itemId: row.id,
+                                itemName: row.notes || 'Pesanan PO',
+                                quantity: 1,
+                                unit: 'paket',
+                                unitPrice: row.totalAmount,
+                                subtotal: row.totalAmount,
+                                rabId: row.rabId,
+                              },
+                            ];
+                      const itemsList = sortPOItemsBahanThenOperasional(rawItemsList, row, rabList);
+                      const itemCount = itemsList.length;
+                      const resolvedDistDate = resolvePODistributionDate(row, rabList, menuItems);
+                      const itemApprovalStatuses = itemsList.map(item =>
+                        resolvePOItemApprovalStatus(item, row)
+                      );
+                      const approvedItemCount = itemApprovalStatuses.filter(
+                        s => s === 'Disetujui'
+                      ).length;
+                      const rejectedItemCount = itemApprovalStatuses.filter(
+                        s => s === 'Ditolak'
+                      ).length;
+                      const pendingItemCount = itemApprovalStatuses.filter(
+                        s => s === 'Menunggu persetujuan'
+                      ).length;
+                      const isPreDispatchPO =
+                        row.status === 'Draft' ||
+                        row.status === 'Menunggu persetujuan' ||
+                        row.status === 'Menunggu Verifikasi Keuangan' ||
+                        row.status === 'Disetujui' ||
+                        row.status === 'Disetujui Kepala' ||
+                        row.status === 'Ditolak';
+                      const canApproveItems =
+                        isPreDispatchPO && hasPermission('procurement', 'approve');
+
+                      return itemsList.map((it, itemIdx) => {
+                        const isFirstItem = itemIdx === 0;
+                        const linkedRab = rabList.find(r => r.id === (it.rabId || row.rabId));
+                        const isOpsItem = isOperasionalPOItem(it, row, rabList);
+                        const itemApprovalStatus = itemApprovalStatuses[itemIdx];
+                        const isItemRejected = itemApprovalStatus === 'Ditolak';
+
+                        return (
+                          <tr
+                            key={`${row.id}-${itemIdx}`}
+                            className={`transition-colors ${
+                              isItemRejected
+                                ? 'bg-rose-50/30 dark:bg-rose-950/15 opacity-75'
+                                : isOpsItem
+                                ? 'bg-amber-50/20 hover:bg-amber-50/50 dark:bg-amber-950/10 dark:hover:bg-slate-800/60'
+                                : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/60'
+                            }`}
+                          >
+                            {/* Col 1: NO */}
+                            {isFirstItem && (
+                              <td
+                                rowSpan={itemCount}
+                                className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono text-slate-700 dark:text-slate-300 align-top"
+                              >
+                                {poIdx + 1}
+                              </td>
+                            )}
+
+                            {/* Col 2: NAMA BAHAN & OPERASIONAL HARIAN */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
+                              <div
+                                className={`font-bold text-xs ${
+                                  isItemRejected
+                                    ? 'line-through text-slate-400 dark:text-slate-500'
+                                    : 'text-slate-900 dark:text-white'
+                                }`}
+                              >
+                                {it.itemName}
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                    isOpsItem
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  }`}
+                                >
+                                  {isOpsItem ? 'Operasional Harian' : 'Bahan Pangan'}
+                                </span>
+                                {linkedRab && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                                    <Link2 className="w-2.5 h-2.5" />
+                                    <span>RAB: {linkedRab.budgetCode}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Col 3: NO. PO, SUPPLIER & TARGET H-1 */}
+                            {isFirstItem && (
+                              <td
+                                rowSpan={itemCount}
+                                className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top"
+                              >
+                                <div className="font-mono text-xs font-bold text-blue-900 dark:text-sky-300">
+                                  {row.poNumber}
+                                </div>
+                                {resolvedDistDate && (
+                                  <div className="text-[10px] text-[#0D9488] dark:text-teal-300 font-semibold">
+                                    Distribusi Menu: {formatIndonesianDate(resolvedDistDate)}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-slate-600 dark:text-slate-300">
+                                  Target Kirim (H-1):{' '}
+                                  <strong className="text-blue-900 dark:text-sky-300">
+                                    {formatIndonesianDate(row.deliveryDate)}
+                                  </strong>
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  Terbit: {formatIndonesianDate(row.date)}
+                                </div>
+                                <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800">
+                                  <div className="font-bold text-slate-900 dark:text-white text-[11px]">
+                                    {row.supplierName}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-mono">
+                                    {row.supplierContact}
+                                  </div>
+                                </div>
+                                {itemCount > 1 && (
+                                  <div className="mt-1 text-[10px] font-mono font-bold text-[#1E3A8A] dark:text-sky-300">
+                                    Total PO: {formatRupiah(row.totalAmount)}
+                                  </div>
+                                )}
+                              </td>
+                            )}
+
+                            {/* Col 4: Jumlah (QTY) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center font-mono font-bold tabular-nums text-slate-900 dark:text-white align-top">
+                              {formatNumber(it.quantity)}
+                            </td>
+
+                            {/* Col 5: Satuan */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center text-slate-700 dark:text-slate-300 align-top">
+                              {it.unit}
+                            </td>
+
+                            {/* Col 6: HARGA DASAR */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums text-slate-800 dark:text-slate-200 align-top whitespace-nowrap">
+                              {formatRupiah(it.unitPrice)}
+                            </td>
+
+                            {/* Col 7: Jumlah (Subtotal / Nilai Item) */}
+                            <td
+                              className={`border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono font-bold tabular-nums align-top whitespace-nowrap ${
+                                isItemRejected
+                                  ? 'line-through text-slate-400 dark:text-slate-500'
+                                  : 'text-slate-900 dark:text-white'
+                              }`}
+                            >
+                              {formatRupiah(it.subtotal)}
+                            </td>
+
+                            {/* Col 8: Status PO (Per Item Bahan & Operasional) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center align-top whitespace-nowrap">
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    itemApprovalStatus === 'Disetujui'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : itemApprovalStatus === 'Ditolak'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {itemApprovalStatus === 'Disetujui' ? (
+                                    <CheckCircle className="w-3 h-3" />
+                                  ) : itemApprovalStatus === 'Ditolak' ? (
+                                    <XCircle className="w-3 h-3" />
+                                  ) : (
+                                    <Clock className="w-3 h-3" />
+                                  )}
+                                  <span>
+                                    {itemApprovalStatus === 'Disetujui'
+                                      ? 'Disetujui'
+                                      : itemApprovalStatus === 'Ditolak'
+                                      ? 'Ditolak'
+                                      : 'Menunggu'}
+                                  </span>
+                                </span>
+
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-semibold ${
+                                    row.status === 'Selesai diterima' ||
+                                    row.status === 'Diterima di Gudang'
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                      : row.status === 'Sebagian diterima'
+                                      ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
+                                      : row.status === 'Dikirim ke supplier'
+                                      ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
+                                      : row.status === 'Disetujui' ||
+                                        row.status === 'Disetujui Kepala'
+                                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-sky-300'
+                                      : row.status === 'Ditolak' || row.status === 'Dibatalkan'
+                                      ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                  }`}
+                                >
+                                  PO: {row.status}
+                                </span>
+
+                                {isFirstItem && itemCount > 1 && (
+                                  <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400">
+                                    {approvedItemCount}/{itemCount} Disetujui
+                                    {rejectedItemCount > 0 ? ` · ${rejectedItemCount} Ditolak` : ''}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Col 9: Status QC Bahan */}
+                            {isFirstItem && (
+                              <td
+                                rowSpan={itemCount}
+                                className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center align-top whitespace-nowrap"
+                              >
+                                <span
+                                  className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    row.qcStatus === 'Lolos Penuh' ||
+                                    row.qcStatus === 'Diterima'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : row.qcStatus === 'Lolos Sebagian' ||
+                                        row.qcStatus === 'Diterima sebagian'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : row.qcStatus === 'Ditolak'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}
+                                >
+                                  {row.qcStatus}
+                                </span>
+                              </td>
+                            )}
+
+                            {/* Col Aksi: Persetujuan Per Item & Alur PO */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 align-top print:hidden">
+                              <div className="flex flex-col items-end gap-1.5 min-w-[165px]">
+                                {/* Baris Tombol Persetujuan Masing-Masing Item (Bahan / Operasional) */}
+                                {canApproveItems && (
+                                  <div className="flex items-center justify-end gap-1 flex-wrap">
+                                    {itemApprovalStatus === 'Menunggu persetujuan' ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(row, itemIdx, 'Disetujui')
+                                          }
+                                          className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold inline-flex items-center gap-1 transition shadow-xs"
+                                          title={`Setujui item ${it.itemName}`}
+                                        >
+                                          <CheckCircle className="w-3 h-3" />
+                                          <span>Setujui</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(row, itemIdx, 'Ditolak')
+                                          }
+                                          className="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold inline-flex items-center gap-1 transition shadow-xs"
+                                          title={`Tolak item ${it.itemName}`}
+                                        >
+                                          <XCircle className="w-3 h-3" />
+                                          <span>Tolak</span>
+                                        </button>
+                                      </>
+                                    ) : itemApprovalStatus === 'Disetujui' ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(row, itemIdx, 'Ditolak')
+                                          }
+                                          className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:hover:bg-rose-900 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded text-[10px] font-bold inline-flex items-center gap-1 transition"
+                                          title={`Batalkan & tolak item ${it.itemName}`}
+                                        >
+                                          <XCircle className="w-3 h-3" />
+                                          <span>Tolak</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(
+                                              row,
+                                              itemIdx,
+                                              'Menunggu persetujuan'
+                                            )
+                                          }
+                                          className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                                          title={`Kembalikan ${it.itemName} ke Menunggu Persetujuan`}
+                                        >
+                                          <RotateCcw className="w-3 h-3" />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(row, itemIdx, 'Disetujui')
+                                          }
+                                          className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded text-[10px] font-bold inline-flex items-center gap-1 transition"
+                                          title={`Setujui kembali item ${it.itemName}`}
+                                        >
+                                          <CheckCircle className="w-3 h-3" />
+                                          <span>Setujui</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdatePOItemApproval(
+                                              row,
+                                              itemIdx,
+                                              'Menunggu persetujuan'
+                                            )
+                                          }
+                                          className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                                          title={`Kembalikan ${it.itemName} ke Menunggu Persetujuan`}
+                                        >
+                                          <RotateCcw className="w-3 h-3" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Alur PO Level Dokumen (Baris Pertama PO) */}
+                                {isFirstItem && (
+                                  <div className="flex items-center justify-end gap-1.5 flex-wrap pt-0.5 border-t border-slate-100 dark:border-slate-800/80 w-full">
+                                    {/* Detail PO Modal */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPOForDetail(row);
+                                        setIsPODetailOpen(true);
+                                      }}
+                                      className="p-1 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                                      title="Lihat Detail & Cetak PO"
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                    </button>
+
+                                    {/* Approve All Pending Items in Multi-Item PO */}
+                                    {canApproveItems && itemCount > 1 && pendingItemCount > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdatePOStatus(row.id, 'Disetujui')}
+                                        className="px-2 py-1 bg-teal-700 hover:bg-teal-600 text-white rounded text-[10px] font-bold inline-flex items-center gap-1 transition shadow-xs"
+                                        title="Setujui semua item pada PO ini"
+                                      >
+                                        <CheckSquare className="w-3 h-3" />
+                                        <span>Setujui Semua</span>
+                                      </button>
+                                    )}
+
+                                    {/* Send to Supplier */}
+                                    {(row.status === 'Disetujui' ||
+                                      row.status === 'Disetujui Kepala') && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleUpdatePOStatus(row.id, 'Dikirim ke supplier')
+                                        }
+                                        className="px-2 py-1 bg-blue-900 hover:bg-blue-800 text-white rounded text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
+                                        title="Kirim PO ke Supplier"
+                                      >
+                                        <Send className="w-3 h-3" />
+                                        <span>Kirim Supplier</span>
+                                      </button>
+                                    )}
+
+                                    {/* Quality Control Button: For arriving deliveries */}
+                                    {(row.status === 'Dikirim ke supplier' ||
+                                      row.status === 'Sebagian diterima') && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenQCModal(row)}
+                                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold flex items-center gap-1 transition shadow-xs"
+                                        title="Input Inspeksi Quality Control"
+                                      >
+                                        <PackageCheck className="w-3 h-3" />
+                                        <span>Inspeksi QC</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1766,9 +5879,9 @@ export const ProcurementModule: React.FC = () => {
       {/* SUBMODUL C: QUALITY CONTROL & STOK GUDANG */}
       {/* ========================================================================= */}
       {activeTab === 'quality_control' && (
-        <div className="space-y-4">
+        <div key="quality_control" className="space-y-4 animate-fadeIn">
           <div className="bg-emerald-50 dark:bg-emerald-950/40 p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-start gap-3 text-xs text-emerald-900 dark:text-emerald-200">
-            <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <ShieldCheck className="w-5 h-5 text-[#0D9488] shrink-0 mt-0.5" />
             <div className="space-y-1">
               <div className="font-bold">
                 Kaidah Penerimaan Stok Gudang & Verifikasi Quality Control (QC):
@@ -1781,31 +5894,31 @@ export const ProcurementModule: React.FC = () => {
           </div>
 
           {/* Calculation & Photo Completeness Summary Bar */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[10px] font-bold uppercase text-slate-400">Total Qty Dipesan</div>
-              <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-0.5">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+              <div className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">Total Qty Dipesan</div>
+              <div className="text-xl font-bold tracking-tight font-mono tabular-nums text-slate-900 dark:text-white mt-1.5">
                 {formatNumber(qcTotals.ordered)} unit
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[10px] font-bold uppercase text-slate-400">Total Qty Diterima</div>
-              <div className="text-lg font-black font-mono text-emerald-600 mt-0.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+              <div className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400">Total Qty Diterima</div>
+              <div className="text-xl font-bold tracking-tight font-mono tabular-nums text-[#0D9488] mt-1.5">
                 {formatNumber(qcTotals.received)} unit
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
-                <Calculator className="w-3 h-3 text-blue-600" />
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+              <div className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                <Calculator className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400" />
                 <span>Perhitungan Selisih</span>
               </div>
               <div
-                className={`text-lg font-black font-mono mt-0.5 ${
+                className={`text-xl font-bold tracking-tight font-mono tabular-nums mt-1.5 ${
                   qcTotals.diff === 0
-                    ? 'text-emerald-600'
+                    ? 'text-[#0D9488]'
                     : qcTotals.diff < 0
-                    ? 'text-rose-600'
-                    : 'text-sky-600'
+                    ? 'text-[#E11D48]'
+                    : 'text-[#1E3A8A] dark:text-sky-400'
                 }`}
               >
                 {qcTotals.diff === 0
@@ -1813,25 +5926,67 @@ export const ProcurementModule: React.FC = () => {
                   : `${qcTotals.diff > 0 ? '+' : ''}${formatNumber(qcTotals.diff)} unit (${qcTotals.pct}%)`}
               </div>
             </div>
-            <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
-                <Camera className="w-3 h-3 text-indigo-600" />
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+              <div className="text-[11px] font-bold uppercase text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                <Camera className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400" />
                 <span>Foto Bahan Terupload</span>
               </div>
-              <div className="text-lg font-black font-mono text-indigo-600 mt-0.5">
-                {qcTotals.photoCount}/{qcList.length} Item ({qcTotals.totalPhotos} Foto)
+              <div className="text-xl font-bold tracking-tight font-mono tabular-nums text-[#1E3A8A] dark:text-sky-400 mt-1.5">
+                {qcTotals.photoCount}/{filteredQCLogList.length} Item ({qcTotals.totalPhotos} Foto)
               </div>
             </div>
           </div>
+
+          {/* Filter Tanggal PO Harian pada Tab Quality Control */}
+          {qcAvailableDates.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 mr-1">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>PO Harian:</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQcTabDateFilter('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                    qcTabDateFilter === 'ALL'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  Semua Tanggal
+                </button>
+                {qcAvailableDates.map(d => (
+                  <button
+                    key={`qc-tab-day-${d}`}
+                    type="button"
+                    onClick={() => setQcTabDateFilter(d)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                      qcTabDateFilter === d
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    {formatIndonesianDate(d)}
+                  </button>
+                ))}
+              </div>
+              {qcTabDateFilter !== 'ALL' && (
+                <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  Menampilkan log QC PO harian {formatIndonesianDate(qcTabDateFilter)}
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <PackageCheck className="w-4 h-4 text-emerald-600" />
-                Rekam Jejak Inspeksi Quality Control Penerimaan Bahan
+                Rekam Jejak Inspeksi Quality Control Penerimaan Bahan &amp; Operasional
               </h3>
               <p className="text-xs text-slate-500">
-                Upload foto per masing-masing bahan/barang, pantau perhitungan selisih dipesan vs diterima, dan isi keterangan manual
+                Upload foto per masing-masing bahan/operasional harian, pantau selisih dipesan vs diterima, dan isi keterangan manual
               </p>
             </div>
 
@@ -1842,7 +5997,7 @@ export const ProcurementModule: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-2xs"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Input QC dari Purchase Order</span>
+                <span>Input QC PO Harian (Bahan &amp; Operasional)</span>
               </button>
               <button
                 type="button"
@@ -1875,7 +6030,7 @@ export const ProcurementModule: React.FC = () => {
           <DataTable
             title="Log Inspeksi Quality Control (QC)"
             subtitle="Pemeriksaan organoleptik, perhitungan selisih pesanan vs penerimaan, foto per bahan & keterangan manual"
-            data={qcList}
+            data={filteredQCLogList}
             keyExtractor={item => item.id}
             searchPlaceholder="Cari no PO, barang, supplier, pemeriksa, keterangan..."
             searchKeys={['poNumber', 'supplierName', 'itemName', 'inspectorName', 'condition', 'qualityGrade', 'notes']}
@@ -2182,6 +6337,8 @@ export const ProcurementModule: React.FC = () => {
                       sourceMenuCode: need.sourceMenuCodes.join(', '),
                       sourceMenuLabel: need.sourceMenuLabels.join(' | '),
                       notes: `Kebutuhan akumulasi Perencanaan Menu (${need.sourceMenuCodes.join(', ')})`,
+                      rincianItems: need.rincianItems.map(l => ({ ...l })),
+                      isRincianManual: false,
                     }));
                   }
                 } else if (val.startsWith('menuitem:')) {
@@ -2200,6 +6357,19 @@ export const ProcurementModule: React.FC = () => {
                       sourceMenuCode: need.sourceMenuCode,
                       sourceMenuLabel: need.sourceMenuLabel,
                       notes: `Kebutuhan Perencanaan Menu ${need.sourceMenuLabel}`,
+                      rincianItems: [
+                        {
+                          id: `rin-modal-${need.sourceMenuId}-${Date.now()}`,
+                          menuName: need.menuDishLabel || need.sourceMenuLabel || need.sourceMenuCode,
+                          ingredientName: need.name,
+                          quantity: need.quantity,
+                          unit: need.unit,
+                          sourceMenuId: need.sourceMenuId,
+                          sourceMenuCode: need.sourceMenuCode,
+                          isManual: false,
+                        },
+                      ],
+                      isRincianManual: false,
                     }));
                   }
                 } else if (val.startsWith('mb:')) {
@@ -2217,6 +6387,17 @@ export const ProcurementModule: React.FC = () => {
                       sourceMenuCode: undefined,
                       sourceMenuLabel: undefined,
                       notes: `Tersinkron dari Master Bahan (${mb.code})`,
+                      rincianItems: [
+                        {
+                          id: `rin-mb-${mb.id}-${Date.now()}`,
+                          menuName: 'Pengadaan Master Bahan',
+                          ingredientName: mb.name,
+                          quantity: Math.max(mb.minimumStock, 50),
+                          unit: mb.unit,
+                          isManual: true,
+                        },
+                      ],
+                      isRincianManual: true,
                     }));
                   }
                 }
@@ -2246,6 +6427,161 @@ export const ProcurementModule: React.FC = () => {
                 ))}
               </optgroup>
             </select>
+          </div>
+
+          {/* Rincian RAB Editor inside Modal */}
+          <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                  Rincian RAB (Menu, Nama Bahan, Kuantiti & Satuan)
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                  Terisi otomatis dari Perencanaan Menu PLOG dan dapat diedit manual
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setRabForm(prev => ({
+                    ...prev,
+                    isRincianManual: true,
+                    rincianItems: [
+                      ...(prev.rincianItems || []),
+                      {
+                        id: `rin-modal-man-${Date.now()}-${(prev.rincianItems || []).length}`,
+                        menuName: prev.sourceMenuLabel || prev.sourceMenuCode || '',
+                        ingredientName: prev.itemName || '',
+                        quantity: 0,
+                        unit: prev.unit || 'kg',
+                        isManual: true,
+                      },
+                    ],
+                  }))
+                }
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 hover:bg-blue-100 text-[#1E3A8A] border border-blue-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800 transition"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Tambah Baris Rincian</span>
+              </button>
+            </div>
+
+            {(rabForm.rincianItems || []).length === 0 ? (
+              <div className="text-[11px] text-slate-400 italic py-1">
+                Pilih kebutuhan bahan PLOG di atas untuk mengisi otomatis, atau klik "Tambah Baris Rincian".
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {(rabForm.rincianItems || []).map((line, idx) => (
+                  <div
+                    key={line.id || idx}
+                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700"
+                  >
+                    <div className="sm:col-span-4">
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        Menu (PLOG)
+                      </label>
+                      <input
+                        type="text"
+                        value={line.menuName}
+                        list="rab-rincian-menu-options"
+                        onChange={e =>
+                          setRabForm(prev => ({
+                            ...prev,
+                            isRincianManual: true,
+                            rincianItems: (prev.rincianItems || []).map((l, i) =>
+                              i === idx ? { ...l, menuName: e.target.value, isManual: true } : l
+                            ),
+                          }))
+                        }
+                        placeholder="Kode & nama menu"
+                        className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        Nama Bahan
+                      </label>
+                      <input
+                        type="text"
+                        value={line.ingredientName}
+                        onChange={e =>
+                          setRabForm(prev => ({
+                            ...prev,
+                            isRincianManual: true,
+                            rincianItems: (prev.rincianItems || []).map((l, i) =>
+                              i === idx ? { ...l, ingredientName: e.target.value, isManual: true } : l
+                            ),
+                          }))
+                        }
+                        placeholder="Nama bahan"
+                        className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        Kuantiti
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={line.quantity}
+                        onChange={e => {
+                          const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value));
+                          setRabForm(prev => ({
+                            ...prev,
+                            isRincianManual: true,
+                            rincianItems: (prev.rincianItems || []).map((l, i) =>
+                              i === idx
+                                ? { ...l, quantity: Number.isFinite(val) ? val : 0, isManual: true }
+                                : l
+                            ),
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 text-xs font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-1">
+                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                        Satuan
+                      </label>
+                      <input
+                        type="text"
+                        value={line.unit}
+                        list="rab-rincian-unit-options"
+                        onChange={e =>
+                          setRabForm(prev => ({
+                            ...prev,
+                            isRincianManual: true,
+                            rincianItems: (prev.rincianItems || []).map((l, i) =>
+                              i === idx ? { ...l, unit: e.target.value, isManual: true } : l
+                            ),
+                          }))
+                        }
+                        className="w-full px-2 py-1.5 text-xs font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                      />
+                    </div>
+                    <div className="sm:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRabForm(prev => ({
+                            ...prev,
+                            isRincianManual: true,
+                            rincianItems: (prev.rincianItems || []).filter((_, i) => i !== idx),
+                          }))
+                        }
+                        className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 transition"
+                        title="Hapus baris rincian"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <DynamicFormRenderer
@@ -2320,23 +6656,39 @@ export const ProcurementModule: React.FC = () => {
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={() => {
-                setIsRABModalOpen(false);
-                setIsModalRabSchemaEdit(false);
-              }}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
-            >
-              Simpan Item RAB
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div>
+              {selectedRAB &&
+                (hasPermission('procurement', 'edit') || hasPermission('procurement', 'delete')) && (
+                  <button
+                    type="button"
+                    onClick={() => handleRequestDeleteRAB(selectedRAB)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Hapus RAB</span>
+                  </button>
+                )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsRABModalOpen(false);
+                  setIsModalRabSchemaEdit(false);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold rounded-lg bg-blue-900 hover:bg-blue-800 text-white shadow-xs"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Simpan Item RAB</span>
+              </button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -2478,8 +6830,8 @@ export const ProcurementModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Supplier & Delivery Date */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Supplier, Tanggal Distribusi Menu & Target Kirim Otomatis H-1 */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Pilih Supplier / Rekanan *
@@ -2499,15 +6851,37 @@ export const ProcurementModule: React.FC = () => {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Tanggal Pengiriman *
+                Tanggal Distribusi Menu Harian *
+              </label>
+              <input
+                type="date"
+                required
+                value={poFormDistributionDate}
+                onChange={e => {
+                  const nextDist = e.target.value;
+                  setPoFormDistributionDate(nextDist);
+                  if (nextDist) {
+                    setPoFormDeliveryDate(shiftIsoDate(nextDist, -1));
+                  }
+                }}
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Target Kirim (Otomatis H-1) *
               </label>
               <input
                 type="date"
                 required
                 value={poFormDeliveryDate}
                 onChange={e => setPoFormDeliveryDate(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-teal-400 dark:border-teal-700 bg-teal-50/40 dark:bg-teal-950/30 text-slate-900 dark:text-white font-mono font-bold"
               />
+              <p className="text-[10px] text-[#0D9488] dark:text-teal-300 mt-0.5 font-semibold">
+                Otomatis H-1 sebelum distribusi menu ({formatIndonesianDate(poFormDistributionDate)})
+              </p>
             </div>
           </div>
 
@@ -2569,7 +6943,7 @@ export const ProcurementModule: React.FC = () => {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: QUALITY CONTROL (WAJIB TERIKAT PURCHASE ORDER) */}
+      {/* MODAL: QUALITY CONTROL (WAJIB TERIKAT PURCHASE ORDER HARIAN) */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isQCModalOpen}
@@ -2580,140 +6954,301 @@ export const ProcurementModule: React.FC = () => {
         title={
           editingQCRecord
             ? `Edit Hasil Quality Control — ${editingQCRecord.itemName}`
-            : 'Input Quality Control (QC) dari Purchase Order'
+            : 'Input Quality Control (QC) — Purchase Order Harian'
         }
         subtitle={
           editingQCRecord
             ? `Mengubah hasil QC otomatis memperbarui status PO (${editingQCRecord.poNumber}) dan saldo Stok Gudang`
-            : selectedPOForQC
-            ? `Verifikasi fisik penerimaan bahan bersumber dari PO: ${selectedPOForQC.poNumber} (Otomatis masuk Stok Gudang)`
-            : 'Pilih Purchase Order (PO) untuk verifikasi barang masuk ke Stok Gudang'
+            : `Menampilkan seluruh Bahan Pangan & Operasional Harian untuk PO tanggal ${formatIndonesianDate(qcModalDate)} (otomatis masuk Stok Gudang)`
         }
         maxWidth="2xl"
       >
         <form onSubmit={handleSaveQCInspection} className="space-y-4">
-          {/* Sumber Purchase Order (Terkunci ke PO) */}
-          <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Sumber Purchase Order (Wajib) *
-              </label>
-              {editingQCRecord ? (
-                <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono font-bold text-blue-900 dark:text-sky-300 truncate">
-                  {editingQCRecord.poNumber}
+          {/* Sumber Purchase Order Harian (Tanggal PO Harian + Cakupan PO + Petugas) */}
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3 text-xs">
+            {!editingQCRecord && (
+              <div className="space-y-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Pilih Tanggal Purchase Order Harian *</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={qcModalDate}
+                      onChange={e => {
+                        if (e.target.value) handleSelectQCDateInModal(e.target.value);
+                      }}
+                      className="px-2 py-1 text-[11px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSyncAndReloadQCModal}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 text-[10px] font-bold transition"
+                      title="Sinkronkan PO Bahan Pangan & Operasional harian dari RAB"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Sinkron PO Harian</span>
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <select
-                  required
-                  value={qcSelectedPOId}
-                  onChange={e => handleSelectPOSourceInQCModal(e.target.value)}
-                  className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
-                >
-                  {eligiblePOsForQC.map(po => (
-                    <option key={po.id} value={po.id}>
-                      {po.poNumber} — {po.supplierName} ({po.status})
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
 
-            <div>
-              <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Supplier Rekanan (Dari PO)
-              </span>
-              <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white truncate">
-                {editingQCRecord?.supplierName || selectedPOForQC?.supplierName || '-'}
+                {qcAvailableDates.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {qcAvailableDates.map(dayIso => {
+                      const isDayActive = qcModalDate === dayIso;
+                      const dayPOsCount = getPOsForDailyQCDate(dayIso).length;
+                      return (
+                        <button
+                          key={`qc-modal-day-${dayIso}`}
+                          type="button"
+                          onClick={() => handleSelectQCDateInModal(dayIso)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition inline-flex items-center gap-1.5 ${
+                            isDayActive
+                              ? 'bg-blue-900 text-white shadow-xs'
+                              : 'bg-white hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          <span>{formatIndonesianDate(dayIso)}</span>
+                          <span
+                            className={`px-1 rounded text-[9px] font-mono ${
+                              isDayActive
+                                ? 'bg-blue-800 text-sky-200'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                            }`}
+                          >
+                            {dayPOsCount} PO
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Petugas Pemeriksa QC *
-              </label>
-              <input
-                type="text"
-                required
-                value={qcFormInspector}
-                onChange={e => setQcFormInspector(e.target.value)}
-                className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Cakupan Purchase Order Harian *
+                </label>
+                {editingQCRecord ? (
+                  <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono font-bold text-blue-900 dark:text-sky-300 truncate">
+                    {editingQCRecord.poNumber}
+                  </div>
+                ) : (
+                  <select
+                    required
+                    value={qcSelectedPOId}
+                    onChange={e => handleSelectPOSourceInQCModal(e.target.value)}
+                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                  >
+                    <option value="ALL_DAILY">
+                      Semua PO Harian — Bahan &amp; Operasional ({qcDailyPOs.length} PO)
+                    </option>
+                    {qcDailyPOs.map(po => (
+                      <option key={po.id} value={po.id}>
+                        {po.poNumber} — {po.poCategory || 'PO'} ({po.supplierName})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Supplier &amp; PO Aktif Hari Ini
+                </span>
+                <div className="px-2.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white truncate">
+                  {editingQCRecord
+                    ? editingQCRecord.supplierName
+                    : qcSelectedPOId === 'ALL_DAILY'
+                    ? qcDailyPOs.length > 0
+                      ? `${qcDailyPOs.length} PO (${Array.from(new Set(qcDailyPOs.map(p => p.supplierName))).join(', ')})`
+                      : 'Belum ada PO pada tanggal ini'
+                    : selectedPOForQC?.supplierName || '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Petugas Pemeriksa QC *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={qcFormInspector}
+                  onChange={e => setQcFormInspector(e.target.value)}
+                  className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Daftar Bahan & Barang dari PO (Item & Qty Dipesan Terkunci dari PO) */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <PackageCheck className="w-4 h-4 text-emerald-600" />
-                <span>Daftar Barang dari Purchase Order ({qcItemDrafts.length} Item)</span>
-              </div>
-              {!editingQCRecord && selectedPOForQC && (
-                <button
-                  type="button"
-                  onClick={handleReloadPOItemsInQC}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[11px] font-bold transition"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Muat Semua Item PO</span>
-                </button>
-              )}
-            </div>
+          {/* Daftar Semua Bahan Pangan & Operasional Harian dari PO */}
+          {(() => {
+            const bahanDraftCount = qcItemDrafts.filter(
+              d => d.categoryLabel === 'Bahan Pangan'
+            ).length;
+            const opsDraftCount = qcItemDrafts.filter(
+              d => d.categoryLabel === 'Operasional Harian'
+            ).length;
+            const visibleQCDrafts = qcItemDrafts.filter(d =>
+              qcModalCategoryFilter === 'ALL'
+                ? true
+                : d.categoryLabel === qcModalCategoryFilter
+            );
 
-            <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-              {qcItemDrafts.map((draft, idx) => {
-                const ordered = Number(draft.orderedQuantity) || 0;
-                const received = Number(draft.receivedQuantity) || 0;
-                const diff = received - ordered;
-                const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
-
-                return (
-                  <div
-                    key={draft.key}
-                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80 space-y-3 shadow-2xs"
-                  >
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                      <span className="text-[11px] font-black text-blue-900 dark:text-sky-300 uppercase tracking-wide">
-                        Item #{idx + 1} — {draft.itemName}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
-                            diff === 0
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : diff < 0
-                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                              : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+            return (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                    <PackageCheck className="w-4 h-4 text-emerald-600" />
+                    <span>
+                      Daftar Semua Bahan Pangan &amp; Operasional Harian ({qcItemDrafts.length} Item)
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {!editingQCRecord && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setQcModalCategoryFilter('ALL')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            qcModalCategoryFilter === 'ALL'
+                              ? 'bg-slate-900 text-white dark:bg-sky-600'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
                           }`}
                         >
-                          Selisih: {diff === 0 ? `0 ${draft.unit} (Sesuai)` : `${diff > 0 ? '+' : ''}${diff} ${draft.unit}`} ({pct}%)
-                        </span>
-                        {!editingQCRecord && qcItemDrafts.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveQCItemRow(draft.key)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                            title="Lewati item yang belum tiba"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                          Semua ({qcItemDrafts.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQcModalCategoryFilter('Bahan Pangan')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            qcModalCategoryFilter === 'Bahan Pangan'
+                              ? 'bg-teal-700 text-white'
+                              : 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300'
+                          }`}
+                        >
+                          Bahan Pangan ({bahanDraftCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQcModalCategoryFilter('Operasional Harian')}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                            qcModalCategoryFilter === 'Operasional Harian'
+                              ? 'bg-amber-600 text-white'
+                              : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                          }`}
+                        >
+                          Operasional Harian ({opsDraftCount})
+                        </button>
+                      </>
+                    )}
+                    {!editingQCRecord && (qcDailyPOs.length > 0 || selectedPOForQC) && (
+                      <button
+                        type="button"
+                        onClick={handleReloadPOItemsInQC}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-blue-900 dark:text-sky-300 border border-blue-200 dark:border-sky-800 text-[10px] font-bold transition"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Muat Semua Item</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-                    {/* Row 1: Nama Bahan (PO), Satuan (PO), Jumlah Dipesan (PO), Jumlah Diterima (Input), Selisih */}
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                      <div className="sm:col-span-4">
-                        <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                          Nama Bahan / Barang (Dari PO)
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          value={draft.itemName}
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-semibold cursor-not-allowed"
-                        />
-                      </div>
+                {visibleQCDrafts.length === 0 ? (
+                  <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/50 text-center space-y-2">
+                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                      Belum ada item Purchase Order harian untuk tanggal {formatIndonesianDate(qcModalDate)}
+                      {qcModalCategoryFilter !== 'ALL' ? ` (Kategori: ${qcModalCategoryFilter})` : ''}.
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Pilih tanggal PO harian lain di atas atau klik Sinkron PO Harian untuk menarik item Bahan Pangan &amp; Operasional dari RAB.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[48vh] overflow-y-auto pr-1">
+                    {visibleQCDrafts.map((draft, idx) => {
+                      const ordered = Number(draft.orderedQuantity) || 0;
+                      const received = Number(draft.receivedQuantity) || 0;
+                      const diff = received - ordered;
+                      const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+                      const isOpsDraft = draft.categoryLabel === 'Operasional Harian';
+
+                      return (
+                        <div
+                          key={draft.key}
+                          className={`p-3.5 rounded-xl border space-y-3 shadow-2xs ${
+                            isOpsDraft
+                              ? 'border-amber-200 dark:border-amber-800/70 bg-amber-50/25 dark:bg-amber-950/15'
+                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-black text-blue-900 dark:text-sky-300 uppercase tracking-wide">
+                                Item #{idx + 1} — {draft.itemName}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                  isOpsDraft
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                    : 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                }`}
+                              >
+                                {draft.categoryLabel}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono text-[9px] font-semibold">
+                                {draft.poNumber} • {draft.supplierName}
+                              </span>
+                              {draft.existingQcId && !editingQCRecord && (
+                                <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 text-[9px] font-bold">
+                                  Tercatat di QC (Update)
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
+                                  diff === 0
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    : diff < 0
+                                    ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                    : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                }`}
+                              >
+                                Selisih: {diff === 0 ? `0 ${draft.unit} (Sesuai)` : `${diff > 0 ? '+' : ''}${diff} ${draft.unit}`} ({pct}%)
+                              </span>
+                              {!editingQCRecord && qcItemDrafts.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveQCItemRow(draft.key)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                  title="Lewati item yang belum tiba"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Row 1: Nama Bahan (PO), Satuan (PO), Jumlah Dipesan (PO), Jumlah Diterima (Input), Selisih */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                            <div className="sm:col-span-4">
+                              <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                                Nama Bahan / Barang (Dari PO)
+                              </label>
+                              <input
+                                type="text"
+                                readOnly
+                                value={draft.itemName}
+                                className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-semibold cursor-not-allowed"
+                              />
+                            </div>
 
                       <div className="sm:col-span-2">
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
@@ -2958,7 +7493,10 @@ export const ProcurementModule: React.FC = () => {
                 );
               })}
             </div>
-          </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Live Calculation Summary Bar Inside Modal */}
           <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -3074,23 +7612,48 @@ export const ProcurementModule: React.FC = () => {
                   <th className="p-2.5">Nama Barang / Bahan</th>
                   <th className="p-2.5 text-center">Jumlah</th>
                   <th className="p-2.5 text-right">Harga Satuan</th>
+                  <th className="p-2.5 text-center">Status Item</th>
                   <th className="p-2.5 text-right">Subtotal</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                {selectedPOForDetail.items.map((it, idx) => (
-                  <tr key={idx}>
-                    <td className="p-2.5">{idx + 1}</td>
-                    <td className="p-2.5 font-sans font-bold">{it.itemName}</td>
-                    <td className="p-2.5 text-center">{formatNumber(it.quantity)} {it.unit}</td>
-                    <td className="p-2.5 text-right">{formatRupiah(it.unitPrice)}</td>
-                    <td className="p-2.5 text-right font-black">{formatRupiah(it.subtotal)}</td>
-                  </tr>
-                ))}
+                {sortPOItemsBahanThenOperasional(
+                  selectedPOForDetail.items,
+                  selectedPOForDetail,
+                  rabList
+                ).map((it, idx) => {
+                  const st = resolvePOItemApprovalStatus(it, selectedPOForDetail);
+                  return (
+                    <tr key={idx} className={st === 'Ditolak' ? 'opacity-60 bg-rose-50/40 dark:bg-rose-950/20' : ''}>
+                      <td className="p-2.5">{idx + 1}</td>
+                      <td className={`p-2.5 font-sans font-bold ${st === 'Ditolak' ? 'line-through text-slate-400' : ''}`}>
+                        {it.itemName}
+                      </td>
+                      <td className="p-2.5 text-center">{formatNumber(it.quantity)} {it.unit}</td>
+                      <td className="p-2.5 text-right">{formatRupiah(it.unitPrice)}</td>
+                      <td className="p-2.5 text-center font-sans">
+                        <span
+                          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            st === 'Disetujui'
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : st === 'Ditolak'
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          }`}
+                        >
+                          {st}
+                        </span>
+                      </td>
+                      <td className={`p-2.5 text-right font-black ${st === 'Ditolak' ? 'line-through text-slate-400' : ''}`}>
+                        {formatRupiah(it.subtotal)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot className="bg-slate-50 dark:bg-slate-900 font-mono font-bold border-t border-slate-200 dark:border-slate-800">
                 <tr>
-                  <td colSpan={4} className="p-2.5 text-right font-sans uppercase">Total Nilai Pesanan:</td>
+                  <td colSpan={5} className="p-2.5 text-right font-sans uppercase">Total Nilai Pesanan (Item Aktif):</td>
                   <td className="p-2.5 text-right font-black text-emerald-700 dark:text-emerald-400 text-sm">
                     {formatRupiah(selectedPOForDetail.totalAmount)}
                   </td>
@@ -3235,6 +7798,16 @@ export const ProcurementModule: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        isOpen={Boolean(rabDeleteConfirm)}
+        onClose={() => setRabDeleteConfirm(null)}
+        onConfirm={handleConfirmDeleteRAB}
+        title="Hapus Item RAB & Rincian"
+        message={`Apakah Anda yakin ingin menghapus item RAB "${rabDeleteConfirm?.budgetCode || ''} — ${rabDeleteConfirm?.itemName || ''}" beserta rinciannya? Penghapusan ini hanya berlaku di RAB dan TIDAK menghapus Menu PLOG maupun Food Cost PLOG.`}
+        confirmLabel="Ya, Hapus RAB"
+        isDestructive
+      />
     </div>
   );
 };

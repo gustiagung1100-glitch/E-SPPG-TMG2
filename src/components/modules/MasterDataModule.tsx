@@ -739,7 +739,7 @@ export const MasterDataModule: React.FC = () => {
         <div
           role="tablist"
           aria-label="Kategori Master Data"
-          className="flex flex-wrap items-center gap-1.5"
+          className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar"
         >
           {[
             {
@@ -781,7 +781,7 @@ export const MasterDataModule: React.FC = () => {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setActiveTab(tab.key)}
-                className={`inline-flex items-center gap-2 min-h-[38px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-2 min-h-[38px] px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-out active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-white'
@@ -806,71 +806,79 @@ export const MasterDataModule: React.FC = () => {
 
       {/* Tab A Content: Master Penerima Manfaat */}
       {activeTab === 'penerima' && (
-        <DataTable
-          title="Master Data Lembaga Penerima Manfaat"
-          subtitle="Daftar resmi lembaga sekolah, jenjang, kuota porsi, nomor rekening dan status aktif"
-          data={institutions}
-          columns={institutionColumns}
-          keyExtractor={item => item.id}
-          searchPlaceholder="Cari nama lembaga, jenis, PIC, no rekening..."
-          searchKeys={['name', 'institutionType', 'npsn', 'picName', 'accountNumber']}
-          onExportExcel={() => exportToExcel(institutions, 'Master_Penerima_Manfaat_SPPG', 'Penerima')}
-          onPrint={triggerPrint}
-          stickyFirstColumn
-        />
+        <div key="penerima" className="animate-fadeIn">
+          <DataTable
+            title="Master Data Lembaga Penerima Manfaat"
+            subtitle="Daftar resmi lembaga sekolah, jenjang, kuota porsi, nomor rekening dan status aktif"
+            data={institutions}
+            columns={institutionColumns}
+            keyExtractor={item => item.id}
+            searchPlaceholder="Cari nama lembaga, jenis, PIC, no rekening..."
+            searchKeys={['name', 'institutionType', 'npsn', 'picName', 'accountNumber']}
+            onExportExcel={() => exportToExcel(institutions, 'Master_Penerima_Manfaat_SPPG', 'Penerima')}
+            onPrint={triggerPrint}
+            stickyFirstColumn
+          />
+        </div>
       )}
 
       {/* Tab B Content: Master Bahan Pangan */}
       {activeTab === 'bahan' && (
-        <DataTable
-          title="Master Data Bahan Pangan & Nilai Nutrisi"
-          subtitle="Spesifikasi bahan, harga acuan BGN vs aktual pasar, stok safety, dan kandungan gizi per 100 gram"
-          data={masterBahan}
-          columns={bahanColumns}
-          keyExtractor={item => item.id}
-          searchPlaceholder="Cari kode, nama bahan, kategori..."
-          searchKeys={['code', 'name', 'category']}
-          onExportExcel={() => exportToExcel(masterBahan, 'Master_Bahan_Pangan_SPPG', 'Bahan Pangan')}
-          onPrint={triggerPrint}
-          stickyFirstColumn
-        />
+        <div key="bahan" className="animate-fadeIn">
+          <DataTable
+            title="Master Data Bahan Pangan & Nilai Nutrisi"
+            subtitle="Spesifikasi bahan, harga acuan BGN vs aktual pasar, stok safety, dan kandungan gizi per 100 gram"
+            data={masterBahan}
+            columns={bahanColumns}
+            keyExtractor={item => item.id}
+            searchPlaceholder="Cari kode, nama bahan, kategori..."
+            searchKeys={['code', 'name', 'category']}
+            onExportExcel={() => exportToExcel(masterBahan, 'Master_Bahan_Pangan_SPPG', 'Bahan Pangan')}
+            onPrint={triggerPrint}
+            stickyFirstColumn
+          />
+        </div>
       )}
 
       {/* Tab C Content: Master Supplier */}
       {activeTab === 'supplier' && (
-        <DataTable
-          title="Master Data Rekanan & Supplier Bahan Pangan"
-          subtitle="Identitas rekanan pengadaan, jenis komoditas pasokan pangan, nomor rekening bank pembayaran"
-          data={masterSuppliers}
-          columns={supplierColumns}
-          keyExtractor={item => item.id}
-          searchPlaceholder="Cari nama supplier, PIC, komoditas..."
-          searchKeys={['name', 'code', 'contactPerson', 'bankName', 'accountNumber']}
-          onExportExcel={() => exportToExcel(masterSuppliers, 'Master_Supplier_SPPG', 'Supplier')}
-          onPrint={triggerPrint}
-          stickyFirstColumn
-        />
+        <div key="supplier" className="animate-fadeIn">
+          <DataTable
+            title="Master Data Rekanan & Supplier Bahan Pangan"
+            subtitle="Identitas rekanan pengadaan, jenis komoditas pasokan pangan, nomor rekening bank pembayaran"
+            data={masterSuppliers}
+            columns={supplierColumns}
+            keyExtractor={item => item.id}
+            searchPlaceholder="Cari nama supplier, PIC, komoditas..."
+            searchKeys={['name', 'code', 'contactPerson', 'bankName', 'accountNumber']}
+            onExportExcel={() => exportToExcel(masterSuppliers, 'Master_Supplier_SPPG', 'Supplier')}
+            onPrint={triggerPrint}
+            stickyFirstColumn
+          />
+        </div>
       )}
 
       {/* Tab D Content: Master Relawan */}
       {activeTab === 'relawan' && (
-        <DataTable
-          title="Master Data Relawan Satuan Pelayanan"
-          subtitle="Daftar relawan aktif per divisi kerja (Persiapan, Pengolahan, Pemorsian, Distribusi, Cuci Ompreng, Kebersihan, Keamanan)"
-          data={masterVolunteers}
-          columns={volunteerColumns}
-          keyExtractor={item => item.id}
-          searchPlaceholder="Cari nama relawan, divisi, jabatan..."
-          searchKeys={['name', 'code', 'division', 'position', 'phone']}
-          onExportExcel={() => exportToExcel(masterVolunteers, 'Master_Relawan_SPPG', 'Relawan')}
-          onPrint={triggerPrint}
-          stickyFirstColumn
-        />
+        <div key="relawan" className="animate-fadeIn">
+          <DataTable
+            title="Master Data Relawan Satuan Pelayanan"
+            subtitle="Daftar relawan aktif per divisi kerja (Persiapan, Pengolahan, Pemorsian, Distribusi, Cuci Ompreng, Kebersihan, Keamanan)"
+            data={masterVolunteers}
+            columns={volunteerColumns}
+            keyExtractor={item => item.id}
+            searchPlaceholder="Cari nama relawan, divisi, jabatan..."
+            searchKeys={['name', 'code', 'division', 'position', 'phone']}
+            onExportExcel={() => exportToExcel(masterVolunteers, 'Master_Relawan_SPPG', 'Relawan')}
+            onPrint={triggerPrint}
+            stickyFirstColumn
+          />
+        </div>
       )}
 
       {/* Tab E Content: Master Satuan & Konversi Dimensi */}
       {activeTab === 'satuan' && (
-        <div className="space-y-6">
+        <div key="satuan" className="space-y-6 animate-fadeIn">
           {/* Interactive Calculator Component */}
           <div className="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200/85 dark:border-slate-800 shadow-sm">
             <div className="flex items-center gap-2 mb-2">

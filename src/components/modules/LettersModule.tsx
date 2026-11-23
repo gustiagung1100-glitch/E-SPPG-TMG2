@@ -964,70 +964,70 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Salinan Dokumen Keluar
             </span>
-            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
+            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-[#1E3A8A] dark:text-blue-400">
               <Send className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {stats.totalOut}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Arsip salinan resmi tersimpan
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Surat Masuk Tercatat
             </span>
             <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400">
               <Inbox className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {stats.totalIn}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Buku register surat masuk
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Perlu Tindak Lanjut
             </span>
-            <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+            <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-900/30 text-[#D97706] dark:text-amber-400">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-[#D97706] dark:text-amber-400 mt-2">
             {stats.pendingIn}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
             Surat masuk menunggu proses
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               Template Master Aktif
             </span>
-            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+            <div className="p-2 rounded-lg bg-teal-50 dark:bg-teal-900/30 text-[#0D9488] dark:text-teal-400">
               <Layers className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+          <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white mt-2">
             {officialDocumentTemplates.length}
           </div>
-          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 font-medium">
+          <div className="text-[11px] text-[#0D9488] dark:text-teal-400 mt-1 flex items-center gap-1 font-medium">
             <Lock className="w-3 h-3" /> Template Asli Terkunci (Read-Only)
           </div>
         </div>
@@ -1035,7 +1035,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
 
       {/* Main Responsive Pill Tab Navigation */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar items-center gap-1.5 pb-1 sm:pb-0">
           <button
             onClick={() => setActiveTab('outgoing')}
             className={`min-h-[38px] inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 ease-in-out cursor-pointer ${
@@ -1099,7 +1099,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
       {/* TAB 1: MODUL 14 ADMINISTRASI DOKUMEN & SURAT KELUAR */}
       {/* ========================================================================= */}
       {activeTab === 'outgoing' && (
-        <div className="space-y-4">
+        <div key="outgoing" className="space-y-4 animate-fadeIn">
           {/* Strict Rule Notice Box */}
           <div className="bg-amber-50/90 dark:bg-amber-950/35 border border-amber-200 dark:border-amber-800/80 p-4 rounded-xl text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
             <Lock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -1192,7 +1192,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
       {/* TAB 2: MODUL 15 BUKU REGISTER SURAT MASUK & DISPOSISI */}
       {/* ========================================================================= */}
       {activeTab === 'incoming' && (
-        <div className="space-y-4">
+        <div key="incoming" className="space-y-4 animate-fadeIn">
           {/* Filters & Actions Bar */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex flex-1 flex-col sm:flex-row gap-3">
@@ -1266,6 +1266,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
               onExportPDF={handleExportIncomingPDF}
               onExportExcel={handleExportIncomingExcel}
               onPrint={triggerPrint}
+              stickyFirstColumn
             />
           </div>
         </div>
@@ -1275,7 +1276,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
       {/* TAB 3: KATALOG 8 TEMPLATE MASTER (READ-ONLY BLUEPRINT) */}
       {/* ========================================================================= */}
       {activeTab === 'templates' && (
-        <div className="space-y-4">
+        <div key="templates" className="space-y-4 animate-fadeIn">
           <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-200">
             <h3 className="font-bold text-sm mb-1 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -1290,7 +1291,7 @@ Dokumen ini dibuat secara resmi melalui E-SPPG Management System.
             {officialDocumentTemplates.map(tmpl => (
               <div
                 key={tmpl.id}
-                className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between"
+                className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 ease-out flex flex-col justify-between h-full"
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">

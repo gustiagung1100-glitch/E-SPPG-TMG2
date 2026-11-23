@@ -3980,7 +3980,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         </div>
 
         {/* Categories Tab Bar */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar gap-1.5 pb-1 sm:pb-0">
           {categoriesList.map(cat => (
             <button
               key={cat}
@@ -4116,7 +4116,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       </div>
 
       {/* DOCUMENT PREVIEW CARD (WYSIWYG TAMPILAN RESMI PEMERINTAH) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden print:overflow-visible print:border-none print:shadow-none print:rounded-none">
+      <div
+        key={activeReportKey}
+        className="bg-white rounded-xl border border-slate-200/80 shadow-md overflow-hidden animate-fadeIn print:animate-none print:overflow-visible print:border-none print:shadow-none print:rounded-none"
+      >
         {/* Document Header Status Bar */}
         <div className="print:hidden bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-blue-900/50">
           <div className="flex items-center gap-3">
@@ -4154,15 +4157,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         {/* Key Metrics Banner */}
         <div className="print:hidden grid grid-cols-2 lg:grid-cols-4 gap-4 p-6 bg-slate-50/70 border-b border-slate-200">
           {reportPayload.metrics.map((m, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider block">
+            <div
+              key={idx}
+              className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider block">
                 {m.label}
               </span>
-              <div className={`text-xl font-bold mt-1 ${m.color || 'text-slate-900'}`}>
+              <div className={`text-2xl font-bold tracking-tight tabular-nums mt-1.5 ${m.color || 'text-slate-900'}`}>
                 {m.value}
               </div>
               {m.sublabel && (
-                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                <span className="text-[11px] text-slate-500 mt-1 block">
                   {m.sublabel}
                 </span>
               )}
@@ -5449,7 +5455,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             {/* Dokumentasi Foto Porsi Kecil & Besar Otomatis dari Divisi Pemorsian (Khusus Laporan Flyer Menu) */}
             {activeReportKey === 'flyer_menu' && (
               <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/40 flex items-center gap-3">
+                <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/40 flex items-center gap-3 h-full transition-all duration-200 ease-out hover:shadow-sm">
                   <img
                     src={flyerPortioningData.smallPhoto}
                     alt="Foto Porsi Kecil Divisi Pemorsian"
@@ -5460,7 +5466,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                         caption: `Gramasi: ~${flyerPortioningData.smallGrams}g • Tanggal: ${flyerPortioningData.date} • Petugas: ${flyerPortioningData.officerName}`,
                       })
                     }
-                    className="w-24 h-20 object-cover rounded-lg border border-blue-200 cursor-pointer shrink-0 hover:opacity-90"
+                    className="w-24 aspect-[4/3] object-cover rounded-lg border border-blue-200 cursor-pointer shrink-0 hover:opacity-90"
                   />
                   <div className="min-w-0">
                     <div className="text-[10px] font-bold uppercase text-blue-800">
@@ -5474,7 +5480,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     </div>
                   </div>
                 </div>
-                <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center gap-3">
+                <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center gap-3 h-full transition-all duration-200 ease-out hover:shadow-sm">
                   <img
                     src={flyerPortioningData.largePhoto}
                     alt="Foto Porsi Besar Divisi Pemorsian"
@@ -5485,7 +5491,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                         caption: `Gramasi: ~${flyerPortioningData.largeGrams}g • Tanggal: ${flyerPortioningData.date} • Petugas: ${flyerPortioningData.officerName}`,
                       })
                     }
-                    className="w-24 h-20 object-cover rounded-lg border border-emerald-200 cursor-pointer shrink-0 hover:opacity-90"
+                    className="w-24 aspect-[4/3] object-cover rounded-lg border border-emerald-200 cursor-pointer shrink-0 hover:opacity-90"
                   />
                   <div className="min-w-0">
                     <div className="text-[10px] font-bold uppercase text-emerald-800">
@@ -5506,9 +5512,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             <div className="overflow-x-auto rounded-lg border border-slate-200 mt-2">
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
-                  <tr className="bg-blue-900 text-white font-semibold">
+                  <tr className="bg-[#1E3A8A] text-white font-semibold">
                     {reportPayload.headers.map((h, i) => (
-                      <th key={i} className="px-3.5 py-2.5 border-b border-blue-950 whitespace-nowrap">
+                      <th
+                        key={i}
+                        className={`px-3.5 py-2.5 border-b border-blue-950 whitespace-nowrap ${
+                          i === 0 ? 'sticky left-0 z-20 print:static bg-[#1E3A8A] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.18)]' : ''
+                        }`}
+                      >
                         {h}
                       </th>
                     ))}
@@ -5525,7 +5536,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                     reportPayload.rows.map((row, rowIdx) => (
                       <tr
                         key={rowIdx}
-                        className={rowIdx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/60 hover:bg-slate-100/60'}
+                        className={`group ${rowIdx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/60 hover:bg-slate-100/60'}`}
                       >
                         {row.map((cell, colIdx) => {
                           const displayCell = reportPayload.displayRows?.[rowIdx]?.[colIdx] ?? cell;
@@ -5537,7 +5548,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                           return (
                             <td
                               key={colIdx}
-                              className={`px-3.5 py-2.5 text-slate-800 align-middle ${isPhotoCol ? '' : 'whitespace-nowrap'}`}
+                              className={`px-3.5 py-2.5 text-slate-800 align-middle ${isPhotoCol ? '' : 'whitespace-nowrap'} ${
+                                colIdx === 0
+                                  ? `sticky left-0 z-10 print:static shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)] ${
+                                      rowIdx % 2 === 0
+                                        ? 'bg-white group-hover:bg-slate-50'
+                                        : 'bg-slate-50 group-hover:bg-slate-100'
+                                    }`
+                                  : ''
+                              }`}
                             >
                               {displayCell}
                             </td>

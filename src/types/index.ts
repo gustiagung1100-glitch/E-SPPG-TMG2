@@ -489,6 +489,15 @@ export interface RecipeIngredientManualOverrides {
   totalKuantiti?: number;
 }
 
+export interface RecipeCustomColumn {
+  id: string;
+  title: string;
+  inputType: 'text' | 'textarea' | 'number';
+  placeholder?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
 export interface RecipeIngredient {
   id: string;
   menuName?: string; // Nama hidangan pada kolom MENU
@@ -511,6 +520,7 @@ export interface RecipeIngredient {
   fiber100g: number;
   referenceSource: string; // e.g. "TKPI Kemenkes RI 2020", "USDA FoodData Central"
   manualOverrides?: RecipeIngredientManualOverrides;
+  customRecipeValues?: Record<string, string>;
 }
 
 export interface FoodCompositionItem {
@@ -669,6 +679,17 @@ export interface InventoryItem {
 export type RABCategory = 'RAB Bahan Pangan' | 'RAB Operasional';
 export type RABApprovalStatus = 'Draft' | 'Menunggu Persetujuan' | 'Disetujui' | 'Ditolak';
 
+export interface RABRincianItem {
+  id: string;
+  menuName: string;
+  ingredientName: string;
+  quantity: number;
+  unit: string;
+  sourceMenuId?: string;
+  sourceMenuCode?: string;
+  isManual?: boolean;
+}
+
 export interface RABItem {
   id: string;
   category: RABCategory;
@@ -690,6 +711,10 @@ export interface RABItem {
   sourceMenuId?: string;
   sourceMenuCode?: string;
   sourceMenuLabel?: string;
+  rincianItems?: RABRincianItem[];
+  isRincianManual?: boolean;
+  isManualOverride?: boolean;
+  sourceIngredientKey?: string;
   customFields?: Record<string, any>;
 }
 
@@ -738,6 +763,11 @@ export interface QualityControlRecord {
   inventoryAdded: boolean;
 }
 
+export type POItemApprovalStatus =
+  | 'Menunggu persetujuan'
+  | 'Disetujui'
+  | 'Ditolak';
+
 export interface PurchaseOrderItem {
   itemId: string;
   itemName: string;
@@ -747,6 +777,10 @@ export interface PurchaseOrderItem {
   subtotal: number;
   rabId?: string;
   receivedQuantity?: number;
+  category?: 'RAB Bahan Pangan' | 'RAB Operasional';
+  approvalStatus?: POItemApprovalStatus;
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export interface SupplierDocument {
@@ -764,6 +798,8 @@ export interface PurchaseOrder {
   supplierName: string;
   supplierContact: string;
   deliveryDate: string;
+  distributionDate?: string;
+  poCategory?: 'Bahan Pangan' | 'Operasional' | 'Gabungan';
   items: PurchaseOrderItem[];
   totalAmount: number;
   rabId?: string;

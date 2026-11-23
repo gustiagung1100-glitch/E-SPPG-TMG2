@@ -894,7 +894,7 @@ export const InstitutionsModule: React.FC = () => {
 
       {/* Sub-Tabs Navigation (Responsive Pill Tabs) */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar text-xs font-semibold">
           {[
             { key: 'data_lembaga' as TabKey, label: '1. Data Lembaga & Kuota', icon: <School className="w-4 h-4 shrink-0" /> },
             { key: 'presensi_harian' as TabKey, label: '2. Presensi Kehadiran Siswa', icon: <UserCheck className="w-4 h-4 shrink-0" /> },
@@ -912,7 +912,7 @@ export const InstitutionsModule: React.FC = () => {
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`min-h-[38px] inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`min-h-[38px] inline-flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all duration-200 ease-out active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer ${
                   isActive
                     ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
@@ -939,7 +939,7 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 1: DATA LEMBAGA & KUOTA PENERIMA MANFAAT */}
       {/* ========================================================================= */}
       {activeTab === 'data_lembaga' && (
-        <div className="space-y-4">
+        <div key="data_lembaga" className="space-y-4 animate-fadeIn">
           {/* Filter Jenjang */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
             <span className="text-slate-600 dark:text-slate-400 font-bold uppercase text-[11px] mr-1">Filter Jenjang:</span>
@@ -1310,7 +1310,7 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 3: RIWAYAT PERUBAHAN KUOTA PENERIMA (AUDIT TRAIL) */}
       {/* ========================================================================= */}
       {activeTab === 'riwayat_kuota' && (
-        <div className="space-y-4">
+        <div key="riwayat_kuota" className="space-y-4 animate-fadeIn">
           <div className="bg-sky-50 dark:bg-sky-950/40 p-4 rounded-xl border border-sky-200 dark:border-sky-800/80 flex items-center gap-3">
             <Info className="w-5 h-5 text-sky-700 dark:text-sky-400 shrink-0" />
             <div className="text-xs text-sky-900 dark:text-sky-200 leading-relaxed">
@@ -1327,6 +1327,7 @@ export const InstitutionsModule: React.FC = () => {
             keyExtractor={item => item.id}
             searchPlaceholder="Cari riwayat lembaga, alasan, atau petugas..."
             searchKeys={['institutionName', 'reason', 'updatedBy', 'timestamp']}
+            stickyFirstColumn
             columns={[
               {
                 key: 'timestamp',
@@ -1422,7 +1423,7 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 4: REKAP DISTRIBUSI HARIAN */}
       {/* ========================================================================= */}
       {activeTab === 'rekap_harian' && (
-        <div className="space-y-4">
+        <div key="rekap_harian" className="space-y-4 animate-fadeIn">
           {/* Date Selector & Action Bar */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -1510,7 +1511,7 @@ export const InstitutionsModule: React.FC = () => {
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
                         <th className="p-3">No</th>
-                        <th className="p-3">Nama Lembaga & Jenjang</th>
+                        <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 p-3 min-w-[170px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Nama Lembaga &amp; Jenjang</th>
                         <th className="p-3 text-center">Terdaftar (K / B / Total)</th>
                         <th className="p-3 text-center text-rose-600">Tidak Hadir (K / B / Total)</th>
                         <th className="p-3 text-center text-emerald-700 dark:text-emerald-400">Porsi Aktual (K / B / Total)</th>
@@ -1527,9 +1528,9 @@ export const InstitutionsModule: React.FC = () => {
                       {dailyRekapLogs.map((item, idx) => {
                         const rate = ((item.actualPortions / item.totalRegistered) * 100).toFixed(1);
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
+                          <tr key={item.id} className="group hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
                             <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
-                            <td className="p-3">
+                            <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 p-3 min-w-[170px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                               <div className="font-bold text-slate-900 dark:text-white">
                                 {item.institutionName}
                               </div>
@@ -1614,7 +1615,7 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 5: REKAP MINGGUAN & BULANAN */}
       {/* ========================================================================= */}
       {activeTab === 'rekap_mingguan_bulanan' && (
-        <div className="space-y-4">
+        <div key="rekap_mingguan_bulanan" className="space-y-4 animate-fadeIn">
           {/* Sub-Switch Toggle */}
           <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-2">
@@ -1664,7 +1665,7 @@ export const InstitutionsModule: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                        <th className="p-3">Hari & Tanggal</th>
+                        <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 p-3 min-w-[160px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Hari &amp; Tanggal</th>
                         <th className="p-3 text-center">Kuota Terdaftar</th>
                         <th className="p-3 text-center text-rose-600">Siswa Tidak Hadir</th>
                         <th className="p-3 text-center text-sky-600">Porsi Kecil Aktual</th>
@@ -1675,8 +1676,8 @@ export const InstitutionsModule: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                       {weeklyDays.map((w, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white font-sans">{w.day}</td>
+                        <tr key={idx} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 p-3 font-bold text-slate-900 dark:text-white font-sans min-w-[160px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{w.day}</td>
                           <td className="p-3 text-center">{formatNumber(w.registered)}</td>
                           <td className="p-3 text-center text-rose-600 font-bold">{w.absent}</td>
                           <td className="p-3 text-center text-sky-700 dark:text-sky-300">{formatNumber(w.actualSmall)}</td>
@@ -1690,7 +1691,7 @@ export const InstitutionsModule: React.FC = () => {
                     </tbody>
                     <tfoot>
                       <tr className="bg-slate-100 dark:bg-slate-800 font-bold font-mono border-t border-slate-300 dark:border-slate-700">
-                        <td className="p-3 font-sans">TOTAL 1 MINGGU (5 Hari Kerja):</td>
+                        <td className="sticky left-0 z-10 bg-slate-100 dark:bg-slate-800 p-3 font-sans shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">TOTAL 1 MINGGU (5 Hari Kerja):</td>
                         <td className="p-3 text-center">{formatNumber(2850 * 5)}</td>
                         <td className="p-3 text-center text-rose-600">{42 + 36 + 45 + 29 + 38}</td>
                         <td className="p-3 text-center text-sky-700">{formatNumber(1065 + 1068 + 1062 + 1072 + 1066)}</td>
@@ -1720,7 +1721,7 @@ export const InstitutionsModule: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                        <th className="p-3">Periode Bulan</th>
+                        <th className="sticky left-0 z-20 bg-slate-100 dark:bg-slate-800 p-3 min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Periode Bulan</th>
                         <th className="p-3 text-center">Hari Operasional</th>
                         <th className="p-3 text-center">Rata-rata Porsi/Hari</th>
                         <th className="p-3 text-center">Porsi Kecil Kumulatif</th>
@@ -1732,8 +1733,8 @@ export const InstitutionsModule: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                       {monthlySummary.map((m, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                          <td className="p-3 font-bold text-slate-900 dark:text-white font-sans">{m.month}</td>
+                        <tr key={idx} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 p-3 font-bold text-slate-900 dark:text-white font-sans min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">{m.month}</td>
                           <td className="p-3 text-center">{m.totalDays} hari</td>
                           <td className="p-3 text-center">{formatNumber(m.avgActualDaily)}</td>
                           <td className="p-3 text-center">{formatNumber(m.totalSmallMonthly)}</td>
@@ -1760,17 +1761,17 @@ export const InstitutionsModule: React.FC = () => {
       {/* TAB 6: REKAP PER LEMBAGA */}
       {/* ========================================================================= */}
       {activeTab === 'rekap_lembaga' && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div key="rekap_lembaga" className="space-y-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
-              <Building className="w-4 h-4 text-blue-900 dark:text-sky-400" />
-              Rekapitulasi & Komparasi Kinerja per Lembaga
+              <Building className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+              Rekapitulasi &amp; Komparasi Kinerja per Lembaga
             </h3>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">
               Perbandingan tingkat penyerapan porsi aktual, presensi siswa, narahubung, dan nomor rekening per lembaga
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
               {institutions.map(inst => {
                 // Calculate average attendance for this school
                 const instLogs = beneficiaryAttendance.filter(a => a.institutionId === inst.id);
@@ -1781,7 +1782,7 @@ export const InstitutionsModule: React.FC = () => {
                 return (
                   <div
                     key={inst.id}
-                    className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 space-y-3"
+                    className="p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full space-y-3"
                   >
                     <div className="flex items-start justify-between">
                       <div>
@@ -1854,17 +1855,29 @@ export const InstitutionsModule: React.FC = () => {
       {/* ========================================================================= */}
       {/* TAB 7: DATA ANAK, ANTI-DUPLIKASI NIK & KALKULATOR Z-SCORE WHO/KEMENKES */}
       {/* ========================================================================= */}
-      {activeTab === 'data_gizi_anak' && <BeneficiaryNutritionTab />}
+      {activeTab === 'data_gizi_anak' && (
+        <div key="data_gizi_anak" className="animate-fadeIn">
+          <BeneficiaryNutritionTab />
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 8: KALKULATOR CEK KESEHATAN IBU HAMIL (3B) & REKAPITULASI */}
       {/* ========================================================================= */}
-      {activeTab === 'cek_kesehatan_ibu_hamil' && <MaternalHealthTab />}
+      {activeTab === 'cek_kesehatan_ibu_hamil' && (
+        <div key="cek_kesehatan_ibu_hamil" className="animate-fadeIn">
+          <MaternalHealthTab />
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 9: KALKULATOR CEK KESEHATAN IBU MENYUSUI (3B) & REKAPITULASI */}
       {/* ========================================================================= */}
-      {activeTab === 'cek_kesehatan_ibu_menyusui' && <LactatingHealthTab />}
+      {activeTab === 'cek_kesehatan_ibu_menyusui' && (
+        <div key="cek_kesehatan_ibu_menyusui" className="animate-fadeIn">
+          <LactatingHealthTab />
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL: CREATE / EDIT LEMBAGA */}

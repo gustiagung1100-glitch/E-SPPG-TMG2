@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import {
   exportTableToPDF,
@@ -607,29 +608,29 @@ export const PICIncentiveModule: React.FC = () => {
 
       {/* Sub-Menu Pill Tabs */}
       <div className="bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm print:hidden">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setActiveSubTab('payouts')}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'payouts'
                 ? 'bg-[#1E3A8A] text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
             }`}
           >
-            <Wallet className="w-4 h-4" />
+            <Wallet className="w-4 h-4 shrink-0" />
             <span>Rekap &amp; Pencairan Harian ({filteredRows.length})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveSubTab('tariffs')}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ease-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeSubTab === 'tariffs'
                 ? 'bg-[#1E3A8A] text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
             }`}
           >
-            <Building2 className="w-4 h-4" />
+            <Building2 className="w-4 h-4 shrink-0" />
             <span>Tarif PIC per Lembaga ({institutions.length})</span>
             {customInstitutionCount > 0 && (
               <span
@@ -647,15 +648,17 @@ export const PICIncentiveModule: React.FC = () => {
       </div>
 
       {/* KPI Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Data Kehadiran Sekolah
             </span>
-            <Building2 className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Building2 className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums">
             {formatNumber(summary.totalRecords)} Laporan
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -663,14 +666,16 @@ export const PICIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Porsi Siswa Hadir Aktual
             </span>
-            <UserCheck className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <UserCheck className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums">
             {formatNumber(summary.totalPresentPortions)} Porsi
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 tabular-nums">
@@ -678,14 +683,16 @@ export const PICIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Total Insentif Terhitung
             </span>
-            <Coins className="w-4 h-4 text-[#D97706]" />
+            <span className="w-8 h-8 rounded-lg bg-amber-50 text-[#D97706] dark:bg-amber-950/60 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Coins className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums font-mono">
             {formatRupiah(summary.totalIncentiveAmount)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -697,14 +704,16 @@ export const PICIncentiveModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               Realisasi Pencairan PIC
             </span>
-            <Wallet className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <Wallet className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
             {formatRupiah(summary.paidAmount)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 tabular-nums">
@@ -714,7 +723,7 @@ export const PICIncentiveModule: React.FC = () => {
       </div>
 
       {activeSubTab === 'payouts' ? (
-        <>
+        <div key="payouts" className="space-y-4 animate-fadeIn">
           {/* Filters */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -797,7 +806,7 @@ export const PICIncentiveModule: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                    <th className="py-3 px-4">Tanggal</th>
+                    <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-3 px-4 min-w-[110px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal</th>
                     <th className="py-3 px-4">Lembaga &amp; PIC</th>
                     <th className="py-3 px-4">Rekening Pencairan</th>
                     <th className="py-3 px-4 text-right">Siswa Hadir / Kuota</th>
@@ -810,17 +819,28 @@ export const PICIncentiveModule: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-10 text-center text-slate-500 dark:text-slate-400">
-                        Belum ada data presensi penerima manfaat yang cocok dengan filter. Input presensi harian pada modul Penerima Manfaat akan muncul otomatis di sini.
+                      <td colSpan={8} className="p-4">
+                        <EmptyState
+                          variant={searchQuery || selectedInstitutionId !== 'ALL' || selectedStatus !== 'ALL' ? 'search' : 'data'}
+                          compact
+                          title="Belum ada data insentif PIC yang cocok"
+                          description="Input presensi harian pada modul Penerima Manfaat atau reset filter untuk melihat daftar pencairan."
+                          actionLabel={searchQuery || selectedInstitutionId !== 'ALL' || selectedStatus !== 'ALL' ? 'Reset Filter' : undefined}
+                          onAction={searchQuery || selectedInstitutionId !== 'ALL' || selectedStatus !== 'ALL' ? () => {
+                            setSearchQuery('');
+                            setSelectedInstitutionId('ALL');
+                            setSelectedStatus('ALL');
+                          } : undefined}
+                        />
                       </td>
                     </tr>
                   ) : (
                     filteredRows.map(row => (
                       <tr
                         key={row.id}
-                        className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
+                        className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                       >
-                        <td className="py-3 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300 font-medium">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-3 px-4 whitespace-nowrap text-slate-700 dark:text-slate-300 font-medium shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           {row.date}
                         </td>
                         <td className="py-3 px-4">
@@ -945,10 +965,10 @@ export const PICIncentiveModule: React.FC = () => {
               </table>
             </div>
           </div>
-        </>
+        </div>
       ) : (
         /* TAB: MASTER TARIF INSENTIF PIC PER LEMBAGA PENERIMA MANFAAT */
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div key="tariffs" className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden animate-fadeIn">
           <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
@@ -998,7 +1018,7 @@ export const PICIncentiveModule: React.FC = () => {
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  <th className="py-3 px-4">Lembaga Penerima Manfaat</th>
+                  <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-3 px-4 min-w-[180px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Lembaga Penerima Manfaat</th>
                   <th className="py-3 px-4">PIC &amp; Rekening</th>
                   <th className="py-3 px-4 text-center">Kuota Porsi</th>
                   <th className="py-3 px-4">Skema Tarif Lembaga</th>
@@ -1010,8 +1030,15 @@ export const PICIncentiveModule: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredTariffInstitutions.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                      Tidak ada lembaga penerima manfaat yang cocok dengan pencarian.
+                    <td colSpan={7} className="p-4">
+                      <EmptyState
+                        variant="search"
+                        compact
+                        title="Lembaga tidak ditemukan"
+                        description={`Tidak ada lembaga penerima manfaat yang cocok dengan kata kunci "${tariffSearchQuery}".`}
+                        actionLabel={tariffSearchQuery ? 'Reset Pencarian' : undefined}
+                        onAction={tariffSearchQuery ? () => setTariffSearchQuery('') : undefined}
+                      />
                     </td>
                   </tr>
                 ) : (
@@ -1037,13 +1064,13 @@ export const PICIncentiveModule: React.FC = () => {
                     return (
                       <tr
                         key={inst.id}
-                        className={`transition-colors ${
+                        className={`group transition-colors ${
                           !isDefault
                             ? 'bg-blue-50/40 dark:bg-blue-950/20'
                             : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/40'
                         }`}
                       >
-                        <td className="py-3 px-4">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-3 px-4 min-w-[180px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                           <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
                             <span>{inst.name}</span>
                             {!isDefault && (

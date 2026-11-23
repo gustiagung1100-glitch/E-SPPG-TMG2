@@ -506,3 +506,271 @@ export const StackedDailyBarChart: React.FC<StackedDailyBarChartProps> = ({
   );
 };
 
+export interface PO7DayBarItem {
+  date: string;
+  shortLabel: string;
+  fullLabel: string;
+  bahanValue: number;
+  opsValue: number;
+  totalValue: number;
+  poCount: number;
+}
+
+interface PO7DayValueChartProps {
+  days: PO7DayBarItem[];
+  dateBasis: 'issue' | 'delivery' | 'distribution';
+  onChangeDateBasis: (basis: 'issue' | 'delivery' | 'distribution') => void;
+  selectedDate?: string;
+  onSelectDate?: (date: string) => void;
+}
+
+const formatCompactRupiahTick = (val: number): string => {
+  if (val <= 0) return 'Rp 0';
+  if (val >= 1_000_000_000) {
+    const num = val / 1_000_000_000;
+    return `Rp ${num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)} M`;
+  }
+  if (val >= 1_000_000) {
+    const num = val / 1_000_000;
+    return `Rp ${num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)} jt`;
+  }
+  if (val >= 1_000) {
+    return `Rp ${Math.round(val / 1_000)} rb`;
+  }
+  return `Rp ${Math.round(val)}`;
+};
+
+export const PO7DayValueChart: React.FC<PO7DayValueChartProps> = ({
+  days,
+  dateBasis,
+  onChangeDateBasis,
+  selectedDate,
+  onSelectDate,
+}) => {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const total7Days = days.reduce((s, d) => s + d.totalValue, 0);
+  const totalBahan = days.reduce((s, d) => s + d.bahanValue, 0);
+  const totalOps = days.reduce((s, d) => s + d.opsValue, 0);
+  const totalPOs = days.reduce((s, d) => s + d.poCount, 0);
+  const avgDaily = days.length > 0 ? Math.round(total7Days / days.length) : 0;
+
+  const rawMax = Math.max(...days.map(d => d.totalValue), 100000);
+  const stepUnit = rawMax >= 10_000_000 ? 5_000_000 : rawMax >= 1_000_000 ? 1_000_000 : 100_000;
+  const niceMax = Math.max(stepUnit, Math.ceil(rawMax / stepUnit) * stepUnit);
+  const midTick = Math.round(niceMax / 2);
+
+  const rangeLabel =
+    days.length >= 2
+      ? `${days[0].fullLabel} – ${days[days.length - 1].fullLabel}`
+      : days[0]?.fullLabel || '-';
+
+  return (
+    <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+      {/* Header & Basis Toggle */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+              Tren Total Nilai Purchase Order (7 Hari Terakhir)
+            </h4>
+            <span className="px-2 py-0.5 rounded bg-blue-50 text-[#1E3A8A] dark:bg-sky-950 dark:text-sky-300 text-[10px] font-mono font-bold">
+              {rangeLabel}
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Akumulasi nilai PO aktif (Bahan Pangan &amp; Operasional Harian). Klik batang grafik untuk memfilter daftar PO tanggal tersebut.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Basis Tanggal:</span>
+          {(
+            [
+              { key: 'issue', label: 'Terbit PO' },
+              { key: 'delivery', label: 'Target Kirim H-1' },
+              { key: 'distribution', label: 'Distribusi Menu' },
+            ] as const
+          ).map(opt => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => onChangeDateBasis(opt.key)}
+              className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                dateBasis === opt.key
+                  ? 'bg-[#1E3A8A] text-white dark:bg-sky-600 shadow-2xs'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Compact Summary KPI Strip + Legend */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
+          <div>
+            <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+              Total Nilai PO (7 Hari)
+            </span>
+            <span className="font-mono font-black text-slate-900 dark:text-white tabular-nums">
+              {formatRupiah(total7Days)}
+            </span>
+          </div>
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
+          <div>
+            <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+              Rata-Rata / Hari
+            </span>
+            <span className="font-mono font-bold text-[#1E3A8A] dark:text-sky-300 tabular-nums">
+              {formatRupiah(avgDaily)}
+            </span>
+          </div>
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
+          <div>
+            <span className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+              Total Dokumen PO
+            </span>
+            <span className="font-mono font-bold text-[#0D9488] dark:text-teal-300 tabular-nums">
+              {formatNumber(totalPOs)} PO
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-xs bg-[#1E3A8A] dark:bg-sky-500 shrink-0" />
+            <span>Bahan Pangan ({formatRupiah(totalBahan)})</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-xs bg-[#0D9488] dark:bg-teal-400 shrink-0" />
+            <span>Operasional ({formatRupiah(totalOps)})</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Bar Chart Area */}
+      <div className="relative pl-14 sm:pl-16 pr-2 pt-7 pb-1">
+        {/* Y-Axis Gridlines */}
+        <div
+          className="absolute left-14 sm:left-16 right-2 top-7 bottom-7 pointer-events-none flex flex-col justify-between"
+          aria-hidden="true"
+        >
+          <div className="relative border-t border-dashed border-slate-200 dark:border-slate-800">
+            <span className="absolute -left-14 sm:-left-16 -top-2 w-12 sm:w-14 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              {formatCompactRupiahTick(niceMax)}
+            </span>
+          </div>
+          <div className="relative border-t border-dashed border-slate-200 dark:border-slate-800">
+            <span className="absolute -left-14 sm:-left-16 -top-2 w-12 sm:w-14 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              {formatCompactRupiahTick(midTick)}
+            </span>
+          </div>
+          <div className="relative border-t border-slate-300 dark:border-slate-700">
+            <span className="absolute -left-14 sm:-left-16 -top-2 w-12 sm:w-14 text-right text-[10px] font-mono tabular-nums text-slate-400">
+              Rp 0
+            </span>
+          </div>
+        </div>
+
+        {/* 7 Daily Columns */}
+        <div className="relative flex items-end justify-around gap-2 sm:gap-4 h-[190px]">
+          {days.map((day, idx) => {
+            const totalHeightPct = Math.min(100, (day.totalValue / niceMax) * 100);
+            const bahanPct = day.totalValue > 0 ? (day.bahanValue / day.totalValue) * 100 : 0;
+            const opsPct = day.totalValue > 0 ? (day.opsValue / day.totalValue) * 100 : 0;
+            const isHovered = hoveredIdx === idx;
+            const isSelected = selectedDate ? selectedDate === day.date : false;
+
+            return (
+              <div
+                key={day.date}
+                onMouseEnter={() => setHoveredIdx(idx)}
+                onMouseLeave={() => setHoveredIdx(null)}
+                onClick={() => onSelectDate?.(day.date)}
+                className={`flex-1 max-w-[84px] h-full flex flex-col items-center justify-end group relative ${
+                  onSelectDate ? 'cursor-pointer' : ''
+                }`}
+              >
+                {/* Hover Tooltip */}
+                {isHovered && (
+                  <div className="absolute -top-3 -translate-y-full z-30 bg-[#142B4A]/95 dark:bg-slate-800/95 backdrop-blur-xs text-white text-[11px] py-2 px-3 rounded-lg shadow-xl border border-white/10 whitespace-nowrap pointer-events-none tabular-nums">
+                    <div className="font-bold text-[#F2D58B] mb-1">
+                      {day.fullLabel} · {day.poCount} PO
+                    </div>
+                    <div className="space-y-0.5 text-[10px]">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-sky-200">Bahan Pangan:</span>
+                        <span className="font-mono font-semibold text-white">
+                          {formatRupiah(day.bahanValue)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-teal-300">Operasional:</span>
+                        <span className="font-mono font-semibold text-white">
+                          {formatRupiah(day.opsValue)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4 pt-1 mt-1 border-t border-white/15 font-bold">
+                        <span>Total Nilai:</span>
+                        <span className="font-mono text-[#F2D58B]">
+                          {formatRupiah(day.totalValue)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Stacked Bar Column */}
+                <div className="w-full flex flex-col items-center justify-end h-[calc(100%-24px)]">
+                  <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-700 dark:text-slate-200 mb-1 tabular-nums truncate max-w-full">
+                    {day.totalValue > 0 ? formatCompactRupiahTick(day.totalValue).replace('Rp ', '') : '0'}
+                  </span>
+                  <div
+                    className={`w-full max-w-[40px] rounded-t-md overflow-hidden flex flex-col-reverse transition-all duration-200 ${
+                      day.totalValue === 0
+                        ? 'bg-slate-100 dark:bg-slate-800/70'
+                        : isSelected
+                        ? 'ring-2 ring-[#1E3A8A] dark:ring-sky-400 ring-offset-1 dark:ring-offset-slate-900'
+                        : 'group-hover:brightness-110'
+                    }`}
+                    style={{
+                      height: `${day.totalValue > 0 ? Math.max(totalHeightPct, 6) : 3}%`,
+                    }}
+                  >
+                    {bahanPct > 0 && (
+                      <div
+                        style={{ height: `${bahanPct}%` }}
+                        className="w-full bg-[#1E3A8A] dark:bg-sky-500 transition-all duration-300"
+                      />
+                    )}
+                    {opsPct > 0 && (
+                      <div
+                        style={{ height: `${opsPct}%` }}
+                        className="w-full bg-[#0D9488] dark:bg-teal-400 border-b border-white/25 transition-all duration-300"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* X-axis Date Label */}
+                <span
+                  className={`mt-1.5 text-[10px] font-medium truncate w-full text-center transition-colors ${
+                    isSelected
+                      ? 'text-[#1E3A8A] dark:text-sky-300 font-bold'
+                      : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'
+                  }`}
+                >
+                  {day.shortLabel}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+

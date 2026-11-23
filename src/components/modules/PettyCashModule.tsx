@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import {
   exportTableToPDF,
@@ -376,15 +377,17 @@ export const PettyCashModule: React.FC = () => {
       </div>
 
       {/* 4 Core Petty Cash Calculation Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               1. Saldo Awal
             </span>
-            <Calculator className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+            <span className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 flex items-center justify-center shrink-0">
+              <Calculator className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white tabular-nums font-mono">
             {formatRupiah(periodSummary.saldoAwalPeriode)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -392,14 +395,16 @@ export const PettyCashModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               2. Pemasukan (+)
             </span>
-            <ArrowDownLeft className="w-4 h-4 text-[#0D9488]" />
+            <span className="w-8 h-8 rounded-lg bg-teal-50 text-[#0D9488] dark:bg-teal-950/60 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <ArrowDownLeft className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-[#0D9488] dark:text-teal-400 tabular-nums font-mono">
             {formatRupiah(periodSummary.totalPemasukan)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -407,14 +412,16 @@ export const PettyCashModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               3. Pengeluaran (&minus;)
             </span>
-            <ArrowUpRight className="w-4 h-4 text-[#E11D48]" />
+            <span className="w-8 h-8 rounded-lg bg-rose-50 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <ArrowUpRight className="w-4 h-4" />
+            </span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-[#E11D48] dark:text-rose-400 tabular-nums font-mono">
+          <div className="mt-2 text-2xl font-bold tracking-tight text-[#E11D48] dark:text-rose-400 tabular-nums font-mono">
             {formatRupiah(periodSummary.totalPengeluaran)}
           </div>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
@@ -422,15 +429,17 @@ export const PettyCashModule: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-in-out">
-          <div className="flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ease-out flex flex-col justify-between h-full">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
               4. Saldo Akhir
             </span>
-            <Wallet className="w-4 h-4 text-[#1E3A8A] dark:text-sky-400" />
+            <span className="w-8 h-8 rounded-lg bg-blue-50 text-[#1E3A8A] dark:bg-sky-950/60 dark:text-sky-400 flex items-center justify-center shrink-0">
+              <Wallet className="w-4 h-4" />
+            </span>
           </div>
           <div
-            className={`mt-2 text-2xl font-bold tabular-nums font-mono ${
+            className={`mt-2 text-2xl font-bold tracking-tight tabular-nums font-mono ${
               periodSummary.saldoAkhirPeriode >= 0
                 ? 'text-[#1E3A8A] dark:text-sky-400'
                 : 'text-[#E11D48] dark:text-rose-400'
@@ -529,12 +538,12 @@ export const PettyCashModule: React.FC = () => {
       </div>
 
       {/* Ledger Table with Running Balance */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                <th className="py-3 px-4">Tanggal &amp; Voucher</th>
+                <th className="sticky left-0 z-20 bg-slate-50 dark:bg-slate-800 py-3 px-4 min-w-[140px] shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">Tanggal &amp; Voucher</th>
                 <th className="py-3 px-4">Kategori &amp; Uraian</th>
                 <th className="py-3 px-4">Sumber / Penerima</th>
                 <th className="py-3 px-4 text-right">Saldo Awal</th>
@@ -547,14 +556,25 @@ export const PettyCashModule: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-500">
-                    Belum ada transaksi Petty Cash pada rentang filter yang dipilih.
+                  <td colSpan={8} className="p-4">
+                    <EmptyState
+                      variant={searchQuery || typeFilter !== 'ALL' || categoryFilter !== 'ALL' ? 'search' : 'data'}
+                      compact
+                      title="Belum ada transaksi Petty Cash"
+                      description="Tidak ditemukan transaksi Petty Cash pada rentang filter atau kata kunci pencarian saat ini."
+                      actionLabel={searchQuery || typeFilter !== 'ALL' || categoryFilter !== 'ALL' ? 'Reset Filter Pencarian' : undefined}
+                      onAction={searchQuery || typeFilter !== 'ALL' || categoryFilter !== 'ALL' ? () => {
+                        setSearchQuery('');
+                        setTypeFilter('ALL');
+                        setCategoryFilter('ALL');
+                      } : undefined}
+                    />
                   </td>
                 </tr>
               ) : (
                 filteredRows.map(tx => (
-                  <tr key={tx.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                    <td className="py-3 px-4 whitespace-nowrap">
+                  <tr key={tx.id} className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                    <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 dark:bg-slate-900 dark:group-hover:bg-slate-800 py-3 px-4 whitespace-nowrap shadow-[2px_0_6px_-2px_rgba(15,23,42,0.08)]">
                       <div className="font-semibold text-slate-900 dark:text-white">{tx.date}</div>
                       <div className="text-[11px] font-mono text-slate-500">{tx.voucherNumber}</div>
                     </td>
