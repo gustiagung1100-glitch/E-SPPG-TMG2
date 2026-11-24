@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { exportTableToPDF, exportToExcel, formatRupiah, formatNumber, triggerPrint } from '../../lib/exportUtils';
+import { defaultFoodCompositions } from '../../lib/plogData';
+import {
+  buildMasterUnitSelectOptions,
+  resolveAutoUnitForItem,
+} from '../../lib/unitResolver';
 import {
   Institution,
   MasterBahan,
@@ -181,11 +186,23 @@ export const MasterDataModule: React.FC = () => {
   const selectedConv = materialConversions.find(c => c.materialName === calcMaterial) || materialConversions[0];
   const calculatedTotalGrams = selectedConv ? calcInputUnitQty * selectedConv.gramsPerUnit : 0;
   const calculatedTotalKg = (calculatedTotalGrams / 1000).toFixed(2);
+  const [isBahanUnitManual, setIsBahanUnitManual] = useState(false);
+
+  const masterUnitSelectOptions = useMemo(
+    () =>
+      buildMasterUnitSelectOptions({
+        masterUnits,
+        materialConversions,
+        extraUnits: [formBahan.unit, formConv.unit],
+      }),
+    [masterUnits, materialConversions, formBahan.unit, formConv.unit]
+  );
 
   // Open Handlers
   const handleOpenAdd = (type: typeof modalType) => {
     setModalType(type);
     setEditItem(null);
+    setIsBahanUnitManual(false);
     if (type === 'penerima') {
       setFormInst({
         name: '',
@@ -278,6 +295,7 @@ export const MasterDataModule: React.FC = () => {
   const handleOpenEdit = (type: typeof modalType, item: any) => {
     setModalType(type);
     setEditItem(item);
+    setIsBahanUnitManual(false);
     if (type === 'penerima') setFormInst({ ...item });
     else if (type === 'bahan') setFormBahan({ ...item });
     else if (type === 'supplier') setFormSupplier({ ...item });
@@ -1312,7 +1330,32 @@ export const MasterDataModule: React.FC = () => {
                     type="text"
                     required
                     value={formBahan.name}
-                    onChange={e => setFormBahan({ ...formBahan, name: e.target.value })}
+                    onChange={e => {
+                      const nextName = e.target.value;
+                      if (!nextName.trim()) {
+                        setIsBahanUnitManual(false);
+                      }
+                      const auto =
+                        !editItem && !isBahanUnitManual && nextName.trim()
+                          ? resolveAutoUnitForItem({
+                              itemName: nextName,
+                              categoryHint:
+                                formBahan.category === 'Kemasan & Higiene' ||
+                                formBahan.category === 'Pelengkap'
+                                  ? 'operasional'
+                                  : 'bahan',
+                              masterUnits,
+                              materialConversions,
+                              masterBahan,
+                              foodCompositions: defaultFoodCompositions,
+                            })
+                          : null;
+                      setFormBahan({
+                        ...formBahan,
+                        name: nextName,
+                        ...(auto ? { unit: auto.unit } : {}),
+                      });
+                    }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                 </div>
@@ -1333,22 +1376,22 @@ export const MasterDataModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Satuan Dasar (Master Satuan) *
+                    Satuan Dasar (Master Satuan &amp; Dimensi Bahan) *
                   </label>
                   <select
                     required
                     value={formBahan.unit}
-                    onChange={e => setFormBahan({ ...formBahan, unit: e.target.value })}
+                    onChange={e => {
+                      setIsBahanUnitManual(true);
+                      setFormBahan({ ...formBahan, unit: e.target.value });
+                    }}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
                   >
-                    {masterUnits.map(u => (
-                      <option key={u.id} value={u.code}>
-                        {u.code} — {u.name} ({u.type === 'Satuan Bahan (Pieces/Dimensi)' ? 'Pieces/Dimensi' : u.type})
+                    {masterUnitSelectOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
                       </option>
                     ))}
-                    {formBahan.unit && !masterUnits.some(u => u.code === formBahan.unit) && (
-                      <option value={formBahan.unit}>{formBahan.unit} (Kustom)</option>
-                    )}
                   </select>
                 </div>
               </div>
@@ -1738,7 +1781,7 @@ export const MasterDataModule: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Satuan Dimensi Fisik (Master Satuan) *
+                    Satuan Dimensi Fisik (Master Satuan &amp; Dimensi Bahan) *
                   </label>
                   <select
                     required
@@ -1746,14 +1789,11 @@ export const MasterDataModule: React.FC = () => {
                     onChange={e => setFormConv({ ...formConv, unit: e.target.value })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
                   >
-                    {masterUnits.map(u => (
-                      <option key={u.id} value={u.code}>
-                        {u.code} — {u.name}
+                    {masterUnitSelectOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
                       </option>
                     ))}
-                    {formConv.unit && !masterUnits.some(u => u.code === formConv.unit) && (
-                      <option value={formConv.unit}>{formConv.unit} (Kustom)</option>
-                    )}
                   </select>
                 </div>
                 <div>

@@ -814,6 +814,158 @@ export function resolvePOItemApprovalStatus(
   return 'Menunggu persetujuan';
 }
 
+export function resolvePOItemSupplierConfirmed(
+  item: Pick<PurchaseOrderItem, 'supplierConfirmed' | 'approvalStatus'>,
+  po: Pick<PurchaseOrder, 'supplierConfirmed'>
+): boolean {
+  if (typeof item.supplierConfirmed === 'boolean') {
+    return item.supplierConfirmed;
+  }
+  if (item.approvalStatus === 'Ditolak') {
+    return false;
+  }
+  return Boolean(po.supplierConfirmed);
+}
+
+export function resolvePOItemSupplierDeliveryStatus(
+  item: Pick<
+    PurchaseOrderItem,
+    'supplierDeliveryStatus' | 'supplierConfirmed' | 'approvalStatus'
+  >,
+  po: Pick<PurchaseOrder, 'supplierDeliveryStatus' | 'supplierConfirmed'>
+): NonNullable<PurchaseOrder['supplierDeliveryStatus']> {
+  if (item.supplierDeliveryStatus) {
+    return item.supplierDeliveryStatus;
+  }
+  if (item.approvalStatus === 'Ditolak') {
+    return 'Ditolak Supplier';
+  }
+  if (typeof item.supplierConfirmed === 'boolean') {
+    return item.supplierConfirmed ? 'Dikonfirmasi Supplier' : 'Menunggu Konfirmasi';
+  }
+  return (
+    po.supplierDeliveryStatus ||
+    (po.supplierConfirmed ? 'Dikonfirmasi Supplier' : 'Menunggu Konfirmasi')
+  );
+}
+
+export interface POItemQCInfo {
+  qcStatus: QCStatusPLOK;
+  receivedQuantity: number;
+  deliveredQuantity: number;
+  qcCount: number;
+  latestInspectedAt?: string;
+  latestGrade?: QualityControlRecord['qualityGrade'];
+  latestCondition?: QualityControlRecord['condition'];
+  latestNotes?: string;
+  itemQCs: QualityControlRecord[];
+}
+
+export function resolvePOItemQCInfo(
+  item: Pick<
+    PurchaseOrderItem,
+    | 'itemName'
+    | 'quantity'
+    | 'receivedQuantity'
+    | 'deliveredQuantity'
+    | 'deliveredAt'
+    | 'supplierDeliveryStatus'
+    | 'approvalStatus'
+  >,
+  po: Pick<PurchaseOrder, 'id' | 'poNumber' | 'status' | 'qcStatus' | 'qcRecords'>,
+  qcs: QualityControlRecord[]
+): POItemQCInfo {
+  const sourceQCs = qcs.length > 0 ? qcs : po.qcRecords || [];
+  const linkedQCs = sourceQCs.filter(
+    q => q.poId === po.id || (q.poNumber && q.poNumber === po.poNumber)
+  );
+  const itemQCs = linkedQCs.filter(q =>
+    isMatchingMaterialNameShared(q.itemName, item.itemName)
+  );
+
+  if (itemQCs.length > 0) {
+    const sortedQCs = [...itemQCs].sort((a, b) =>
+      (b.inspectedAt || '').localeCompare(a.inspectedAt || '')
+    );
+    const totalReceived = itemQCs.reduce(
+      (sum, q) => sum + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)),
+      0
+    );
+    const totalQCRecordedReceived = itemQCs.reduce(
+      (sum, q) => sum + Number(q.receivedQuantity || 0),
+      0
+    );
+    const hasRejected = itemQCs.some(q => q.status === 'Ditolak');
+    const hasRetest = itemQCs.some(q => q.status === 'Perlu pemeriksaan ulang');
+    const hasPartial = itemQCs.some(
+      q => q.status === 'Diterima sebagian' || q.status === 'Lolos Sebagian'
+    );
+    const hasFull = itemQCs.some(q => q.status === 'Lolos Penuh');
+    const orderedQty = Number(item.quantity || 0);
+
+    let qcStatus: QCStatusPLOK = sortedQCs[0].status;
+    if (totalReceived <= 0 && hasRejected) {
+      qcStatus = 'Ditolak';
+    } else if (hasRetest && totalReceived <= 0) {
+      qcStatus = 'Perlu pemeriksaan ulang';
+    } else if (orderedQty > 0 && totalReceived >= orderedQty && !hasPartial) {
+      qcStatus = hasFull ? 'Lolos Penuh' : 'Diterima';
+    } else if (totalReceived > 0) {
+      qcStatus = 'Diterima sebagian';
+    }
+
+    return {
+      qcStatus,
+      receivedQuantity: totalReceived,
+      deliveredQuantity: totalQCRecordedReceived,
+      qcCount: itemQCs.length,
+      latestInspectedAt: item.deliveredAt || sortedQCs[0].inspectedAt,
+      latestGrade: sortedQCs[0].qualityGrade,
+      latestCondition: sortedQCs[0].condition,
+      latestNotes: sortedQCs.map(q => q.notes).filter(Boolean).join(' | '),
+      itemQCs: sortedQCs,
+    };
+  }
+
+  const approvalStatus = resolvePOItemApprovalStatus(item, po);
+  if (approvalStatus === 'Ditolak') {
+    return {
+      qcStatus: 'Ditolak',
+      receivedQuantity: 0,
+      deliveredQuantity: 0,
+      qcCount: 0,
+      latestInspectedAt: item.deliveredAt,
+      itemQCs: [],
+    };
+  }
+
+  if (
+    (po.status === 'Diterima di Gudang' || po.status === 'Selesai diterima') &&
+    po.qcStatus !== 'Belum QC'
+  ) {
+    const qtyVal = Number(item.receivedQuantity ?? item.quantity ?? 0);
+    return {
+      qcStatus: po.qcStatus,
+      receivedQuantity: qtyVal,
+      deliveredQuantity: qtyVal,
+      qcCount: 0,
+      latestInspectedAt: item.deliveredAt,
+      itemQCs: [],
+    };
+  }
+
+  const fallbackDelivered = Number(item.receivedQuantity || 0);
+
+  return {
+    qcStatus: 'Belum QC',
+    receivedQuantity: Number(item.receivedQuantity || 0),
+    deliveredQuantity: fallbackDelivered,
+    qcCount: 0,
+    latestInspectedAt: item.deliveredAt,
+    itemQCs: [],
+  };
+}
+
 export function reconcileRABWithPurchaseOrders(
   pos: PurchaseOrder[],
   rabs: RABItem[]
@@ -1012,6 +1164,26 @@ export function resolvePODistributionDate(
     return shiftIsoDate(po.deliveryDate.trim(), 1);
   }
   return po.date || '';
+}
+
+export function resolvePOItemDistributionDate(
+  item: Pick<PurchaseOrderItem, 'rabId' | 'itemName'>,
+  po: PurchaseOrder,
+  rabItems: RABItem[],
+  menuItems: MenuItem[]
+): string {
+  const linkedRab =
+    (item.rabId ? rabItems.find(r => r.id === item.rabId) : undefined) ||
+    rabItems.find(
+      r =>
+        (r.id === po.rabId || isMatchingMaterialNameShared(r.itemName, item.itemName)) &&
+        (!po.distributionDate || r.planDate === po.distributionDate)
+    );
+  if (linkedRab) {
+    const resolvedFromRab = resolveRABDistributionDate(linkedRab, menuItems, '');
+    if (resolvedFromRab) return resolvedFromRab;
+  }
+  return resolvePODistributionDate(po, rabItems, menuItems);
 }
 
 function getDailyOperationalSliceQty(rab: RABItem, remainingQty: number, isExactPlanDate: boolean): number {
@@ -1335,7 +1507,11 @@ export function reconcilePurchaseOrdersWithQC(
       return {
         ...po,
         qcRecords: [],
-        items: (po.items || []).map(it => ({ ...it, receivedQuantity: 0 })),
+        items: (po.items || []).map(it => ({
+          ...it,
+          receivedQuantity: 0,
+          deliveredQuantity: 0,
+        })),
         qcStatus:
           po.status === 'Diterima di Gudang' || po.status === 'Selesai diterima'
             ? po.qcStatus
@@ -1351,9 +1527,14 @@ export function reconcilePurchaseOrdersWithQC(
         (sum, q) => sum + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)),
         0
       );
+      const totalDeliveredForItem = itemQCs.reduce(
+        (sum, q) => sum + Number(q.receivedQuantity || 0),
+        0
+      );
       return {
         ...it,
         receivedQuantity: totalReceivedForItem,
+        deliveredQuantity: totalDeliveredForItem,
       };
     });
 

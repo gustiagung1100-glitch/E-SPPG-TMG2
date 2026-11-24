@@ -77,6 +77,11 @@ import {
 } from 'lucide-react';
 import { RefreshCw } from 'lucide-react';
 import { processFacilityImageUpload } from '../common/FacilityTempUploadSection';
+import { defaultFoodCompositions } from '../../lib/plogData';
+import {
+  buildMasterUnitSelectOptions,
+  resolveAutoUnitForItem,
+} from '../../lib/unitResolver';
 
 type InventoryTab =
   | 'stok_gudang'
@@ -100,6 +105,8 @@ export const InventoryModule: React.FC = () => {
     recordStockOpname,
     masterSuppliers,
     masterUnits,
+    materialConversions,
+    masterBahan,
     currentUser,
     hasPermission,
     sppgConfig,
@@ -108,15 +115,6 @@ export const InventoryModule: React.FC = () => {
     qualityControlRecords,
     dynamicFormSchemas,
   } = useApp();
-
-  const unitOptions = useMemo(
-    () =>
-      masterUnits.map(u => ({
-        value: u.code,
-        label: `${u.code} — ${u.name}`,
-      })),
-    [masterUnits]
-  );
 
   // Dynamic Form Builder States
   const [isEditingInvSchema, setIsEditingInvSchema] = useState(false);
@@ -156,6 +154,17 @@ export const InventoryModule: React.FC = () => {
     qualityStatus: 'Baik',
     customFields: {},
   });
+  const [isItemUnitManual, setIsItemUnitManual] = useState(false);
+
+  const unitOptions = useMemo(
+    () =>
+      buildMasterUnitSelectOptions({
+        masterUnits,
+        materialConversions,
+        extraUnits: [...items.map(i => i.unit), itemFormData.unit],
+      }),
+    [masterUnits, materialConversions, items, itemFormData.unit]
+  );
 
   // Modal: Quick Transaction (Barang Keluar / Retur Keluar — Barang Masuk otomatis dari QC)
   const [isMutationModalOpen, setIsMutationModalOpen] = useState(false);
@@ -265,6 +274,7 @@ export const InventoryModule: React.FC = () => {
   // ---------------------------------------------------------------------------
   const handleOpenCreateItem = () => {
     setEditingItem(null);
+    setIsItemUnitManual(false);
     setItemFormData({
       code: `BHK-0${items.length + 1}`,
       name: '',
@@ -286,6 +296,7 @@ export const InventoryModule: React.FC = () => {
 
   const handleOpenEditItem = (item: InventoryItem) => {
     setEditingItem(item);
+    setIsItemUnitManual(false);
     setItemFormData({
       ...item,
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.inventory_item_form, item.customFields),
@@ -2073,10 +2084,49 @@ export const InventoryModule: React.FC = () => {
             excludeKeys={editingItem ? ['currentStock'] : []}
             onChange={(key, value, field) => {
               if (field.isSystem) {
+                if (key === 'unit') {
+                  setIsItemUnitManual(true);
+                } else if (key === 'name' && !String(value || '').trim()) {
+                  setIsItemUnitManual(false);
+                }
                 setItemFormData(prev => {
                   const next = { ...prev, [key]: value };
                   if (key === 'currentStock' && !editingItem) {
                     next.initialStock = Number(value) || 0;
+                  }
+                  const categoryHint =
+                    next.category === 'Kemasan & Higiene' || next.category === 'Pelengkap'
+                      ? 'operasional'
+                      : 'bahan';
+                  if (key === 'name' && !isItemUnitManual && String(value || '').trim()) {
+                    const auto = resolveAutoUnitForItem({
+                      itemName: String(value || ''),
+                      categoryHint,
+                      masterUnits,
+                      materialConversions,
+                      masterBahan,
+                      inventory: items,
+                      foodCompositions: defaultFoodCompositions,
+                    });
+                    if (auto) {
+                      next.unit = auto.unit;
+                      if (!editingItem && auto.unitPrice && auto.unitPrice > 0) {
+                        next.pricePerUnit = auto.unitPrice;
+                      }
+                    }
+                  } else if (key === 'category' && !isItemUnitManual && next.name.trim()) {
+                    const auto = resolveAutoUnitForItem({
+                      itemName: next.name,
+                      categoryHint,
+                      masterUnits,
+                      materialConversions,
+                      masterBahan,
+                      inventory: items,
+                      foodCompositions: defaultFoodCompositions,
+                    });
+                    if (auto) {
+                      next.unit = auto.unit;
+                    }
                   }
                   return next;
                 });

@@ -781,6 +781,16 @@ export interface PurchaseOrderItem {
   approvalStatus?: POItemApprovalStatus;
   approvedBy?: string;
   approvedAt?: string;
+  supplierConfirmed?: boolean;
+  supplierConfirmedAt?: string;
+  supplierEstimatedDelivery?: string;
+  supplierDriverName?: string;
+  supplierDriverPhone?: string;
+  supplierVehicleNumber?: string;
+  supplierDeliveryStatus?: 'Menunggu Konfirmasi' | 'Dikonfirmasi Supplier' | 'Sedang Dipersiapkan' | 'Dalam Pengiriman' | 'Telah Tiba di Gudang' | 'Ditolak Supplier';
+  supplierRejectionReason?: string;
+  deliveredQuantity?: number;
+  deliveredAt?: string;
 }
 
 export interface SupplierDocument {

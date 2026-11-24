@@ -26,11 +26,22 @@ export interface NutritionIngredientRow {
   seratLarge: number;
 }
 
+export interface NutritionPortionTotals {
+  berat: number;
+  energi: number;
+  protein: number;
+  lemak: number;
+  kh: number;
+  serat: number;
+}
+
 export interface NutritionDishGroup {
   menuName: string;
   ingredientIds: string[];
   hasManualMenuName: boolean;
   ingredients: NutritionIngredientRow[];
+  totalsSmall: NutritionPortionTotals;
+  totalsLarge: NutritionPortionTotals;
 }
 
 export interface NutritionDateGroup {
@@ -40,20 +51,8 @@ export interface NutritionDateGroup {
   hariTglDisplay: string;
   sasaranLabel: string;
   dishes: NutritionDishGroup[];
-  totalsSmall: {
-    energi: number;
-    protein: number;
-    lemak: number;
-    kh: number;
-    serat: number;
-  };
-  totalsLarge: {
-    energi: number;
-    protein: number;
-    lemak: number;
-    kh: number;
-    serat: number;
-  };
+  totalsSmall: NutritionPortionTotals;
+  totalsLarge: NutritionPortionTotals;
 }
 
 export interface NutritionReportData {
@@ -203,8 +202,21 @@ export function resolveNutritionReportData(
     const dishOrder: string[] = [];
     const dishMap = new Map<string, NutritionIngredientRow[]>();
 
-    const totalsSmall = { energi: 0, protein: 0, lemak: 0, kh: 0, serat: 0 };
-    const totalsLarge = { energi: 0, protein: 0, lemak: 0, kh: 0, serat: 0 };
+    const emptyTotals = (): NutritionPortionTotals => ({
+      berat: 0,
+      energi: 0,
+      protein: 0,
+      lemak: 0,
+      kh: 0,
+      serat: 0,
+    });
+    const safePos = (val: unknown): number => {
+      const n = Number(val);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+
+    const totalsSmall = emptyTotals();
+    const totalsLarge = emptyTotals();
 
     rawIngredients.forEach(ing => {
       const dishName = resolveDishNameForNutrition(ing, menu);
@@ -213,27 +225,34 @@ export function resolveNutritionReportData(
         dishOrder.push(dishName);
       }
 
-      const wSmall = Number(ing.netWeightSmall) || 0;
-      const wLarge = Number(ing.netWeightLarge) || 0;
+      const wSmall = safePos(ing.netWeightSmall);
+      const wLarge = safePos(ing.netWeightLarge);
+      const cal100 = safePos(ing.calories100g);
+      const prot100 = safePos(ing.protein100g);
+      const fat100 = safePos(ing.fat100g);
+      const carb100 = safePos(ing.carb100g);
+      const fib100 = safePos(ing.fiber100g);
 
-      const energiSmall = (wSmall / 100) * (Number(ing.calories100g) || 0);
-      const proteinSmall = (wSmall / 100) * (Number(ing.protein100g) || 0);
-      const lemakSmall = (wSmall / 100) * (Number(ing.fat100g) || 0);
-      const khSmall = (wSmall / 100) * (Number(ing.carb100g) || 0);
-      const seratSmall = (wSmall / 100) * (Number(ing.fiber100g) || 0);
+      const energiSmall = (wSmall / 100) * cal100;
+      const proteinSmall = (wSmall / 100) * prot100;
+      const lemakSmall = (wSmall / 100) * fat100;
+      const khSmall = (wSmall / 100) * carb100;
+      const seratSmall = (wSmall / 100) * fib100;
 
-      const energiLarge = (wLarge / 100) * (Number(ing.calories100g) || 0);
-      const proteinLarge = (wLarge / 100) * (Number(ing.protein100g) || 0);
-      const lemakLarge = (wLarge / 100) * (Number(ing.fat100g) || 0);
-      const khLarge = (wLarge / 100) * (Number(ing.carb100g) || 0);
-      const seratLarge = (wLarge / 100) * (Number(ing.fiber100g) || 0);
+      const energiLarge = (wLarge / 100) * cal100;
+      const proteinLarge = (wLarge / 100) * prot100;
+      const lemakLarge = (wLarge / 100) * fat100;
+      const khLarge = (wLarge / 100) * carb100;
+      const seratLarge = (wLarge / 100) * fib100;
 
+      totalsSmall.berat += wSmall;
       totalsSmall.energi += energiSmall;
       totalsSmall.protein += proteinSmall;
       totalsSmall.lemak += lemakSmall;
       totalsSmall.kh += khSmall;
       totalsSmall.serat += seratSmall;
 
+      totalsLarge.berat += wLarge;
       totalsLarge.energi += energiLarge;
       totalsLarge.protein += proteinLarge;
       totalsLarge.lemak += lemakLarge;
@@ -263,11 +282,35 @@ export function resolveNutritionReportData(
 
     const dishes: NutritionDishGroup[] = dishOrder.map(menuName => {
       const ings = dishMap.get(menuName) || [];
+      const dishTotalsSmall = ings.reduce<NutritionPortionTotals>(
+        (acc, row) => ({
+          berat: acc.berat + row.beratSmall,
+          energi: acc.energi + row.energiSmall,
+          protein: acc.protein + row.proteinSmall,
+          lemak: acc.lemak + row.lemakSmall,
+          kh: acc.kh + row.khSmall,
+          serat: acc.serat + row.seratSmall,
+        }),
+        emptyTotals()
+      );
+      const dishTotalsLarge = ings.reduce<NutritionPortionTotals>(
+        (acc, row) => ({
+          berat: acc.berat + row.beratLarge,
+          energi: acc.energi + row.energiLarge,
+          protein: acc.protein + row.proteinLarge,
+          lemak: acc.lemak + row.lemakLarge,
+          kh: acc.kh + row.khLarge,
+          serat: acc.serat + row.seratLarge,
+        }),
+        emptyTotals()
+      );
       return {
         menuName,
         ingredientIds: ings.map(i => i.id),
         hasManualMenuName: ings.some(i => Boolean(i.rawMenuName && i.rawMenuName.trim() !== '')),
         ingredients: ings,
+        totalsSmall: dishTotalsSmall,
+        totalsLarge: dishTotalsLarge,
       };
     });
 
@@ -589,22 +632,22 @@ export const NutritionReportSheet: React.FC<NutritionReportSheetProps> = ({
             <tr className="bg-[#c5d9b6] print:bg-[#c5d9b6] font-bold text-center">
               {showSmall && (
                 <>
-                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Berat</th>
+                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Berat (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Energi (kkal)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Protein (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Lemak (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">KH (g)</th>
-                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Serat (mg)</th>
+                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Serat (g)</th>
                 </>
               )}
               {showLarge && (
                 <>
-                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Berat</th>
+                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Berat (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Energi (kkal)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Protein (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">Lemak (g)</th>
                   <th className="border border-black px-1.5 py-1 whitespace-nowrap">KH (g)</th>
-                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Serat (mg)</th>
+                  <th className="border border-black px-1.5 py-1 whitespace-nowrap">Serat (g)</th>
                 </>
               )}
             </tr>
@@ -658,7 +701,8 @@ export const NutritionReportSheet: React.FC<NutritionReportSheetProps> = ({
                   );
                 }
 
-                const totalGroupRows = ingredientRowCount + 1;
+                const subtotalRowCount = group.dishes.filter(d => d.ingredients.length > 1).length;
+                const totalGroupRows = ingredientRowCount + subtotalRowCount + 1;
                 const renderedRows: React.ReactNode[] = [];
                 let isFirstRowOfGroup = true;
 
@@ -899,6 +943,68 @@ export const NutritionReportSheet: React.FC<NutritionReportSheetProps> = ({
 
                     isFirstRowOfGroup = false;
                   });
+
+                  // Subtotal otomatis per Item Menu jika tersusun dari > 1 bahan makanan
+                  if (dishSpan > 1) {
+                    renderedRows.push(
+                      <tr
+                        key={`${group.menuId}-${dishIdx}-subtotal`}
+                        className="bg-[#fef9e7] print:bg-[#fef9e7] font-semibold align-middle text-slate-900"
+                      >
+                        <td
+                          colSpan={2}
+                          className="border border-black px-2 py-1 text-right italic text-[9px] sm:text-[9.5px]"
+                        >
+                          Subtotal Item Menu: {dish.menuName}
+                        </td>
+                        {showSmall && (
+                          <>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrCell(dish.totalsSmall.berat, 1)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsSmall.energi)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsSmall.protein)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsSmall.lemak)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsSmall.kh)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsSmall.serat)}
+                            </td>
+                          </>
+                        )}
+                        {showLarge && (
+                          <>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrCell(dish.totalsLarge.berat, 1)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsLarge.energi)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsLarge.protein)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsLarge.lemak)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsLarge.kh)}
+                            </td>
+                            <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                              {formatNutrTotal(dish.totalsLarge.serat)}
+                            </td>
+                          </>
+                        )}
+                        {editable && <td className="print:hidden border border-black px-1 py-1" />}
+                      </tr>
+                    );
+                  }
                 });
 
                 // TOTAL row per hari/menu
@@ -915,7 +1021,9 @@ export const NutritionReportSheet: React.FC<NutritionReportSheetProps> = ({
                     </td>
                     {showSmall && (
                       <>
-                        <td className="border border-black px-1.5 py-1 text-center" />
+                        <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                          {formatNutrCell(group.totalsSmall.berat, 1)}
+                        </td>
                         <td className="border border-black px-1.5 py-1 text-center tabular-nums">
                           {formatNutrTotal(group.totalsSmall.energi)}
                         </td>
@@ -935,7 +1043,9 @@ export const NutritionReportSheet: React.FC<NutritionReportSheetProps> = ({
                     )}
                     {showLarge && (
                       <>
-                        <td className="border border-black px-1.5 py-1 text-center" />
+                        <td className="border border-black px-1.5 py-1 text-center tabular-nums">
+                          {formatNutrCell(group.totalsLarge.berat, 1)}
+                        </td>
                         <td className="border border-black px-1.5 py-1 text-center tabular-nums">
                           {formatNutrTotal(group.totalsLarge.energi)}
                         </td>
@@ -1077,7 +1187,7 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
       colSpan: 6,
       styles: { fillColor: [197, 217, 182], halign: 'center', valign: 'middle' },
     });
-    ['Berat', 'Energi (kkal)', 'Protein (g)', 'Lemak (g)', 'KH (g)', 'Serat (mg)'].forEach(lbl =>
+    ['Berat (g)', 'Energi (kkal)', 'Protein (g)', 'Lemak (g)', 'KH (g)', 'Serat (g)'].forEach(lbl =>
       headRow2.push({
         content: lbl,
         styles: { fillColor: [197, 217, 182], halign: 'center', valign: 'middle' },
@@ -1090,7 +1200,7 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
       colSpan: 6,
       styles: { fillColor: [197, 217, 182], halign: 'center', valign: 'middle' },
     });
-    ['Berat', 'Energi (kkal)', 'Protein (g)', 'Lemak (g)', 'KH (g)', 'Serat (mg)'].forEach(lbl =>
+    ['Berat (g)', 'Energi (kkal)', 'Protein (g)', 'Lemak (g)', 'KH (g)', 'Serat (g)'].forEach(lbl =>
       headRow2.push({
         content: lbl,
         styles: { fillColor: [197, 217, 182], halign: 'center', valign: 'middle' },
@@ -1104,7 +1214,8 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
     const ingredientRowCount = group.dishes.reduce((s, d) => s + d.ingredients.length, 0);
     if (ingredientRowCount === 0) return;
 
-    const totalGroupRows = ingredientRowCount + 1;
+    const subtotalRowCount = group.dishes.filter(d => d.ingredients.length > 1).length;
+    const totalGroupRows = ingredientRowCount + subtotalRowCount + 1;
     let isFirstRowOfGroup = true;
 
     group.dishes.forEach(dish => {
@@ -1161,6 +1272,37 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
         body.push(row);
         isFirstRowOfGroup = false;
       });
+
+      if (dishSpan > 1) {
+        const subRow: CellDef[] = [
+          {
+            content: `Subtotal Item Menu: ${dish.menuName}`,
+            colSpan: 2,
+            styles: {
+              fillColor: [254, 249, 231],
+              halign: 'right',
+              fontStyle: 'bolditalic',
+            },
+          },
+        ];
+        if (showSmall) {
+          subRow.push({ content: formatNutrCell(dish.totalsSmall.berat, 1), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsSmall.energi), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsSmall.protein), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsSmall.lemak), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsSmall.kh), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsSmall.serat), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+        }
+        if (showLarge) {
+          subRow.push({ content: formatNutrCell(dish.totalsLarge.berat, 1), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsLarge.energi), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsLarge.protein), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsLarge.lemak), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsLarge.kh), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+          subRow.push({ content: formatNutrTotal(dish.totalsLarge.serat), styles: { fillColor: [254, 249, 231], halign: 'center', fontStyle: 'bold' } });
+        }
+        body.push(subRow);
+      }
     });
 
     const totalRow: CellDef[] = [
@@ -1176,7 +1318,10 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
     ];
 
     if (showSmall) {
-      totalRow.push({ content: '', styles: { fillColor: [255, 217, 102], halign: 'center' } });
+      totalRow.push({
+        content: formatNutrCell(group.totalsSmall.berat, 1),
+        styles: { fillColor: [255, 217, 102], halign: 'center', fontStyle: 'bold' },
+      });
       totalRow.push({
         content: formatNutrTotal(group.totalsSmall.energi),
         styles: { fillColor: [255, 217, 102], halign: 'center', fontStyle: 'bold' },
@@ -1200,7 +1345,10 @@ export async function exportNutritionReportPDF(data: NutritionReportData): Promi
     }
 
     if (showLarge) {
-      totalRow.push({ content: '', styles: { fillColor: [255, 217, 102], halign: 'center' } });
+      totalRow.push({
+        content: formatNutrCell(group.totalsLarge.berat, 1),
+        styles: { fillColor: [255, 217, 102], halign: 'center', fontStyle: 'bold' },
+      });
       totalRow.push({
         content: formatNutrTotal(group.totalsLarge.energi),
         styles: { fillColor: [255, 217, 102], halign: 'center', fontStyle: 'bold' },

@@ -7,6 +7,9 @@ import {
   MenuItem,
   InventoryItem,
   PurchaseOrder,
+  PurchaseOrderItem,
+  POStatusPLOK,
+  QCStatusPLOK,
   DistributionLog,
   FinancialTransaction,
   VolunteerAttendance,
@@ -144,11 +147,14 @@ import {
   syncRABWithMenuPlans,
   seedAndSyncDailyPurchaseOrders,
   sortPOItemsBahanThenOperasional,
+  resolvePOItemApprovalStatus,
+  resolvePOItemSupplierConfirmed,
+  resolvePOItemSupplierDeliveryStatus,
   reconcileRABWithPurchaseOrders as reconcileRABWithPurchaseOrdersShared,
   reconcilePurchaseOrdersWithQC,
   reconcileInventoryFromQualityControl,
 } from './supplyChainSync';
-import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType, sanitizeFirestoreData } from './firebase';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import {
   GoogleAuthProvider,
@@ -545,6 +551,34 @@ interface AppContextType {
   supplierConfirmPO: (poId: string, estimatedDelivery: string, driverName?: string, driverPhone?: string, vehicleNumber?: string) => Promise<void>;
   supplierUpdatePOStatus: (poId: string, status: NonNullable<PurchaseOrder['supplierDeliveryStatus']>, notes?: string) => Promise<void>;
   supplierRejectPO: (poId: string, reason: string) => Promise<void>;
+  supplierConfirmPOItem: (poId: string, itemMatch: { itemId?: string; itemName: string }, estimatedDelivery: string, driverName?: string, driverPhone?: string, vehicleNumber?: string) => Promise<void>;
+  supplierUpdatePOItemStatus: (poId: string, itemMatch: { itemId?: string; itemName: string }, status: NonNullable<PurchaseOrder['supplierDeliveryStatus']>, notes?: string) => Promise<void>;
+  supplierRejectPOItem: (poId: string, itemMatch: { itemId?: string; itemName: string }, reason: string) => Promise<void>;
+  supplierResetPOItem: (poId: string, itemMatch: { itemId?: string; itemName: string }) => Promise<void>;
+  supplierReducePOItemQuantity: (poId: string, itemMatch: { itemId?: string; itemName: string }, newOrderedQty: number, notes?: string) => Promise<void>;
+  supplierCoverPOItemShortage: (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    addedQty: number,
+    options?: {
+      deliveredAt?: string;
+      condition?: QualityControlRecord['condition'];
+      qualityGrade?: QualityControlRecord['qualityGrade'];
+      notes?: string;
+    }
+  ) => Promise<void>;
+  supplierEditDeliveredPOItem: (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    payload: {
+      deliveredAt: string;
+      orderedQuantity: number;
+      deliveredQuantity: number;
+      qcPassedQuantity: number;
+      status: QCStatusPLOK;
+      notes?: string;
+    }
+  ) => Promise<void>;
   supplierUploadDocument: (poId: string, doc: Omit<SupplierDocument, 'id' | 'uploadedAt'>) => Promise<void>;
 
   officialLetters: OfficialLetter[];
@@ -2115,6 +2149,174 @@ function buildDefaultMenuIngredientsMap(): Record<string, RecipeIngredient[]> {
         referenceSource: 'TKPI Kemenkes RI',
       },
     ],
+    'menu-3': [
+      {
+        id: 'ing-301',
+        name: 'Beras Pulen Wangi',
+        category: 'Makanan Pokok',
+        netWeightSmall: 85,
+        netWeightLarge: 125,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 14500,
+        calories100g: 360,
+        protein100g: 6.8,
+        fat100g: 0.7,
+        carb100g: 78.9,
+        fiber100g: 0.8,
+        referenceSource: 'TKPI 2020 (A01)',
+      },
+      {
+        id: 'ing-302',
+        menuName: 'Ikan Tenggiri / Kakap Asam Manis Nanas',
+        name: 'Ikan Tenggiri Fillet Segar',
+        category: 'Lauk Hewani',
+        netWeightSmall: 55,
+        netWeightLarge: 80,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 54000,
+        calories100g: 112,
+        protein100g: 21.4,
+        fat100g: 2.3,
+        carb100g: 0.0,
+        fiber100g: 0.0,
+        referenceSource: 'TKPI 2020 (B11)',
+      },
+      {
+        id: 'ing-303',
+        menuName: 'Ikan Tenggiri / Kakap Asam Manis Nanas',
+        name: 'Nanas Segar',
+        category: 'Lauk Hewani',
+        netWeightSmall: 20,
+        netWeightLarge: 30,
+        unit: 'gram',
+        ediblePortionPercent: 53,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 12000,
+        calories100g: 40,
+        protein100g: 0.6,
+        fat100g: 0.3,
+        carb100g: 9.9,
+        fiber100g: 1.4,
+        referenceSource: 'TKPI 2020 (E10)',
+      },
+      {
+        id: 'ing-304',
+        name: 'Tahu Putih Kedelai',
+        category: 'Lauk Nabati',
+        netWeightSmall: 45,
+        netWeightLarge: 65,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 10000,
+        calories100g: 80,
+        protein100g: 10.9,
+        fat100g: 4.7,
+        carb100g: 0.8,
+        fiber100g: 0.1,
+        referenceSource: 'TKPI 2020 (C01)',
+      },
+      {
+        id: 'ing-305',
+        menuName: 'Capcay Kuah Segar Bakso Sapi & Brokoli',
+        name: 'Brokoli & Wortel Segar',
+        category: 'Sayuran',
+        netWeightSmall: 50,
+        netWeightLarge: 75,
+        unit: 'gram',
+        ediblePortionPercent: 82,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 18000,
+        calories100g: 35,
+        protein100g: 1.9,
+        fat100g: 0.5,
+        carb100g: 7.1,
+        fiber100g: 1.7,
+        referenceSource: 'TKPI 2020 (D12 & D24)',
+      },
+      {
+        id: 'ing-306',
+        menuName: 'Capcay Kuah Segar Bakso Sapi & Brokoli',
+        name: 'Bakso Daging Sapi',
+        category: 'Sayuran',
+        netWeightSmall: 20,
+        netWeightLarge: 30,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 68000,
+        calories100g: 202,
+        protein100g: 13.4,
+        fat100g: 9.0,
+        carb100g: 16.5,
+        fiber100g: 0.2,
+        referenceSource: 'TKPI 2020 (B02)',
+      },
+      {
+        id: 'ing-307',
+        name: 'Jeruk Manis Probolinggo',
+        category: 'Buah Segar',
+        netWeightSmall: 80,
+        netWeightLarge: 110,
+        unit: 'gram',
+        ediblePortionPercent: 72,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 18000,
+        calories100g: 45,
+        protein100g: 0.9,
+        fat100g: 0.2,
+        carb100g: 11.2,
+        fiber100g: 1.4,
+        referenceSource: 'TKPI 2020 (E06)',
+      },
+      {
+        id: 'ing-308',
+        name: 'Susu UHT Plain 125ml',
+        category: 'Ekstra / Susu',
+        netWeightSmall: 125,
+        netWeightLarge: 125,
+        unit: 'pcs',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 1,
+        purchaseUnit: 'pcs',
+        unitPrice: 3600,
+        calories100g: 65,
+        protein100g: 3.2,
+        fat100g: 3.5,
+        carb100g: 5.0,
+        fiber100g: 0.0,
+        referenceSource: 'SNI Susu UHT Kemenkes',
+      },
+      {
+        id: 'ing-309',
+        name: 'Minyak Goreng & Bumbu Halus',
+        category: 'Bumbu & Minyak',
+        netWeightSmall: 8,
+        netWeightLarge: 12,
+        unit: 'gram',
+        ediblePortionPercent: 100,
+        conversionFactorToBase: 0.001,
+        purchaseUnit: 'kg',
+        unitPrice: 22000,
+        calories100g: 650,
+        protein100g: 0.8,
+        fat100g: 70.0,
+        carb100g: 6.0,
+        fiber100g: 0.5,
+        referenceSource: 'TKPI 2020 (F01)',
+      },
+    ],
   };
 }
 
@@ -2354,30 +2556,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isDataHydrating, setIsDataHydrating] = useState<boolean>(true);
 
   // Existing Operational States (Single Source of Truth)
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('esppg_menu_items');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {
-      // Fallback
-    }
-    return initialMenuItems;
-  });
-
   const [menuIngredientsMap, setMenuIngredientsMap] = useState<Record<string, RecipeIngredient[]>>(() => {
+    const defaultMap = buildDefaultMenuIngredientsMap();
     try {
       const saved = localStorage.getItem('esppg_menu_ingredients_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return parsed;
+        if (parsed && typeof parsed === 'object') {
+          const merged: Record<string, RecipeIngredient[]> = { ...parsed };
+          // Pastikan menu bawaan yang belum punya rincian resep (misal menu-3) otomatis terisi
+          Object.entries(defaultMap).forEach(([menuId, defIngs]) => {
+            if (!Array.isArray(merged[menuId]) || merged[menuId].length === 0) {
+              merged[menuId] = defIngs;
+            }
+          });
+          return merged;
+        }
       }
     } catch {
       // Fallback
     }
-    return buildDefaultMenuIngredientsMap();
+    return defaultMap;
+  });
+
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
+    let baseMenus: MenuItem[] = initialMenuItems;
+    try {
+      const saved = localStorage.getItem('esppg_menu_items');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) baseMenus = parsed;
+      }
+    } catch {
+      // Fallback
+    }
+    const qSmall = institutions.reduce((s, i) => s + (i.smallPortions || 0), 0);
+    const qLarge = institutions.reduce((s, i) => s + (i.largePortions || 0), 0);
+    return recomputeMenuItemsFromRecipes(baseMenus, menuIngredientsMap, masterUnits, qSmall, qLarge);
   });
 
   const [recipeCustomColumns, setRecipeCustomColumns] = useState<RecipeCustomColumn[]>(() => {
@@ -6790,50 +7005,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     syncLinkedMenuPlansToRABSilently(nextMenus, nextMap);
 
     if (auth.currentUser && /^[a-zA-Z0-9_-]+$/.test(menuId)) {
-      setDoc(
-        doc(db, 'recipes', `menu_${menuId}`),
-        {
-          id: `menu_${menuId}`,
-          sppgId: 'GFBQSYXD',
-          menuId,
-          ingredients,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser.name,
-        },
-        { merge: true }
-      ).catch(() => {
+      try {
+        const sanitizedIngredients = sanitizeFirestoreData(ingredients);
+        setDoc(
+          doc(db, 'recipes', `menu_${menuId}`),
+          sanitizeFirestoreData({
+            id: `menu_${menuId}`,
+            sppgId: 'GFBQSYXD',
+            menuId,
+            ingredients: sanitizedIngredients,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          }),
+          { merge: true }
+        ).catch(() => {
+          // Non-blocking fallback to LocalStorage
+        });
+      } catch {
         // Non-blocking fallback to LocalStorage
-      });
+      }
     }
   };
 
   const syncRecipeCustomColumnsToFirestore = (nextCols: RecipeCustomColumn[]) => {
     safeWriteLocalStorage('esppg_recipe_custom_columns_v1', JSON.stringify(nextCols));
     if (auth.currentUser) {
-      setDoc(
-        doc(db, 'recipes', 'custom_recipe_columns'),
-        {
-          id: 'custom_recipe_columns',
-          sppgId: 'GFBQSYXD',
-          columns: nextCols,
-          updatedAt: new Date().toISOString(),
-          updatedBy: currentUser.name,
-        },
-        { merge: true }
-      ).catch(() => {
+      try {
+        setDoc(
+          doc(db, 'recipes', 'custom_recipe_columns'),
+          sanitizeFirestoreData({
+            id: 'custom_recipe_columns',
+            sppgId: 'GFBQSYXD',
+            columns: nextCols,
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser.name,
+          }),
+          { merge: true }
+        ).catch(() => {
+          // Non-blocking fallback to LocalStorage
+        });
+      } catch {
         // Non-blocking fallback to LocalStorage
-      });
+      }
     }
   };
 
   const addRecipeCustomColumn = (
     col: Omit<RecipeCustomColumn, 'id' | 'createdAt' | 'createdBy'>
   ): RecipeCustomColumn => {
+    const trimmedPlaceholder = col.placeholder?.trim();
     const newCol: RecipeCustomColumn = {
       id: `resep_col_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       title: col.title.trim(),
       inputType: col.inputType || 'text',
-      placeholder: col.placeholder?.trim() || undefined,
+      ...(trimmedPlaceholder ? { placeholder: trimmedPlaceholder } : {}),
       createdAt: new Date().toISOString(),
       createdBy: currentUser.name,
     };
@@ -6850,16 +7075,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     patch: Partial<Pick<RecipeCustomColumn, 'title' | 'inputType' | 'placeholder'>>
   ) => {
     setRecipeCustomColumns(prev => {
-      const next = prev.map(c =>
-        c.id === colId
-          ? {
-              ...c,
-              ...(patch.title !== undefined ? { title: patch.title.trim() || c.title } : {}),
-              ...(patch.inputType !== undefined ? { inputType: patch.inputType } : {}),
-              ...(patch.placeholder !== undefined ? { placeholder: patch.placeholder.trim() || undefined } : {}),
-            }
-          : c
-      );
+      const next = prev.map(c => {
+        if (c.id !== colId) return c;
+        const updated: RecipeCustomColumn = {
+          ...c,
+          ...(patch.title !== undefined ? { title: patch.title.trim() || c.title } : {}),
+          ...(patch.inputType !== undefined ? { inputType: patch.inputType } : {}),
+        };
+        if (patch.placeholder !== undefined) {
+          const cleaned = patch.placeholder.trim();
+          if (cleaned) {
+            updated.placeholder = cleaned;
+          } else {
+            delete updated.placeholder;
+          }
+        }
+        return updated;
+      });
       syncRecipeCustomColumnsToFirestore(next);
       return next;
     });
@@ -8764,7 +8996,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const supplierRejectPO = async (poId: string, reason: string) => {
-    const nextPOs = purchaseOrders.map(po =>
+    const nextPOs = purchaseOrdersRef.current.map(po =>
       po.id === poId
         ? {
             ...po,
@@ -8775,10 +9007,762 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         : po
     );
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
     setPurchaseOrders(nextPOs);
-    setRabItems(prev => reconcileRABWithPurchaseOrders(nextPOs, prev));
+    setRabItems(nextRABs);
     addToast('warning', 'Pesanan Ditolak Supplier', `Pesanan PO ditolak oleh supplier dengan alasan: ${reason}. Alokasi RAB dikembalikan.`);
     await logAudit('UPDATE', 'procurement', `Supplier menolak pesanan PO ${poId}: ${reason}`);
+  };
+
+  const findTargetItemIndex = (items: PurchaseOrderItem[], itemMatch: { itemId?: string; itemName: string }) => {
+    let idx = items.findIndex(
+      it =>
+        (itemMatch.itemId ? it.itemId === itemMatch.itemId : true) &&
+        it.itemName === itemMatch.itemName
+    );
+    if (idx === -1 && itemMatch.itemId) {
+      idx = items.findIndex(it => it.itemId === itemMatch.itemId);
+    }
+    if (idx === -1) {
+      idx = items.findIndex(it => it.itemName === itemMatch.itemName);
+    }
+    return idx;
+  };
+
+  const rollupPOFromItems = (
+    po: PurchaseOrder,
+    nextItems: PurchaseOrderItem[]
+  ): PurchaseOrder => {
+    const rejectedCount = nextItems.filter(it => it.approvalStatus === 'Ditolak').length;
+    const activeItems = nextItems.filter(it => it.approvalStatus !== 'Ditolak');
+    const allRejected = nextItems.length > 0 && rejectedCount === nextItems.length;
+    const allActiveApproved =
+      activeItems.length > 0 && activeItems.every(it => it.approvalStatus === 'Disetujui');
+    const allActiveConfirmed =
+      activeItems.length > 0 && activeItems.every(it => Boolean(it.supplierConfirmed));
+    const nextTotalAmount = activeItems.reduce(
+      (sum, it) => sum + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)),
+      0
+    );
+
+    let nextPOStatus: POStatusPLOK = po.status;
+    if (allRejected) {
+      nextPOStatus = 'Ditolak';
+    } else if (
+      po.status === 'Menunggu persetujuan' ||
+      po.status === 'Draft' ||
+      po.status === 'Ditolak'
+    ) {
+      nextPOStatus = allActiveApproved ? 'Disetujui' : 'Menunggu persetujuan';
+    }
+
+    let nextDeliveryStatus: NonNullable<PurchaseOrder['supplierDeliveryStatus']> =
+      po.supplierDeliveryStatus || 'Menunggu Konfirmasi';
+    if (allRejected) {
+      nextDeliveryStatus = 'Ditolak Supplier';
+    } else if (activeItems.length > 0 && activeItems.every(it => it.supplierDeliveryStatus === 'Telah Tiba di Gudang')) {
+      nextDeliveryStatus = 'Telah Tiba di Gudang';
+    } else if (activeItems.length > 0 && activeItems.every(it => it.supplierDeliveryStatus === 'Dalam Pengiriman')) {
+      nextDeliveryStatus = 'Dalam Pengiriman';
+      if (nextPOStatus !== 'Diterima di Gudang' && nextPOStatus !== 'Selesai diterima') {
+        nextPOStatus = 'Dikirim ke supplier';
+      }
+    } else if (activeItems.length > 0 && activeItems.every(it => it.supplierDeliveryStatus === 'Sedang Dipersiapkan')) {
+      nextDeliveryStatus = 'Sedang Dipersiapkan';
+    } else if (allActiveConfirmed) {
+      nextDeliveryStatus = 'Dikonfirmasi Supplier';
+    } else {
+      nextDeliveryStatus = 'Menunggu Konfirmasi';
+    }
+
+    return {
+      ...po,
+      items: nextItems,
+      totalAmount: nextTotalAmount,
+      status: nextPOStatus,
+      supplierConfirmed: allActiveConfirmed,
+      supplierDeliveryStatus: nextDeliveryStatus,
+      approvedBy:
+        nextPOStatus === 'Disetujui'
+          ? po.approvedBy || `${currentUser.name} (${currentUser.role})`
+          : po.approvedBy,
+    };
+  };
+
+  const supplierConfirmPOItem = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    estimatedDelivery: string,
+    driverName?: string,
+    driverPhone?: string,
+    vehicleNumber?: string
+  ) => {
+    const confirmedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const approverLabel = `${currentUser.name} (${currentUser.role})`;
+    const nextPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const items = po.items && po.items.length > 0 ? po.items : [];
+      if (items.length === 0) {
+        return {
+          ...po,
+          supplierConfirmed: true,
+          supplierConfirmedAt: confirmedAt,
+          supplierEstimatedDelivery: estimatedDelivery,
+          supplierDriverName: driverName,
+          supplierDriverPhone: driverPhone,
+          supplierVehicleNumber: vehicleNumber,
+          supplierDeliveryStatus: 'Dikonfirmasi Supplier' as const,
+          status:
+            po.status === 'Menunggu persetujuan' || po.status === 'Draft'
+              ? ('Disetujui' as const)
+              : po.status,
+        };
+      }
+      const targetIdx = findTargetItemIndex(items, itemMatch);
+      if (targetIdx === -1) return po;
+
+      const nextItems: PurchaseOrderItem[] = items.map((it, idx) => {
+        if (idx === targetIdx) {
+          return {
+            ...it,
+            approvalStatus: 'Disetujui' as const,
+            approvedBy: it.approvedBy || approverLabel,
+            approvedAt: it.approvedAt || confirmedAt,
+            supplierConfirmed: true,
+            supplierConfirmedAt: confirmedAt,
+            supplierEstimatedDelivery: estimatedDelivery,
+            supplierDriverName: driverName,
+            supplierDriverPhone: driverPhone,
+            supplierVehicleNumber: vehicleNumber,
+            supplierDeliveryStatus: 'Dikonfirmasi Supplier' as const,
+            supplierRejectionReason: undefined,
+          };
+        }
+        return {
+          ...it,
+          approvalStatus: resolvePOItemApprovalStatus(it, po),
+          supplierConfirmed: resolvePOItemSupplierConfirmed(it, po),
+          supplierDeliveryStatus: resolvePOItemSupplierDeliveryStatus(it, po),
+        };
+      });
+
+      const updatedPO = rollupPOFromItems(po, nextItems);
+      return {
+        ...updatedPO,
+        supplierConfirmedAt: confirmedAt,
+        supplierEstimatedDelivery: estimatedDelivery,
+        supplierDriverName: driverName,
+        supplierDriverPhone: driverPhone,
+        supplierVehicleNumber: vehicleNumber,
+      };
+    });
+
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    addToast(
+      'success',
+      'Item PO Dikonfirmasi',
+      `${itemMatch.itemName} berhasil dikonfirmasi & disetujui. Estimasi kirim: ${estimatedDelivery}`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Supplier mengonfirmasi item [${itemMatch.itemName}] pada PO ${poId} (Estimasi: ${estimatedDelivery})`
+    );
+  };
+
+  const supplierUpdatePOItemStatus = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    status: NonNullable<PurchaseOrder['supplierDeliveryStatus']>,
+    notes?: string
+  ) => {
+    const nextPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const items = po.items && po.items.length > 0 ? po.items : [];
+      if (items.length === 0) {
+        return {
+          ...po,
+          supplierDeliveryStatus: status,
+          status: status === 'Dalam Pengiriman' ? ('Dikirim ke supplier' as const) : po.status,
+          notes: notes ? `${po.notes ? po.notes + ' | ' : ''}Update Supplier: ${notes}` : po.notes,
+        };
+      }
+      const targetIdx = findTargetItemIndex(items, itemMatch);
+      if (targetIdx === -1) return po;
+
+      const nextItems: PurchaseOrderItem[] = items.map((it, idx) => {
+        if (idx === targetIdx) {
+          return {
+            ...it,
+            approvalStatus: resolvePOItemApprovalStatus(it, po),
+            supplierConfirmed: true,
+            supplierDeliveryStatus: status,
+          };
+        }
+        return {
+          ...it,
+          approvalStatus: resolvePOItemApprovalStatus(it, po),
+          supplierConfirmed: resolvePOItemSupplierConfirmed(it, po),
+          supplierDeliveryStatus: resolvePOItemSupplierDeliveryStatus(it, po),
+        };
+      });
+
+      const updatedPO = rollupPOFromItems(po, nextItems);
+      return {
+        ...updatedPO,
+        notes: notes
+          ? `${po.notes ? po.notes + ' | ' : ''}Update ${itemMatch.itemName}: ${notes}`
+          : po.notes,
+      };
+    });
+
+    purchaseOrdersRef.current = nextPOs;
+    setPurchaseOrders(nextPOs);
+    addToast(
+      'success',
+      'Status Item Diperbarui',
+      `Status pengiriman ${itemMatch.itemName} kini: ${status}`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Supplier memperbarui status item [${itemMatch.itemName}] pada PO ${poId} menjadi ${status}`
+    );
+  };
+
+  const supplierRejectPOItem = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    reason: string
+  ) => {
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const approverLabel = `${currentUser.name} (${currentUser.role})`;
+    const nextPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const items = po.items && po.items.length > 0 ? po.items : [];
+      if (items.length === 0) {
+        return {
+          ...po,
+          supplierConfirmed: false,
+          supplierDeliveryStatus: 'Ditolak Supplier' as const,
+          supplierRejectionReason: reason,
+          status: 'Ditolak' as const,
+        };
+      }
+      const targetIdx = findTargetItemIndex(items, itemMatch);
+      if (targetIdx === -1) return po;
+
+      const nextItems: PurchaseOrderItem[] = items.map((it, idx) => {
+        if (idx === targetIdx) {
+          return {
+            ...it,
+            approvalStatus: 'Ditolak' as const,
+            approvedBy: approverLabel,
+            approvedAt: stamp,
+            supplierConfirmed: false,
+            supplierDeliveryStatus: 'Ditolak Supplier' as const,
+            supplierRejectionReason: reason,
+          };
+        }
+        return {
+          ...it,
+          approvalStatus: resolvePOItemApprovalStatus(it, po),
+          supplierConfirmed: resolvePOItemSupplierConfirmed(it, po),
+          supplierDeliveryStatus: resolvePOItemSupplierDeliveryStatus(it, po),
+        };
+      });
+
+      const updatedPO = rollupPOFromItems(po, nextItems);
+      return {
+        ...updatedPO,
+        supplierRejectionReason:
+          updatedPO.status === 'Ditolak' ? reason : po.supplierRejectionReason,
+      };
+    });
+
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    addToast(
+      'warning',
+      'Item PO Ditolak Supplier',
+      `Item ${itemMatch.itemName} ditolak (${reason}). Alokasi RAB item terkait dilepaskan.`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Supplier menolak item [${itemMatch.itemName}] pada PO ${poId}: ${reason}`
+    );
+  };
+
+  const supplierResetPOItem = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string }
+  ) => {
+    const nextPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const items = po.items && po.items.length > 0 ? po.items : [];
+      if (items.length === 0) {
+        return {
+          ...po,
+          supplierConfirmed: false,
+          supplierDeliveryStatus: 'Menunggu Konfirmasi' as const,
+          supplierRejectionReason: undefined,
+          status: 'Menunggu persetujuan' as const,
+        };
+      }
+      const targetIdx = findTargetItemIndex(items, itemMatch);
+      if (targetIdx === -1) return po;
+
+      const nextItems: PurchaseOrderItem[] = items.map((it, idx) => {
+        if (idx === targetIdx) {
+          return {
+            ...it,
+            approvalStatus: 'Menunggu persetujuan' as const,
+            approvedBy: undefined,
+            approvedAt: undefined,
+            supplierConfirmed: false,
+            supplierConfirmedAt: undefined,
+            supplierEstimatedDelivery: undefined,
+            supplierDriverName: undefined,
+            supplierDriverPhone: undefined,
+            supplierVehicleNumber: undefined,
+            supplierDeliveryStatus: 'Menunggu Konfirmasi' as const,
+            supplierRejectionReason: undefined,
+          };
+        }
+        return {
+          ...it,
+          approvalStatus: resolvePOItemApprovalStatus(it, po),
+          supplierConfirmed: resolvePOItemSupplierConfirmed(it, po),
+          supplierDeliveryStatus: resolvePOItemSupplierDeliveryStatus(it, po),
+        };
+      });
+
+      return rollupPOFromItems(po, nextItems);
+    });
+
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    addToast(
+      'info',
+      'Konfirmasi Item Direset',
+      `Item ${itemMatch.itemName} dikembalikan ke status Menunggu Konfirmasi.`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Supplier mereset konfirmasi item [${itemMatch.itemName}] pada PO ${poId}`
+    );
+  };
+
+  const supplierReducePOItemQuantity = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    newOrderedQty: number,
+    notes?: string
+  ) => {
+    const safeNewQty = Math.max(0, Number(newOrderedQty) || 0);
+    const targetPO = purchaseOrdersRef.current.find(p => p.id === poId);
+    if (!targetPO) return;
+
+    const items = targetPO.items || [];
+    const targetIdx = findTargetItemIndex(items, itemMatch);
+    if (targetIdx === -1) return;
+
+    const draftPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const nextItems: PurchaseOrderItem[] = (po.items || []).map((it, idx) => {
+        if (idx !== targetIdx) return it;
+        const unitPrice = Number(it.unitPrice || 0);
+        return {
+          ...it,
+          quantity: safeNewQty,
+          subtotal: safeNewQty * unitPrice,
+        };
+      });
+      const activeTotal = nextItems
+        .filter(it => it.approvalStatus !== 'Ditolak')
+        .reduce((s, it) => s + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)), 0);
+      return {
+        ...po,
+        items: nextItems,
+        totalAmount: activeTotal,
+        notes: notes
+          ? `${po.notes ? po.notes + ' | ' : ''}Penyesuaian PO ${itemMatch.itemName}: ${notes}`
+          : po.notes,
+      };
+    });
+
+    const isItemQC = (q: QualityControlRecord) =>
+      (q.poId === targetPO.id || (q.poNumber && q.poNumber === targetPO.poNumber)) &&
+      isMatchingMaterialNameShared(q.itemName, itemMatch.itemName);
+
+    const totalQcReceived = qualityControlRecordsRef.current
+      .filter(isItemQC)
+      .reduce((s, q) => s + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)), 0);
+
+    const nextQCs = qualityControlRecordsRef.current.map(q => {
+      if (!isItemQC(q)) return q;
+      const diff = Number(q.receivedQuantity || 0) - safeNewQty;
+      const shouldUpgradeToReceived =
+        safeNewQty > 0 &&
+        totalQcReceived >= safeNewQty &&
+        (q.status === 'Diterima sebagian' || q.status === 'Lolos Sebagian');
+      return {
+        ...q,
+        orderedQuantity: safeNewQty,
+        differenceQuantity: totalQcReceived >= safeNewQty ? 0 : diff,
+        status: shouldUpgradeToReceived ? ('Diterima' as const) : q.status,
+        notes: notes ? `${q.notes ? q.notes + ' | ' : ''}${notes}` : q.notes,
+      };
+    });
+
+    const nextPOs = reconcilePurchaseOrdersWithQC(draftPOs, nextQCs).map(po => {
+      if (po.id !== poId) return po;
+      const nextTotal = (po.items || [])
+        .filter(it => it.approvalStatus !== 'Ditolak')
+        .reduce((s, it) => s + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)), 0);
+      return { ...po, totalAmount: nextTotal };
+    });
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
+    });
+
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setQualityControlRecords(nextQCs);
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    addToast(
+      'success',
+      'Jumlah PO Dikurangi',
+      `Jumlah pesanan PO untuk ${itemMatch.itemName} disesuaikan menjadi ${safeNewQty} & RAB disinkronkan.`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Mengurangi jumlah PO item [${itemMatch.itemName}] pada PO ${targetPO.poNumber} menjadi ${safeNewQty}`
+    );
+  };
+
+  const supplierCoverPOItemShortage = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    addedQty: number,
+    options?: {
+      deliveredAt?: string;
+      condition?: QualityControlRecord['condition'];
+      qualityGrade?: QualityControlRecord['qualityGrade'];
+      notes?: string;
+    }
+  ) => {
+    const safeAddedQty = Math.max(0, Number(addedQty) || 0);
+    if (safeAddedQty <= 0) return;
+
+    const targetPO = purchaseOrdersRef.current.find(p => p.id === poId);
+    if (!targetPO) return;
+
+    const items = targetPO.items || [];
+    const targetIdx = findTargetItemIndex(items, itemMatch);
+    if (targetIdx === -1) return;
+
+    const targetItem = items[targetIdx];
+    const stamp =
+      options?.deliveredAt?.trim() || new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const orderedQty = Number(targetItem.quantity || 0);
+
+    const isItemQC = (q: QualityControlRecord) =>
+      (q.poId === targetPO.id || (q.poNumber && q.poNumber === targetPO.poNumber)) &&
+      isMatchingMaterialNameShared(q.itemName, itemMatch.itemName);
+
+    const existingItemQCs = qualityControlRecordsRef.current.filter(isItemQC);
+    const prevQcPassed = existingItemQCs.reduce(
+      (s, q) => s + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)),
+      0
+    );
+    const prevDelivered =
+      typeof targetItem.deliveredQuantity === 'number'
+        ? targetItem.deliveredQuantity
+        : existingItemQCs.reduce((s, q) => s + Number(q.receivedQuantity || 0), 0) ||
+          Number(targetItem.receivedQuantity || 0);
+
+    const nextTotalQcPassed = prevQcPassed + safeAddedQty;
+    const isNowFulfilled = orderedQty > 0 && nextTotalQcPassed >= orderedQty;
+    const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+    const newSupplementalQC: QualityControlRecord = {
+      id: `qc-cover-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      poId: targetPO.id,
+      poNumber: targetPO.poNumber,
+      supplierName: targetPO.supplierName,
+      itemName: targetItem.itemName,
+      orderedQuantity: orderedQty,
+      unit: targetItem.unit || 'kg',
+      receivedQuantity: safeAddedQty,
+      differenceQuantity: isNowFulfilled ? 0 : nextTotalQcPassed - orderedQty,
+      condition: options?.condition || 'Baik',
+      qualityGrade: options?.qualityGrade || 'Grade A (Sangat Baik)',
+      expiryDate: defaultExp,
+      notes:
+        options?.notes?.trim() ||
+        `Pengiriman susulan penutup kekurangan sebesar ${safeAddedQty} ${targetItem.unit}.`,
+      inspectorName: `${currentUser.name} (${currentUser.role})`,
+      status: isNowFulfilled ? 'Diterima' : 'Diterima sebagian',
+      inspectedAt: stamp,
+      inventoryAdded: true,
+    };
+
+    const updatedExistingQCs = qualityControlRecordsRef.current.map(q => {
+      if (!isItemQC(q)) return q;
+      if (
+        isNowFulfilled &&
+        (q.status === 'Diterima sebagian' || q.status === 'Lolos Sebagian')
+      ) {
+        return {
+          ...q,
+          status: 'Diterima' as const,
+          differenceQuantity: 0,
+        };
+      }
+      return q;
+    });
+
+    const nextQCs = [newSupplementalQC, ...updatedExistingQCs];
+
+    const draftPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const nextItems: PurchaseOrderItem[] = (po.items || []).map((it, idx) => {
+        if (idx !== targetIdx) return it;
+        return {
+          ...it,
+          deliveredQuantity: prevDelivered + safeAddedQty,
+          deliveredAt: stamp,
+          supplierConfirmed: true,
+          supplierDeliveryStatus: 'Telah Tiba di Gudang' as const,
+        };
+      });
+      return {
+        ...po,
+        items: nextItems,
+      };
+    });
+
+    const nextPOs = reconcilePurchaseOrdersWithQC(draftPOs, nextQCs);
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
+    });
+
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setQualityControlRecords(nextQCs);
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    addToast(
+      'success',
+      'Kekurangan Ditutupi',
+      `Tambahan ${safeAddedQty} ${targetItem.unit} untuk ${targetItem.itemName} berhasil dicatat & disinkronkan ke QC dan Gudang.`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Menutupi kekurangan item [${targetItem.itemName}] pada PO ${targetPO.poNumber} (+${safeAddedQty} ${targetItem.unit})`
+    );
+  };
+
+  const supplierEditDeliveredPOItem = async (
+    poId: string,
+    itemMatch: { itemId?: string; itemName: string },
+    payload: {
+      deliveredAt: string;
+      orderedQuantity: number;
+      deliveredQuantity: number;
+      qcPassedQuantity: number;
+      status: QCStatusPLOK;
+      notes?: string;
+    }
+  ) => {
+    const targetPO = purchaseOrdersRef.current.find(p => p.id === poId);
+    if (!targetPO) return;
+
+    const items = targetPO.items || [];
+    const targetIdx = findTargetItemIndex(items, itemMatch);
+    if (targetIdx === -1) return;
+
+    const targetItem = items[targetIdx];
+    const safeOrderedQty = Math.max(0, Number(payload.orderedQuantity) || 0);
+    const safeDeliveredQty = Math.max(0, Number(payload.deliveredQuantity) || 0);
+    const safeQcPassedQty = Math.max(0, Number(payload.qcPassedQuantity) || 0);
+    const stamp =
+      payload.deliveredAt.trim() || new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+    const isItemQC = (q: QualityControlRecord) =>
+      (q.poId === targetPO.id || (q.poNumber && q.poNumber === targetPO.poNumber)) &&
+      isMatchingMaterialNameShared(q.itemName, itemMatch.itemName);
+
+    const existingItemQCs = qualityControlRecordsRef.current.filter(isItemQC);
+    const prevQcRecorded = existingItemQCs.reduce(
+      (s, q) => s + Number(q.receivedQuantity || 0),
+      0
+    );
+    const effectiveQcReceivedQty =
+      payload.status === 'Ditolak'
+        ? safeDeliveredQty
+        : safeQcPassedQty !== prevQcRecorded
+        ? safeQcPassedQty
+        : safeDeliveredQty;
+    const effectivePassedQty =
+      payload.status === 'Ditolak' ? 0 : effectiveQcReceivedQty;
+    const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+    let nextQCs: QualityControlRecord[];
+    if (existingItemQCs.length > 0) {
+      const primaryId = existingItemQCs[0].id;
+      nextQCs = qualityControlRecordsRef.current
+        .filter(q => !isItemQC(q) || q.id === primaryId)
+        .map(q => {
+          if (q.id !== primaryId) return q;
+          return {
+            ...q,
+            orderedQuantity: safeOrderedQty,
+            receivedQuantity: effectiveQcReceivedQty,
+            differenceQuantity: effectivePassedQty - safeOrderedQty,
+            inspectedAt: stamp,
+            status: payload.status,
+            notes: payload.notes !== undefined ? payload.notes : q.notes,
+            inventoryAdded: payload.status !== 'Ditolak' && effectivePassedQty > 0,
+          };
+        });
+    } else {
+      const newQC: QualityControlRecord = {
+        id: `qc-edit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        poId: targetPO.id,
+        poNumber: targetPO.poNumber,
+        supplierName: targetPO.supplierName,
+        itemName: targetItem.itemName,
+        orderedQuantity: safeOrderedQty,
+        unit: targetItem.unit || 'kg',
+        receivedQuantity: effectiveQcReceivedQty,
+        differenceQuantity: effectivePassedQty - safeOrderedQty,
+        condition: payload.status === 'Ditolak' ? 'Busuk/Tercemar' : 'Baik',
+        qualityGrade:
+          payload.status === 'Diterima sebagian' || payload.status === 'Lolos Sebagian'
+            ? 'Grade B (Standar)'
+            : payload.status === 'Ditolak'
+            ? 'Afkir (Tidak Layak)'
+            : 'Grade A (Sangat Baik)',
+        expiryDate: defaultExp,
+        notes: payload.notes || '',
+        inspectorName: `${currentUser.name} (${currentUser.role})`,
+        status: payload.status,
+        inspectedAt: stamp,
+        inventoryAdded: payload.status !== 'Ditolak' && effectivePassedQty > 0,
+      };
+      nextQCs = [newQC, ...qualityControlRecordsRef.current];
+    }
+
+    const draftPOs = purchaseOrdersRef.current.map(po => {
+      if (po.id !== poId) return po;
+      const nextItems: PurchaseOrderItem[] = (po.items || []).map((it, idx) => {
+        if (idx !== targetIdx) return it;
+        const unitPrice = Number(it.unitPrice || 0);
+        return {
+          ...it,
+          quantity: safeOrderedQty,
+          subtotal: safeOrderedQty * unitPrice,
+          deliveredQuantity: effectiveQcReceivedQty,
+          receivedQuantity: effectivePassedQty,
+          deliveredAt: stamp,
+          supplierConfirmed: true,
+          supplierDeliveryStatus: 'Telah Tiba di Gudang' as const,
+        };
+      });
+      const activeTotal = nextItems
+        .filter(it => it.approvalStatus !== 'Ditolak')
+        .reduce((s, it) => s + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)), 0);
+      return {
+        ...po,
+        items: nextItems,
+        totalAmount: activeTotal,
+      };
+    });
+
+    const nextPOs = reconcilePurchaseOrdersWithQC(draftPOs, nextQCs).map(po => {
+      if (po.id !== poId) return po;
+      const nextTotal = (po.items || [])
+        .filter(it => it.approvalStatus !== 'Ditolak')
+        .reduce((s, it) => s + Number(it.subtotal ?? (it.quantity || 0) * (it.unitPrice || 0)), 0);
+      return { ...po, totalAmount: nextTotal };
+    });
+    const nextRABs = reconcileRABWithPurchaseOrders(nextPOs, rabItemsRef.current);
+    const invSync = reconcileInventoryFromQualityControl({
+      qualityControlRecords: nextQCs,
+      purchaseOrders: nextPOs,
+      rabItems: nextRABs,
+      masterBahan,
+      existingInventory: inventoryRef.current,
+      existingMutations: stockMutationsRef.current,
+    });
+
+    qualityControlRecordsRef.current = nextQCs;
+    purchaseOrdersRef.current = nextPOs;
+    rabItemsRef.current = nextRABs;
+    inventoryRef.current = invSync.inventory;
+    stockMutationsRef.current = invSync.stockMutations;
+
+    setQualityControlRecords(nextQCs);
+    setPurchaseOrders(nextPOs);
+    setRabItems(nextRABs);
+    setInventory(invSync.inventory);
+    setStockMutations(invSync.stockMutations);
+
+    addToast(
+      'success',
+      'Data Terkirim Diperbarui',
+      `Data pengiriman & QC item ${targetItem.itemName} berhasil diperbarui.`
+    );
+    await logAudit(
+      'UPDATE',
+      'procurement',
+      `Memperbarui data terkirim item [${targetItem.itemName}] pada PO ${targetPO.poNumber} (Pesan: ${safeOrderedQty}, Terima: ${safeDeliveredQty}, QC: ${safeQcPassedQty})`
+    );
   };
 
   const supplierUploadDocument = async (poId: string, doc: Omit<SupplierDocument, 'id' | 'uploadedAt'>) => {
@@ -8962,6 +9946,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supplierConfirmPO,
         supplierUpdatePOStatus,
         supplierRejectPO,
+        supplierConfirmPOItem,
+        supplierUpdatePOItemStatus,
+        supplierRejectPOItem,
+        supplierResetPOItem,
+        supplierReducePOItemQuantity,
+        supplierCoverPOItemShortage,
+        supplierEditDeliveredPOItem,
         supplierUploadDocument,
         officialLetters,
         addLetter,

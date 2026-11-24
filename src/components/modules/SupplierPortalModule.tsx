@@ -1,11 +1,29 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
+import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { PrintHeader } from '../common/PrintHeader';
 import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate, formatRupiah, formatNumber } from '../../lib/exportUtils';
-import { PurchaseOrder, SupplierDocument, MasterSupplier } from '../../types';
+import {
+  sortPOItemsBahanThenOperasional,
+  isOperasionalPOItem,
+  resolvePOItemDistributionDate,
+  resolvePOItemApprovalStatus,
+  resolvePOItemSupplierConfirmed,
+  resolvePOItemSupplierDeliveryStatus,
+  resolvePOItemQCInfo,
+  getPODisplayCategoryRank,
+} from '../../lib/supplyChainSync';
+import {
+  PurchaseOrder,
+  PurchaseOrderItem,
+  SupplierDocument,
+  MasterSupplier,
+  QCStatusPLOK,
+  QualityControlRecord,
+} from '../../types';
 import {
   Truck,
   CheckCircle,
@@ -32,14 +50,29 @@ import {
   FileCheck,
   Image as ImageIcon,
   ExternalLink,
+  Link2,
+  RotateCcw,
+  Edit3,
+  MinusCircle,
+  PlusCircle,
 } from 'lucide-react';
 
 export const SupplierPortalModule: React.FC = () => {
   const {
     purchaseOrders,
+    rabItems,
+    menuItems,
+    qualityControlRecords,
     supplierConfirmPO,
     supplierUpdatePOStatus,
     supplierRejectPO,
+    supplierConfirmPOItem,
+    supplierUpdatePOItemStatus,
+    supplierRejectPOItem,
+    supplierResetPOItem,
+    supplierReducePOItemQuantity,
+    supplierCoverPOItemShortage,
+    supplierEditDeliveredPOItem,
     supplierUploadDocument,
     currentUser,
     masterSuppliers,
@@ -47,28 +80,27 @@ export const SupplierPortalModule: React.FC = () => {
     addToast,
   } = useApp();
 
-  // If logged in as Supplier, force current supplierName.
-  // If logged in as Admin / SPPG staff, provide a simulation selector to test different supplier accounts.
-  const isSupplierAccount = currentUser.role === 'Supplier / Mitra Pangan';
-  const defaultSimulated = currentUser.supplierName || 'PT Unggas Barokah Probolinggo';
-  const [selectedSupplierName, setSelectedSupplierName] = useState<string>(defaultSimulated);
-
-  const activeSupplierName = isSupplierAccount ? (currentUser.supplierName || defaultSimulated) : selectedSupplierName;
+  const activeSupplierName = (currentUser.supplierName || '').trim() || 'PT Unggas Barokah Probolinggo';
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'active_po' | 'history' | 'profile'>('active_po');
+  const [activeTab, setActiveTab] = useState<'active_po' | 'delivered' | 'history' | 'profile'>('active_po');
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [deliveryDateFilter, setDeliveryDateFilter] = useState<string>('ALL');
 
   // Modals
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
+  const [selectedPOItem, setSelectedPOItem] = useState<PurchaseOrderItem | null>(null);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isUpdateStatusModalOpen, setIsUpdateStatusModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [isUploadDocModalOpen, setIsUploadDocModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isReducePOQtyModalOpen, setIsReducePOQtyModalOpen] = useState(false);
+  const [isCoverShortageModalOpen, setIsCoverShortageModalOpen] = useState(false);
+  const [isEditDeliveredModalOpen, setIsEditDeliveredModalOpen] = useState(false);
 
   // Form States
   const [confirmForm, setConfirmForm] = useState({
@@ -93,12 +125,38 @@ export const SupplierPortalModule: React.FC = () => {
     fileUrl: '',
   });
 
-  // Strict Data Isolation Filter: ONLY get POs addressed to activeSupplierName!
+  const [reducePOForm, setReducePOForm] = useState({
+    currentOrderedQty: 0,
+    qcPassedQty: 0,
+    newOrderedQty: 0,
+    unit: 'kg',
+    notes: '',
+  });
+
+  const [coverShortageForm, setCoverShortageForm] = useState({
+    shortageQty: 0,
+    addedQty: 0,
+    unit: 'kg',
+    deliveredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    condition: 'Baik' as QualityControlRecord['condition'],
+    qualityGrade: 'Grade A (Sangat Baik)' as QualityControlRecord['qualityGrade'],
+    notes: '',
+  });
+
+  const [editDeliveredForm, setEditDeliveredForm] = useState({
+    deliveredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+    orderedQuantity: 0,
+    deliveredQuantity: 0,
+    qcPassedQuantity: 0,
+    unit: 'kg',
+    status: 'Diterima' as QCStatusPLOK,
+    notes: '',
+  });
+
+  // Data Purchase Order diambil langsung dari data Purchase Order PLOK (Bahan Pangan & Operasional)
   const supplierPOs = useMemo(() => {
-    return purchaseOrders.filter(po =>
-      po.supplierName.toLowerCase().trim() === activeSupplierName.toLowerCase().trim()
-    );
-  }, [purchaseOrders, activeSupplierName]);
+    return purchaseOrders;
+  }, [purchaseOrders]);
 
   // Split into Active vs Completed/History
   const activePOs = useMemo(() => {
@@ -113,20 +171,288 @@ export const SupplierPortalModule: React.FC = () => {
     );
   }, [supplierPOs]);
 
-  // Filtered List based on tab and search
+  // Data Bahan & Operasional Terkirim (All delivered / QC-inspected / arrived items from PLOK)
+  const allDeliveredRows = useMemo(() => {
+    const flattened = supplierPOs.flatMap(po => {
+      const rawItemsList =
+        po.items && po.items.length > 0
+          ? po.items
+          : [
+              {
+                itemId: po.id,
+                itemName: po.notes || 'Pesanan PO',
+                quantity: 1,
+                unit: 'paket',
+                unitPrice: po.totalAmount,
+                subtotal: po.totalAmount,
+                rabId: po.rabId,
+              },
+            ];
+      const sortedItems = sortPOItemsBahanThenOperasional(rawItemsList, po, rabItems);
+
+      return sortedItems
+        .map((it, itemIdx) => {
+          const isOpsItem = isOperasionalPOItem(it, po, rabItems);
+          const linkedRab = rabItems.find(r => r.id === (it.rabId || po.rabId));
+          const itemApprovalStatus = resolvePOItemApprovalStatus(it, po);
+          const itemDeliveryStatus = resolvePOItemSupplierDeliveryStatus(it, po);
+          const itemQCInfo = resolvePOItemQCInfo(it, po, qualityControlRecords);
+          const orderedQty = Number(it.quantity || 0);
+          const qcRecordedReceivedQty = itemQCInfo.itemQCs.reduce(
+            (sum, q) => sum + Number(q.receivedQuantity || 0),
+            0
+          );
+          const deliveredQty =
+            itemQCInfo.qcCount > 0
+              ? qcRecordedReceivedQty
+              : Number(itemQCInfo.deliveredQuantity || 0);
+          const qcPassedQty = Number(itemQCInfo.receivedQuantity || 0);
+          const isWarehouseReceivedPO =
+            po.status === 'Diterima di Gudang' ||
+            po.status === 'Selesai diterima' ||
+            po.status === 'Sebagian diterima' ||
+            po.status === 'Dikirim ke supplier';
+          const isDeliveredItem =
+            itemQCInfo.qcCount > 0 ||
+            itemDeliveryStatus === 'Telah Tiba di Gudang' ||
+            itemDeliveryStatus === 'Dalam Pengiriman' ||
+            isWarehouseReceivedPO ||
+            deliveredQty > 0 ||
+            qcPassedQty > 0;
+
+          if (!isDeliveredItem) return null;
+          if (itemApprovalStatus === 'Ditolak' && itemQCInfo.qcCount === 0) return null;
+
+          const hasQCEvaluation =
+            itemQCInfo.qcCount > 0 ||
+            qcPassedQty > 0 ||
+            po.status === 'Diterima di Gudang' ||
+            po.status === 'Selesai diterima' ||
+            itemQCInfo.qcStatus === 'Ditolak';
+          const totalSelisih = hasQCEvaluation
+            ? qcPassedQty - orderedQty
+            : deliveredQty > 0
+            ? deliveredQty - orderedQty
+            : 0;
+
+          const receivedTimeRaw =
+            itemQCInfo.latestInspectedAt ||
+            it.deliveredAt ||
+            (itemDeliveryStatus === 'Telah Tiba di Gudang' || isWarehouseReceivedPO
+              ? po.deliveryDate
+              : '');
+
+          return {
+            po,
+            it,
+            itemIdx,
+            isOpsItem,
+            linkedRab,
+            itemApprovalStatus,
+            itemDeliveryStatus,
+            itemQCInfo,
+            orderedQty,
+            deliveredQty,
+            qcPassedQty,
+            totalSelisih,
+            hasQCEvaluation,
+            receivedTimeRaw,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+    });
+
+    return flattened.sort((a, b) => {
+      const catA = a.isOpsItem ? 1 : 0;
+      const catB = b.isOpsItem ? 1 : 0;
+      if (catA !== catB) return catA - catB;
+      const timeDiff = (b.receivedTimeRaw || b.po.deliveryDate || '').localeCompare(
+        a.receivedTimeRaw || a.po.deliveryDate || ''
+      );
+      if (timeDiff !== 0) return timeDiff;
+      const poDiff = (a.po.poNumber || '').localeCompare(b.po.poNumber || '');
+      if (poDiff !== 0) return poDiff;
+      return a.itemIdx - b.itemIdx;
+    });
+  }, [supplierPOs, rabItems, qualityControlRecords]);
+
+  // Available Delivery Target Days (Hari Target Kirim) for current tab
+  const deliveryDateOptions = useMemo(() => {
+    const countMap = new Map<string, number>();
+    if (activeTab === 'delivered') {
+      allDeliveredRows.forEach(row => {
+        const dateStr = (row.po.deliveryDate || '').trim();
+        if (!dateStr) return;
+        countMap.set(dateStr, (countMap.get(dateStr) || 0) + 1);
+      });
+    } else {
+      const sourceList = activeTab === 'history' ? historyPOs : activePOs;
+      sourceList.forEach(po => {
+        const dateStr = (po.deliveryDate || '').trim();
+        if (!dateStr) return;
+        countMap.set(dateStr, (countMap.get(dateStr) || 0) + 1);
+      });
+    }
+    return Array.from(countMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({
+        date,
+        count,
+      }));
+  }, [activeTab, activePOs, historyPOs, allDeliveredRows]);
+
+  // Filtered List based on tab, delivery target day, status, and search (sorted: Bahan dahulu, lalu Operasional)
   const displayedPOs = useMemo(() => {
     const sourceList = activeTab === 'history' ? historyPOs : activePOs;
-    return sourceList.filter(po => {
-      const matchSearch =
-        po.poNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        po.items.some(i => i.itemName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (po.supplierDriverName && po.supplierDriverName.toLowerCase().includes(searchQuery.toLowerCase()));
+    const query = searchQuery.trim().toLowerCase();
+    return sourceList
+      .filter(po => {
+        const matchSearch =
+          !query ||
+          po.poNumber.toLowerCase().includes(query) ||
+          po.items.some(i => i.itemName.toLowerCase().includes(query)) ||
+          (po.supplierDriverName && po.supplierDriverName.toLowerCase().includes(query));
 
-      const matchStatus = statusFilter === 'ALL' || po.supplierDeliveryStatus === statusFilter;
+        const resolvedDeliveryStatus =
+          po.supplierDeliveryStatus ||
+          (po.supplierConfirmed ? 'Dikonfirmasi Supplier' : 'Menunggu Konfirmasi');
+        const hasItemMatchingStatus =
+          statusFilter !== 'ALL' &&
+          (po.items || []).some(
+            it => resolvePOItemSupplierDeliveryStatus(it, po) === statusFilter
+          );
+        const matchStatus =
+          statusFilter === 'ALL' ||
+          po.supplierDeliveryStatus === statusFilter ||
+          resolvedDeliveryStatus === statusFilter ||
+          hasItemMatchingStatus;
 
-      return matchSearch && matchStatus;
+        const matchDeliveryDate =
+          deliveryDateFilter === 'ALL' || (po.deliveryDate || '').trim() === deliveryDateFilter;
+
+        return matchSearch && matchStatus && matchDeliveryDate;
+      })
+      .sort((a, b) => {
+        const rankDiff =
+          getPODisplayCategoryRank(a, rabItems) - getPODisplayCategoryRank(b, rabItems);
+        if (rankDiff !== 0) return rankDiff;
+        const dateDiff = (a.deliveryDate || '').localeCompare(b.deliveryDate || '');
+        if (dateDiff !== 0) return dateDiff;
+        return (a.poNumber || '').localeCompare(b.poNumber || '');
+      });
+  }, [activeTab, activePOs, historyPOs, searchQuery, statusFilter, deliveryDateFilter, rabItems]);
+
+  // Item rows terurut ketat: seluruh item Nama Bahan terlebih dahulu, lalu dilanjutkan Item Operasional
+  const activePORows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const flattened = displayedPOs.flatMap(po => {
+      const rawItemsList =
+        po.items && po.items.length > 0
+          ? po.items
+          : [
+              {
+                itemId: po.id,
+                itemName: po.notes || 'Pesanan PO',
+                quantity: 1,
+                unit: 'paket',
+                unitPrice: po.totalAmount,
+                subtotal: po.totalAmount,
+                rabId: po.rabId,
+              },
+            ];
+      const sortedItems = sortPOItemsBahanThenOperasional(rawItemsList, po, rabItems);
+
+      return sortedItems
+        .map((it, itemIdx) => {
+          const isOpsItem = isOperasionalPOItem(it, po, rabItems);
+          const linkedRab = rabItems.find(r => r.id === (it.rabId || po.rabId));
+          const itemApprovalStatus = resolvePOItemApprovalStatus(it, po);
+          const itemConfirmed = resolvePOItemSupplierConfirmed(it, po);
+          const itemDeliveryStatus = resolvePOItemSupplierDeliveryStatus(it, po);
+          const itemQCInfo = resolvePOItemQCInfo(it, po, qualityControlRecords);
+          const resolvedDistDate = resolvePOItemDistributionDate(it, po, rabItems, menuItems);
+          const itemEstimatedDelivery =
+            it.supplierEstimatedDelivery ||
+            (itemConfirmed ? po.supplierEstimatedDelivery : undefined);
+          const itemDriverName =
+            it.supplierDriverName || (itemConfirmed ? po.supplierDriverName : undefined);
+          const itemVehicleNumber =
+            it.supplierVehicleNumber || (itemConfirmed ? po.supplierVehicleNumber : undefined);
+          const itemRejectionReason =
+            it.supplierRejectionReason ||
+            (itemApprovalStatus === 'Ditolak' ? po.supplierRejectionReason : undefined);
+
+          return {
+            po,
+            it,
+            itemIdx,
+            isOpsItem,
+            linkedRab,
+            itemApprovalStatus,
+            itemConfirmed,
+            itemDeliveryStatus,
+            itemQCInfo,
+            resolvedDistDate,
+            itemEstimatedDelivery,
+            itemDriverName,
+            itemVehicleNumber,
+            itemRejectionReason,
+          };
+        })
+        .filter(row => {
+          if (statusFilter !== 'ALL') {
+            if (
+              row.itemDeliveryStatus !== statusFilter &&
+              row.po.supplierDeliveryStatus !== statusFilter
+            ) {
+              return false;
+            }
+          }
+          if (query) {
+            const matchPo = row.po.poNumber.toLowerCase().includes(query);
+            const matchItem = row.it.itemName.toLowerCase().includes(query);
+            const matchDriver = (row.itemDriverName || row.po.supplierDriverName || '')
+              .toLowerCase()
+              .includes(query);
+            if (!matchPo && !matchItem && !matchDriver) {
+              return false;
+            }
+          }
+          return true;
+        });
     });
-  }, [activeTab, activePOs, historyPOs, searchQuery, statusFilter]);
+
+    return flattened.sort((a, b) => {
+      const catA = a.isOpsItem ? 1 : 0;
+      const catB = b.isOpsItem ? 1 : 0;
+      if (catA !== catB) return catA - catB;
+      const dateDiff = (a.po.deliveryDate || '').localeCompare(b.po.deliveryDate || '');
+      if (dateDiff !== 0) return dateDiff;
+      const poDiff = (a.po.poNumber || '').localeCompare(b.po.poNumber || '');
+      if (poDiff !== 0) return poDiff;
+      return a.itemIdx - b.itemIdx;
+    });
+  }, [displayedPOs, rabItems, menuItems, qualityControlRecords, statusFilter, searchQuery]);
+
+  const deliveredRows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return allDeliveredRows.filter(row => {
+      const matchDeliveryDate =
+        deliveryDateFilter === 'ALL' || (row.po.deliveryDate || '').trim() === deliveryDateFilter;
+      const matchStatus =
+        statusFilter === 'ALL' ||
+        row.itemDeliveryStatus === statusFilter ||
+        row.itemQCInfo.qcStatus === statusFilter ||
+        row.po.supplierDeliveryStatus === statusFilter;
+      const matchSearch =
+        !query ||
+        row.po.poNumber.toLowerCase().includes(query) ||
+        row.it.itemName.toLowerCase().includes(query) ||
+        row.itemQCInfo.qcStatus.toLowerCase().includes(query) ||
+        (row.po.supplierDriverName || '').toLowerCase().includes(query);
+      return matchDeliveryDate && matchStatus && matchSearch;
+    });
+  }, [allDeliveredRows, deliveryDateFilter, statusFilter, searchQuery]);
 
   // Statistics for Current Supplier
   const stats = useMemo(() => {
@@ -155,21 +481,33 @@ export const SupplierPortalModule: React.FC = () => {
     };
   }, [masterSuppliers, activeSupplierName]);
 
-  // Handle Confirm PO Submit
+  // Handle Confirm PO / Item Submit
   const handleConfirmSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPO) return;
 
     const fullEstimated = `${formatIndonesianDate(confirmForm.estimatedDeliveryDate)} - ${confirmForm.estimatedDeliveryTime}`;
-    await supplierConfirmPO(
-      selectedPO.id,
-      fullEstimated,
-      confirmForm.driverName,
-      confirmForm.driverPhone,
-      confirmForm.vehicleNumber
-    );
+    if (selectedPOItem) {
+      await supplierConfirmPOItem(
+        selectedPO.id,
+        { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+        fullEstimated,
+        confirmForm.driverName,
+        confirmForm.driverPhone,
+        confirmForm.vehicleNumber
+      );
+    } else {
+      await supplierConfirmPO(
+        selectedPO.id,
+        fullEstimated,
+        confirmForm.driverName,
+        confirmForm.driverPhone,
+        confirmForm.vehicleNumber
+      );
+    }
 
     setIsConfirmModalOpen(false);
+    setSelectedPOItem(null);
   };
 
   // Handle Status Update Submit
@@ -177,8 +515,18 @@ export const SupplierPortalModule: React.FC = () => {
     e.preventDefault();
     if (!selectedPO) return;
 
-    await supplierUpdatePOStatus(selectedPO.id, updateStatusForm.status, updateStatusForm.notes);
+    if (selectedPOItem) {
+      await supplierUpdatePOItemStatus(
+        selectedPO.id,
+        { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+        updateStatusForm.status,
+        updateStatusForm.notes
+      );
+    } else {
+      await supplierUpdatePOStatus(selectedPO.id, updateStatusForm.status, updateStatusForm.notes);
+    }
     setIsUpdateStatusModalOpen(false);
+    setSelectedPOItem(null);
   };
 
   // Handle Reject Submit
@@ -190,8 +538,17 @@ export const SupplierPortalModule: React.FC = () => {
       return;
     }
 
-    await supplierRejectPO(selectedPO.id, rejectReason.trim());
+    if (selectedPOItem) {
+      await supplierRejectPOItem(
+        selectedPO.id,
+        { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+        rejectReason.trim()
+      );
+    } else {
+      await supplierRejectPO(selectedPO.id, rejectReason.trim());
+    }
     setIsRejectModalOpen(false);
+    setSelectedPOItem(null);
     setRejectReason('');
   };
 
@@ -214,43 +571,187 @@ export const SupplierPortalModule: React.FC = () => {
     });
   };
 
+  const formatReceivedTimeLabel = (rawTime: string, fallbackDeliveryDate: string, deliveryStatus: string) => {
+    const trimmed = (rawTime || '').trim();
+    if (trimmed) {
+      const dateMatch = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?/.exec(trimmed);
+      if (dateMatch) {
+        const formattedDate = formatIndonesianDate(dateMatch[1]);
+        return dateMatch[2] ? `${formattedDate} · ${dateMatch[2]} WIB` : formattedDate;
+      }
+      return trimmed;
+    }
+    if (deliveryStatus === 'Dalam Pengiriman') {
+      return `Dalam Pengiriman (Target: ${formatIndonesianDate(fallbackDeliveryDate)})`;
+    }
+    return fallbackDeliveryDate ? formatIndonesianDate(fallbackDeliveryDate) : '-';
+  };
+
+  const handleReducePOQtySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPO || !selectedPOItem) return;
+    await supplierReducePOItemQuantity(
+      selectedPO.id,
+      { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+      reducePOForm.newOrderedQty,
+      reducePOForm.notes.trim() || undefined
+    );
+    setIsReducePOQtyModalOpen(false);
+    setSelectedPOItem(null);
+  };
+
+  const handleCoverShortageSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPO || !selectedPOItem) return;
+    if (coverShortageForm.addedQty <= 0) {
+      addToast('error', 'Jumlah Tidak Valid', 'Masukkan jumlah tambahan pengiriman lebih dari 0.');
+      return;
+    }
+    await supplierCoverPOItemShortage(
+      selectedPO.id,
+      { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+      coverShortageForm.addedQty,
+      {
+        deliveredAt: coverShortageForm.deliveredAt,
+        condition: coverShortageForm.condition,
+        qualityGrade: coverShortageForm.qualityGrade,
+        notes: coverShortageForm.notes,
+      }
+    );
+    setIsCoverShortageModalOpen(false);
+    setSelectedPOItem(null);
+  };
+
+  const handleEditDeliveredSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPO || !selectedPOItem) return;
+    await supplierEditDeliveredPOItem(
+      selectedPO.id,
+      { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
+      {
+        deliveredAt: editDeliveredForm.deliveredAt,
+        orderedQuantity: editDeliveredForm.orderedQuantity,
+        deliveredQuantity: editDeliveredForm.deliveredQuantity,
+        qcPassedQuantity: editDeliveredForm.qcPassedQuantity,
+        status: editDeliveredForm.status,
+        notes: editDeliveredForm.notes,
+      }
+    );
+    setIsEditDeliveredModalOpen(false);
+    setSelectedPOItem(null);
+  };
+
   // Export handlers
   const handleExportPDF = () => {
+    if (activeTab === 'delivered') {
+      exportTableToPDF({
+        title: `DATA BAHAN & OPERASIONAL TERKIRIM`,
+        subtitle: `Rekapitulasi Penerimaan, Hasil QC & Selisih Purchase Order PLOK | SPPG Temenggungan 2`,
+        headers: [
+          'Nomor',
+          'Nama Bahan dan Operasional',
+          'Waktu Diterima',
+          'Jumlah Dipesan',
+          'Jumlah Diterima',
+          'Jumlah Hasil QC',
+          'Total Selisih',
+          'Status',
+        ],
+        rows: deliveredRows.map((row, idx) => [
+          String(idx + 1),
+          `${row.it.itemName} (${row.po.poNumber})`,
+          formatReceivedTimeLabel(row.receivedTimeRaw, row.po.deliveryDate, row.itemDeliveryStatus),
+          `${formatNumber(row.orderedQty)} ${row.it.unit}`,
+          `${formatNumber(row.deliveredQty)} ${row.it.unit}`,
+          `${formatNumber(row.qcPassedQty)} ${row.it.unit}`,
+          `${row.totalSelisih > 0 ? `+${formatNumber(row.totalSelisih)}` : formatNumber(row.totalSelisih)} ${row.it.unit}`,
+          row.itemQCInfo.qcStatus,
+        ]),
+        fileName: `Data_Bahan_Operasional_Terkirim`,
+        sppgConfig,
+        signerName: currentUser.name,
+        signerRole: 'Koordinator Pengadaan & Mitra',
+      });
+      return;
+    }
+
     exportTableToPDF({
-      title: `REKAPITULASI PURCHASE ORDER (PO) SUPPLIER`,
-      subtitle: `Mitra Pangan: ${activeSupplierName} | SPPG Temenggungan 2`,
-      headers: ['Nomor PO', 'Tanggal PO', 'Bahan Dipesan', 'Total Nilai (Rp)', 'Estimasi Kirim', 'Status Pengiriman'],
-      rows: displayedPOs.map(p => [
-        p.poNumber,
-        formatIndonesianDate(p.date),
-        p.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join(', '),
-        formatRupiah(p.totalAmount),
-        p.supplierEstimatedDelivery || formatIndonesianDate(p.deliveryDate),
-        p.supplierDeliveryStatus || p.status,
-      ]),
-      fileName: `PO_Supplier_${activeSupplierName.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      title: `REKAPITULASI PURCHASE ORDER (PO) BAHAN & OPERASIONAL`,
+      subtitle: `Sumber Data: Purchase Order PLOK | SPPG Temenggungan 2`,
+      headers: ['Nomor PO', 'Tanggal PO', 'Bahan & Operasional Dipesan', 'Total Nilai (Rp)', 'Target / Estimasi Kirim', 'Status Pengiriman'],
+      rows: displayedPOs.map(p => {
+        const sorted = sortPOItemsBahanThenOperasional(p.items || [], p, rabItems);
+        return [
+          p.poNumber,
+          formatIndonesianDate(p.date),
+          sorted.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join(', '),
+          formatRupiah(p.totalAmount),
+          p.supplierEstimatedDelivery || formatIndonesianDate(p.deliveryDate),
+          p.supplierDeliveryStatus || p.status,
+        ];
+      }),
+      fileName: `PO_Bahan_Operasional_PLOK`,
       sppgConfig,
-      signerName: activeSupplierName,
-      signerRole: 'Penanggung Jawab Rekanan',
+      signerName: currentUser.name,
+      signerRole: 'Koordinator Pengadaan & Mitra',
     });
   };
 
   const handleExportExcel = () => {
-    const data = displayedPOs.map(p => ({
-      'Nomor PO': p.poNumber,
-      'Tanggal Terbit': p.date,
-      'Jadwal Tiba Diminta SPPG': p.deliveryDate,
-      'Estimasi Pengiriman Supplier': p.supplierEstimatedDelivery || '-',
-      'Nama Driver': p.supplierDriverName || '-',
-      'Kontak Driver': p.supplierDriverPhone || '-',
-      'Nomor Polisi': p.supplierVehicleNumber || '-',
-      'Rincian Bahan': p.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join('; '),
-      'Total Nilai PO': p.totalAmount,
-      'Status Konfirmasi': p.supplierConfirmed ? 'Dikonfirmasi' : 'Belum Konfirmasi',
-      'Status Pengiriman': p.supplierDeliveryStatus || p.status,
-      'Catatan': p.notes || '-',
+    if (activeTab === 'delivered') {
+      const data = deliveredRows.map((row, idx) => ({
+        'Nomor': idx + 1,
+        'Nomor PO': row.po.poNumber,
+        'Kategori Item': row.isOpsItem ? 'Operasional' : 'Bahan Pangan',
+        'Nama Bahan dan Operasional': row.it.itemName,
+        'Waktu Bahan dan Operasional diterima': formatReceivedTimeLabel(
+          row.receivedTimeRaw,
+          row.po.deliveryDate,
+          row.itemDeliveryStatus
+        ),
+        'Jumlah yang pesan': row.orderedQty,
+        'Jumlah yang diterima': row.deliveredQty,
+        'Jumlah Hasil QC': row.qcPassedQty,
+        'Total Selisih': row.totalSelisih,
+        'Satuan': row.it.unit,
+        'Status QC': row.itemQCInfo.qcStatus,
+        'Status Pengiriman': row.itemDeliveryStatus,
+      }));
+      exportToExcel(data, `Data_Bahan_Operasional_Terkirim`);
+      return;
+    }
+
+    const data = activePORows.map(({
+      po,
+      it,
+      isOpsItem,
+      itemApprovalStatus,
+      itemConfirmed,
+      itemDeliveryStatus,
+      itemQCInfo,
+      itemEstimatedDelivery,
+      itemDriverName,
+      itemVehicleNumber,
+    }) => ({
+      'Nomor PO': po.poNumber,
+      'Kategori Item': isOpsItem ? 'Operasional' : 'Bahan Pangan',
+      'Nama Bahan dan Operasional': it.itemName,
+      'Jumlah': it.quantity,
+      'Satuan': it.unit,
+      'Harga Dasar': it.unitPrice,
+      'Subtotal': it.subtotal,
+      'Target Kirim (H-1)': formatIndonesianDate(po.deliveryDate),
+      'Tanggal Terbit': formatIndonesianDate(po.date),
+      'Estimasi Pengiriman': itemEstimatedDelivery || '-',
+      'Nama Driver': itemDriverName || '-',
+      'Nomor Polisi': itemVehicleNumber || '-',
+      'Status Persetujuan Item': itemApprovalStatus,
+      'Status Konfirmasi': itemConfirmed ? 'Dikonfirmasi' : 'Belum Konfirmasi',
+      'Status Pengiriman': itemDeliveryStatus,
+      'Status QC Item': itemQCInfo.qcStatus,
+      'Qty Diterima QC': itemQCInfo.receivedQuantity,
     }));
-    exportToExcel(data, `PO_Supplier_${activeSupplierName.replace(/[^a-zA-Z0-9]/g, '_')}`);
+    exportToExcel(data, `PO_Bahan_Operasional_PLOK`);
   };
 
   // Table Columns
@@ -463,36 +964,6 @@ export const SupplierPortalModule: React.FC = () => {
             </p>
           </div>
 
-          {/* Account Card / Simulation Switcher */}
-          <div className="bg-white/10 backdrop-blur-md p-3.5 rounded-xl border border-white/20 text-xs shrink-0 max-w-sm">
-            <div className="text-[11px] font-bold text-sky-300 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-              <Building className="w-3.5 h-3.5 text-sky-300" />
-              Akun Mitra Aktif:
-            </div>
-            <div className="font-bold text-white text-sm">
-              {activeSupplierName}
-            </div>
-
-            {/* Simulation dropdown if admin/staff logged in */}
-            {!isSupplierAccount && (
-              <div className="mt-2 pt-2 border-t border-white/20">
-                <label className="block text-[10px] text-blue-200 mb-1">
-                  Mode Simulasi Mitra Rekanan (Admin Preview):
-                </label>
-                <select
-                  value={selectedSupplierName}
-                  onChange={(e) => setSelectedSupplierName(e.target.value)}
-                  className="w-full py-1 px-2 rounded bg-slate-900/80 text-white text-xs border border-white/30"
-                >
-                  {masterSuppliers.map(s => (
-                    <option key={s.id} value={s.name}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Decorative blur */}
@@ -595,6 +1066,26 @@ export const SupplierPortalModule: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setActiveTab('delivered')}
+            className={`inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'delivered'
+                ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800'
+            }`}
+          >
+            <Truck className="w-4 h-4 shrink-0" />
+            <span>Data Bahan &amp; Operasional Terkirim</span>
+            <span className={`px-2 py-0.5 text-[11px] rounded-full font-bold tabular-nums ${
+              activeTab === 'delivered'
+                ? 'bg-white/20 text-white'
+                : 'bg-teal-50 text-[#0D9488] dark:bg-teal-900/50 dark:text-teal-300'
+            }`}>
+              {allDeliveredRows.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('history')}
             className={`inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'history'
@@ -629,75 +1120,1021 @@ export const SupplierPortalModule: React.FC = () => {
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1 & 2: DAFTAR PO AKTIF & RIWAYAT */}
+      {/* TAB 1, 2 & 3: DAFTAR PO AKTIF, TERKIRIM & RIWAYAT */}
       {/* ========================================================================= */}
-      {(activeTab === 'active_po' || activeTab === 'history') && (
+      {(activeTab === 'active_po' || activeTab === 'delivered' || activeTab === 'history') && (
         <div key={activeTab} className="space-y-4 animate-fadeIn">
           {/* Filters & Actions Bar */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex flex-1 flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Cari nomor PO, nama bahan makanan, atau driver..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3 print:hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-1 flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Cari nomor PO, nama bahan & operasional, atau driver..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="ALL">Semua Status Pengiriman & QC</option>
+                  <option value="Menunggu Konfirmasi">Menunggu Konfirmasi</option>
+                  <option value="Dikonfirmasi Supplier">Dikonfirmasi Supplier</option>
+                  <option value="Sedang Dipersiapkan">Sedang Dipersiapkan</option>
+                  <option value="Dalam Pengiriman">Dalam Pengiriman</option>
+                  <option value="Telah Tiba di Gudang">Telah Tiba di Gudang</option>
+                  <option value="Ditolak Supplier">Ditolak Supplier</option>
+                  {activeTab === 'delivered' && (
+                    <>
+                      <option value="Diterima">QC: Diterima</option>
+                      <option value="Diterima sebagian">QC: Diterima sebagian</option>
+                      <option value="Lolos Penuh">QC: Lolos Penuh</option>
+                      <option value="Lolos Sebagian">QC: Lolos Sebagian</option>
+                      <option value="Ditolak">QC: Ditolak</option>
+                      <option value="Belum QC">QC: Belum QC</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportPDF}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-300 transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 transition-colors cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  Export Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerPrint()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Cetak
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Berdasarkan Hari Target Kirim */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mr-1">
+                  <Calendar className="w-3.5 h-3.5 text-[#0D9488]" />
+                  <span>Hari Target Kirim:</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDeliveryDateFilter('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                    deliveryDateFilter === 'ALL'
+                      ? 'bg-[#1E3A8A] text-white border-[#1E3A8A] shadow-2xs dark:bg-sky-600 dark:border-sky-600'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  Semua Hari (
+                  {activeTab === 'delivered'
+                    ? allDeliveredRows.length
+                    : activeTab === 'history'
+                    ? historyPOs.length
+                    : activePOs.length}
+                  )
+                </button>
+                {deliveryDateOptions.map(opt => {
+                  const isActive = deliveryDateFilter === opt.date;
+                  return (
+                    <button
+                      key={opt.date}
+                      type="button"
+                      onClick={() => setDeliveryDateFilter(opt.date)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                        isActive
+                          ? 'bg-[#0D9488] text-white border-[#0D9488] shadow-2xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-teal-50 hover:border-teal-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>{formatIndonesianDate(opt.date)}</span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                          isActive
+                            ? 'bg-white/20 text-white'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {opt.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="date"
+                    aria-label="Pilih Tanggal Target Kirim"
+                    value={deliveryDateFilter === 'ALL' ? '' : deliveryDateFilter}
+                    onChange={(e) => setDeliveryDateFilter(e.target.value || 'ALL')}
+                    className="py-1.5 px-2.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                {(deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== '') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeliveryDateFilter('ALL');
+                      setStatusFilter('ALL');
+                      setSearchQuery('');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 transition cursor-pointer"
+                    title="Reset semua filter"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {activeTab === 'active_po' ? (
+            /* Format Kolom Daftar Purchase Order (PO) Bahan & Operasional */
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm overflow-hidden print:shadow-none">
+              <div className="p-4 hidden print:block">
+                <PrintHeader
+                  title="PURCHASE ORDER (PO) AKTIF BAHAN & OPERASIONAL"
+                  subtitle="Data Purchase Order PLOK — Nama Bahan dan Operasional"
                 />
               </div>
 
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="ALL">Semua Status Pengiriman</option>
-                <option value="Menunggu Konfirmasi">Menunggu Konfirmasi</option>
-                <option value="Dikonfirmasi Supplier">Dikonfirmasi Supplier</option>
-                <option value="Sedang Dipersiapkan">Sedang Dipersiapkan</option>
-                <option value="Dalam Pengiriman">Dalam Pengiriman</option>
-                <option value="Telah Tiba di Gudang">Telah Tiba di Gudang</option>
-                <option value="Ditolak Supplier">Ditolak Supplier</option>
-              </select>
-            </div>
+              <div className="px-4 py-2.5 bg-[#C6E0B4] dark:bg-emerald-950/70 border-b border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-emerald-100">
+                    PURCHASE ORDER (PO) AKTIF BAHAN &amp; OPERASIONAL ({displayedPOs.length} PO)
+                  </span>
+                  {deliveryDateFilter !== 'ALL' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/85 dark:bg-slate-900/75 text-[#0D9488] dark:text-teal-300 border border-teal-700/25">
+                      Target Kirim: {formatIndonesianDate(deliveryDateFilter)}
+                    </span>
+                  )}
+                  {statusFilter !== 'ALL' && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                      Status: {statusFilter}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 dark:text-emerald-200 font-mono">
+                  Total Baris Pesanan: {activePORows.length} Item (Bahan → Operasional)
+                </span>
+              </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleExportPDF}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-300 transition-colors"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Export PDF
-              </button>
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-300 transition-colors"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                Export Excel
-              </button>
-            </div>
-          </div>
+              {activePORows.length === 0 ? (
+                <div className="p-6">
+                  <EmptyState
+                    variant={searchQuery || deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' ? 'search' : 'data'}
+                    title="Belum ada Pesanan Aktif (PO Berjalan)"
+                    description={
+                      deliveryDateFilter !== 'ALL'
+                        ? `Tidak ada PO aktif pada Purchase Order PLOK dengan target kirim hari ${formatIndonesianDate(deliveryDateFilter)}.`
+                        : searchQuery || statusFilter !== 'ALL'
+                        ? 'Tidak ada pesanan aktif yang cocok dengan pencarian atau filter status pengiriman Anda.'
+                        : 'Belum ada Purchase Order bahan atau operasional yang aktif pada data Purchase Order PLOK.'
+                    }
+                    actionLabel={
+                      deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== ''
+                        ? 'Tampilkan Semua PO Aktif'
+                        : undefined
+                    }
+                    onAction={
+                      deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== ''
+                        ? () => {
+                            setDeliveryDateFilter('ALL');
+                            setStatusFilter('ALL');
+                            setSearchQuery('');
+                          }
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      {/* Numbered Spreadsheet Column Strip */}
+                      <tr className="bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 text-center">
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 w-10">1</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 sticky left-0 z-10 bg-slate-100 dark:bg-slate-800">2</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">3</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">4</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">5</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">6</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">7</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">8</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1">9</th>
+                        <th className="border border-slate-300 dark:border-slate-700 px-2 py-1 print:hidden">
+                          Aksi
+                        </th>
+                      </tr>
 
-          {/* DataTable */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-            <DataTable
-              title={activeTab === 'active_po' ? 'Daftar Purchase Order (PO) Aktif' : 'Riwayat PO & Verifikasi QC'}
-              subtitle={`Menampilkan pesanan yang ditujukan kepada: ${activeSupplierName}`}
-              columns={poColumns as any}
-              data={displayedPOs as any}
-              keyExtractor={(item: any) => item.id}
-              searchPlaceholder="Cari data pesanan..."
-              searchKeys={['poNumber', 'supplierDriverName']}
-              onExportPDF={handleExportPDF}
-              onExportExcel={handleExportExcel}
-              onPrint={triggerPrint}
-              stickyFirstColumn
-            />
-          </div>
+                      {/* Main Olive Green Column Headers matching Procurement PO Bahan & Operasional */}
+                      <tr className="bg-[#548235] dark:bg-emerald-900 text-white text-[11px] font-extrabold tracking-wide">
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-2.5 py-2 text-center w-10">
+                          NO
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[240px] sticky left-0 z-10 bg-[#548235] dark:bg-emerald-900">
+                          NAMA BAHAN DAN OPERASIONAL
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-left min-w-[215px] whitespace-nowrap">
+                          NO. PO &amp; TARGET H-1
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                          Jumlah
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                          Satuan
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                          HARGA DASAR
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap">
+                          Jumlah
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                          Status PO
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-center whitespace-nowrap">
+                          Status QC Bahan
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2 text-right whitespace-nowrap print:hidden">
+                          Aksi &amp; Alur PO
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {activePORows.map((entry, rowIdx) => {
+                        const {
+                          po,
+                          it,
+                          itemIdx,
+                          isOpsItem,
+                          linkedRab,
+                          itemApprovalStatus,
+                          itemConfirmed,
+                          itemDeliveryStatus,
+                          itemQCInfo,
+                          resolvedDistDate,
+                          itemEstimatedDelivery,
+                          itemDriverName,
+                          itemVehicleNumber,
+                          itemRejectionReason,
+                        } = entry;
+
+                        const deliveryStatusColors: Record<string, string> = {
+                          'Menunggu Konfirmasi':
+                            'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300',
+                          'Dikonfirmasi Supplier':
+                            'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/40 dark:text-blue-300',
+                          'Sedang Dipersiapkan':
+                            'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950/40 dark:text-indigo-300',
+                          'Dalam Pengiriman':
+                            'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950/40 dark:text-purple-300',
+                          'Telah Tiba di Gudang':
+                            'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300',
+                          'Ditolak Supplier':
+                            'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-300',
+                        };
+
+                        const isItemRejected = itemApprovalStatus === 'Ditolak';
+                        const isItemClosed =
+                          po.status === 'Diterima di Gudang' || po.status === 'Selesai diterima';
+
+                        return (
+                          <tr
+                            key={`${po.id}-${itemIdx}-${isOpsItem ? 'op' : 'bh'}`}
+                            className={`transition-colors ${
+                              isItemRejected
+                                ? 'bg-rose-50/30 dark:bg-rose-950/15 opacity-75'
+                                : isOpsItem
+                                ? 'bg-amber-50/20 hover:bg-amber-50/50 dark:bg-amber-950/10 dark:hover:bg-slate-800/60'
+                                : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/60'
+                            }`}
+                          >
+                            {/* Col 1: NO */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center font-mono text-slate-700 dark:text-slate-300 align-top">
+                              {rowIdx + 1}
+                            </td>
+
+                            {/* Col 2: NAMA BAHAN DAN OPERASIONAL */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
+                              <div
+                                className={`font-bold text-xs ${
+                                  isItemRejected
+                                    ? 'line-through text-slate-400 dark:text-slate-500'
+                                    : 'text-slate-900 dark:text-white'
+                                }`}
+                              >
+                                {it.itemName}
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                    isOpsItem
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  }`}
+                                >
+                                  {isOpsItem ? 'Operasional' : 'Bahan Pangan'}
+                                </span>
+                                {linkedRab && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                                    <Link2 className="w-2.5 h-2.5" />
+                                    <span>RAB: {linkedRab.budgetCode}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Col 3: NO. PO & TARGET H-1 (Berdasarkan Item Bahan & Operasional) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 align-top">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="font-mono text-xs font-bold text-blue-900 dark:text-sky-300">
+                                  {po.poNumber}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                    isOpsItem
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  }`}
+                                >
+                                  {isOpsItem ? 'Operasional' : 'Bahan'}
+                                </span>
+                              </div>
+                              {resolvedDistDate && (
+                                <div className="text-[10px] text-[#0D9488] dark:text-teal-300 font-semibold mt-0.5">
+                                  Distribusi Menu: {formatIndonesianDate(resolvedDistDate)}
+                                </div>
+                              )}
+                              <div className="text-[10px] text-slate-600 dark:text-slate-300">
+                                Target Kirim (H-1):{' '}
+                                <strong className="text-blue-900 dark:text-sky-300">
+                                  {formatIndonesianDate(po.deliveryDate)}
+                                </strong>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                Terbit: {formatIndonesianDate(po.date)}
+                              </div>
+                              {(itemEstimatedDelivery || itemDriverName || itemRejectionReason) && (
+                                <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800">
+                                  {itemEstimatedDelivery && (
+                                    <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                      Estimasi Mitra: {itemEstimatedDelivery}
+                                    </div>
+                                  )}
+                                  {itemDriverName && (
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      Driver: {itemDriverName} ({itemVehicleNumber || '-'})
+                                    </div>
+                                  )}
+                                  {itemRejectionReason && (
+                                    <div className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                                      Alasan Tolak: {itemRejectionReason}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Col 4: Jumlah (QTY) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center font-mono font-bold tabular-nums text-slate-900 dark:text-white align-top">
+                              {formatNumber(it.quantity)}
+                            </td>
+
+                            {/* Col 5: Satuan */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center text-slate-700 dark:text-slate-300 align-top">
+                              {it.unit}
+                            </td>
+
+                            {/* Col 6: HARGA DASAR */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums text-slate-800 dark:text-slate-200 align-top whitespace-nowrap">
+                              {formatRupiah(it.unitPrice)}
+                            </td>
+
+                            {/* Col 7: Jumlah (Subtotal Item) */}
+                            <td
+                              className={`border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono font-bold tabular-nums align-top whitespace-nowrap ${
+                                isItemRejected
+                                  ? 'line-through text-slate-400 dark:text-slate-500'
+                                  : 'text-slate-900 dark:text-white'
+                              }`}
+                            >
+                              {formatRupiah(it.subtotal)}
+                            </td>
+
+                            {/* Col 8: Status PO (Per Item) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 text-center align-top whitespace-nowrap">
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    itemApprovalStatus === 'Disetujui'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : itemApprovalStatus === 'Ditolak'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                      : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  }`}
+                                >
+                                  {itemApprovalStatus === 'Disetujui' ? (
+                                    <CheckCircle className="w-3 h-3" />
+                                  ) : itemApprovalStatus === 'Ditolak' ? (
+                                    <XCircle className="w-3 h-3" />
+                                  ) : (
+                                    <Clock className="w-3 h-3" />
+                                  )}
+                                  <span>
+                                    {itemApprovalStatus === 'Disetujui'
+                                      ? 'Disetujui'
+                                      : itemApprovalStatus === 'Ditolak'
+                                      ? 'Ditolak'
+                                      : 'Menunggu'}
+                                  </span>
+                                </span>
+
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full border ${
+                                    deliveryStatusColors[itemDeliveryStatus] ||
+                                    'bg-slate-100 text-slate-800 border-slate-300'
+                                  }`}
+                                >
+                                  {itemDeliveryStatus}
+                                </span>
+
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                  PO: {po.status}
+                                </span>
+
+                                {po.supplierDocuments && po.supplierDocuments.length > 0 && (
+                                  <span className="text-[10px] text-blue-600 dark:text-sky-400 font-semibold flex items-center gap-1">
+                                    <FileCheck className="w-3 h-3" />
+                                    {po.supplierDocuments.length} Dokumen
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Col 9: Status QC Bahan (Berdasarkan Item Bahan & Operasional) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-center align-top whitespace-nowrap">
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    itemQCInfo.qcStatus === 'Lolos Penuh' ||
+                                    itemQCInfo.qcStatus === 'Diterima'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : itemQCInfo.qcStatus === 'Lolos Sebagian' ||
+                                        itemQCInfo.qcStatus === 'Diterima sebagian'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : itemQCInfo.qcStatus === 'Ditolak'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                      : itemQCInfo.qcStatus === 'Perlu pemeriksaan ulang'
+                                      ? 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}
+                                >
+                                  {itemQCInfo.qcStatus}
+                                </span>
+                                {itemQCInfo.qcCount > 0 && (
+                                  <>
+                                    <span className="text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                                      Masuk: {formatNumber(itemQCInfo.receivedQuantity)}/{formatNumber(it.quantity)} {it.unit}
+                                    </span>
+                                    {itemQCInfo.latestGrade && (
+                                      <span className="text-[9px] text-slate-500 dark:text-slate-400">
+                                        {itemQCInfo.latestGrade}
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Col 10: Aksi & Alur PO (Konfirmasi/Persetujuan Per Item) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2 align-top print:hidden">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap min-w-[165px]">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPO(po);
+                                    setSelectedPOItem(it);
+                                    setIsDetailModalOpen(true);
+                                  }}
+                                  title={`Lihat Rincian ${it.itemName}`}
+                                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+
+                                {!itemConfirmed &&
+                                  !isItemRejected &&
+                                  po.status !== 'Ditolak' &&
+                                  po.status !== 'Dibatalkan' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPO(po);
+                                        setSelectedPOItem(it);
+                                        setConfirmForm({
+                                          estimatedDeliveryDate:
+                                            po.deliveryDate || new Date().toISOString().slice(0, 10),
+                                          estimatedDeliveryTime: '04:00 WIB',
+                                          driverName: itemDriverName || 'Budi Santoso',
+                                          driverPhone: it.supplierDriverPhone || po.supplierDriverPhone || '0813-8822-1100',
+                                          vehicleNumber: itemVehicleNumber || 'N 8922 UB',
+                                          notes: `Sanggup memenuhi item ${it.itemName} dan siap kirim tepat waktu.`,
+                                        });
+                                        setIsConfirmModalOpen(true);
+                                      }}
+                                      title={`Konfirmasi & Setujui item ${it.itemName}`}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Konfirmasi</span>
+                                    </button>
+                                  )}
+
+                                {itemConfirmed && !isItemRejected && !isItemClosed && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedPO(po);
+                                      setSelectedPOItem(it);
+                                      setUpdateStatusForm({
+                                        status:
+                                          itemDeliveryStatus === 'Dikonfirmasi Supplier' ||
+                                          itemDeliveryStatus === 'Menunggu Konfirmasi'
+                                            ? 'Sedang Dipersiapkan'
+                                            : itemDeliveryStatus,
+                                        notes: '',
+                                      });
+                                      setIsUpdateStatusModalOpen(true);
+                                    }}
+                                    title={`Perbarui Status Pengiriman ${it.itemName}`}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    <Truck className="w-3.5 h-3.5" />
+                                    <span>Update Status</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPO(po);
+                                    setSelectedPOItem(it);
+                                    setUploadDocForm({
+                                      type: 'Surat Jalan',
+                                      fileName: `Surat_Jalan_${po.poNumber.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+                                      fileUrl: '',
+                                    });
+                                    setIsUploadDocModalOpen(true);
+                                  }}
+                                  title="Unggah Dokumen Pendukung (Surat Jalan/Faktur/Halal)"
+                                  className="p-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 transition-colors cursor-pointer"
+                                >
+                                  <Upload className="w-4 h-4" />
+                                </button>
+
+                                {!itemConfirmed &&
+                                  !isItemRejected &&
+                                  po.status !== 'Ditolak' &&
+                                  po.status !== 'Dibatalkan' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedPO(po);
+                                        setSelectedPOItem(it);
+                                        setRejectReason('');
+                                        setIsRejectModalOpen(true);
+                                      }}
+                                      title={`Tolak item ${it.itemName}`}
+                                      className="p-1.5 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 transition-colors cursor-pointer"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  )}
+
+                                {(itemConfirmed || isItemRejected) && !isItemClosed && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      supplierResetPOItem(po.id, {
+                                        itemId: it.itemId,
+                                        itemName: it.itemName,
+                                      })
+                                    }
+                                    title={`Kembalikan ${it.itemName} ke Menunggu Konfirmasi`}
+                                    className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : activeTab === 'delivered' ? (
+            /* Sub Menu: Data Bahan & Operasional Terkirim */
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 shadow-sm overflow-hidden print:shadow-none">
+              <div className="p-4 hidden print:block">
+                <PrintHeader
+                  title="DATA BAHAN & OPERASIONAL TERKIRIM"
+                  subtitle="Rincian Penerimaan, Hasil QC, Selisih & Penyesuaian PO Mitra"
+                />
+              </div>
+
+              <div className="px-4 py-2.5 bg-[#C6E0B4] dark:bg-emerald-950/70 border-b border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-900 dark:text-emerald-100">
+                    DATA BAHAN &amp; OPERASIONAL TERKIRIM ({deliveredRows.length} Item)
+                  </span>
+                  {deliveryDateFilter !== 'ALL' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/85 dark:bg-slate-900/75 text-[#0D9488] dark:text-teal-300 border border-teal-700/25">
+                      Target Kirim: {formatIndonesianDate(deliveryDateFilter)}
+                    </span>
+                  )}
+                  {statusFilter !== 'ALL' && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/70 text-slate-700 dark:text-emerald-200 border border-emerald-700/20">
+                      Status: {statusFilter}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 dark:text-emerald-200 font-mono">
+                  Total Item Terkirim: {deliveredRows.length} Baris (Bahan → Operasional)
+                </span>
+              </div>
+
+              {deliveredRows.length === 0 ? (
+                <div className="p-6">
+                  <EmptyState
+                    variant={searchQuery || deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' ? 'search' : 'data'}
+                    title="Belum ada Data Bahan & Operasional Terkirim"
+                    description={
+                      deliveryDateFilter !== 'ALL'
+                        ? `Tidak ada data bahan atau operasional terkirim dengan target kirim hari ${formatIndonesianDate(deliveryDateFilter)}.`
+                        : searchQuery || statusFilter !== 'ALL'
+                        ? 'Tidak ada data terkirim yang cocok dengan pencarian atau filter status Anda.'
+                        : 'Belum ada item PO bahan pangan maupun operasional yang dikirim atau diterima di gudang.'
+                    }
+                    actionLabel={
+                      deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== ''
+                        ? 'Tampilkan Semua Data Terkirim'
+                        : undefined
+                    }
+                    onAction={
+                      deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== ''
+                        ? () => {
+                            setDeliveryDateFilter('ALL');
+                            setStatusFilter('ALL');
+                            setSearchQuery('');
+                          }
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-[#548235] dark:bg-emerald-900 text-white text-[11px] font-extrabold tracking-wide">
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-2.5 py-2.5 text-center w-12">
+                          Nomor
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-left min-w-[230px] sticky left-0 z-10 bg-[#548235] dark:bg-emerald-900">
+                          Nama Bahan dan Operasional
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-left min-w-[185px]">
+                          Waktu Bahan dan Operasional diterima
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-center whitespace-nowrap">
+                          Jumlah yang pesan
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-center whitespace-nowrap">
+                          Jumlah yang diterima
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-center whitespace-nowrap">
+                          Jumlah Hasil QC
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-center whitespace-nowrap">
+                          Total Selisih
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-center whitespace-nowrap">
+                          Status
+                        </th>
+                        <th className="border border-slate-400/70 dark:border-slate-700 px-3 py-2.5 text-right whitespace-nowrap print:hidden">
+                          Tindakan
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deliveredRows.map((row, rowIdx) => {
+                        const {
+                          po,
+                          it,
+                          itemIdx,
+                          isOpsItem,
+                          linkedRab,
+                          itemDeliveryStatus,
+                          itemQCInfo,
+                          orderedQty,
+                          deliveredQty,
+                          qcPassedQty,
+                          totalSelisih,
+                          hasQCEvaluation,
+                          receivedTimeRaw,
+                        } = row;
+
+                        const receivedTimeLabel = formatReceivedTimeLabel(
+                          receivedTimeRaw,
+                          po.deliveryDate,
+                          itemDeliveryStatus
+                        );
+                        const isShortage = totalSelisih < 0;
+                        const isSurplus = totalSelisih > 0;
+                        const shortageAmount = Math.max(0, orderedQty - qcPassedQty);
+                        const defaultStamp =
+                          receivedTimeRaw && /^\d{4}-\d{2}-\d{2}/.test(receivedTimeRaw)
+                            ? receivedTimeRaw.slice(0, 16)
+                            : new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+                        return (
+                          <tr
+                            key={`deliv-${po.id}-${itemIdx}-${isOpsItem ? 'op' : 'bh'}`}
+                            className={`transition-colors ${
+                              isOpsItem
+                                ? 'bg-amber-50/20 hover:bg-amber-50/50 dark:bg-amber-950/10 dark:hover:bg-slate-800/60'
+                                : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/60'
+                            }`}
+                          >
+                            {/* 1. Nomor */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2.5 text-center font-mono text-slate-700 dark:text-slate-300 align-top">
+                              {rowIdx + 1}
+                            </td>
+
+                            {/* 2. Nama Bahan dan Operasional */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
+                              <div className="font-bold text-xs text-slate-900 dark:text-white">
+                                {it.itemName}
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                    isOpsItem
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : 'bg-teal-100 text-[#0D9488] dark:bg-teal-950 dark:text-teal-300'
+                                  }`}
+                                >
+                                  {isOpsItem ? 'Operasional' : 'Bahan Pangan'}
+                                </span>
+                                <span className="text-[10px] font-mono font-semibold text-blue-800 dark:text-sky-300">
+                                  {po.poNumber}
+                                </span>
+                                {linkedRab && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                                    <Link2 className="w-2.5 h-2.5" />
+                                    <span>RAB: {linkedRab.budgetCode}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* 3. Waktu Bahan dan Operasional diterima */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 align-top text-slate-700 dark:text-slate-300">
+                              <div className="font-semibold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
+                                <span>{receivedTimeLabel}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                Target Kirim H-1: {formatIndonesianDate(po.deliveryDate)}
+                              </div>
+                            </td>
+
+                            {/* 4. Jumlah yang pesan */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center font-mono font-bold tabular-nums text-slate-900 dark:text-white align-top whitespace-nowrap">
+                              {formatNumber(orderedQty)} {it.unit}
+                            </td>
+
+                            {/* 5. Jumlah yang diterima (Diambil dari PLOK Sub menu Quality Control) */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
+                              <div className="font-mono font-bold tabular-nums text-blue-900 dark:text-sky-300">
+                                {formatNumber(deliveredQty)} {it.unit}
+                              </div>
+                              <div className="text-[9px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                {itemQCInfo.qcCount > 0 ? 'Data QC PLOK' : 'Belum Input QC'}
+                              </div>
+                            </td>
+
+                            {/* 6. Jumlah Hasil QC */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
+                              <div className="font-mono font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                                {formatNumber(qcPassedQty)} {it.unit}
+                              </div>
+                              {itemQCInfo.latestGrade && (
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {itemQCInfo.latestGrade}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* 7. Total Selisih */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
+                              {hasQCEvaluation || deliveredQty > 0 ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-extrabold ${
+                                      isShortage
+                                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                        : isSurplus
+                                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+                                        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                    }`}
+                                  >
+                                    {totalSelisih > 0
+                                      ? `+${formatNumber(totalSelisih)}`
+                                      : formatNumber(totalSelisih)}{' '}
+                                    {it.unit}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                    {isShortage
+                                      ? `Kurang ${formatNumber(Math.abs(totalSelisih))} ${it.unit}`
+                                      : isSurplus
+                                      ? `Lebih +${formatNumber(totalSelisih)} ${it.unit}`
+                                      : 'Sesuai Pesanan'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 italic">Menunggu QC</span>
+                              )}
+                            </td>
+
+                            {/* 8. Status */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
+                              <div className="flex flex-col items-center gap-1">
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    itemQCInfo.qcStatus === 'Lolos Penuh' ||
+                                    itemQCInfo.qcStatus === 'Diterima'
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                      : itemQCInfo.qcStatus === 'Lolos Sebagian' ||
+                                        itemQCInfo.qcStatus === 'Diterima sebagian'
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                      : itemQCInfo.qcStatus === 'Ditolak'
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                      : itemQCInfo.qcStatus === 'Perlu pemeriksaan ulang'
+                                      ? 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300'
+                                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}
+                                >
+                                  {itemQCInfo.qcStatus}
+                                </span>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  {itemDeliveryStatus}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* 9. Tindakan: Kurangi Jumlah PO, Tutupi kekurangan, dan Edit */}
+                            <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-2.5 align-top print:hidden">
+                              <div className="flex items-center justify-end gap-1.5 flex-wrap min-w-[260px]">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPO(po);
+                                    setSelectedPOItem(it);
+                                    const suggestedNewQty =
+                                      qcPassedQty > 0
+                                        ? Math.min(orderedQty, qcPassedQty)
+                                        : deliveredQty > 0
+                                        ? Math.min(orderedQty, deliveredQty)
+                                        : orderedQty;
+                                    setReducePOForm({
+                                      currentOrderedQty: orderedQty,
+                                      qcPassedQty,
+                                      newOrderedQty: suggestedNewQty,
+                                      unit: it.unit,
+                                      notes:
+                                        shortageAmount > 0
+                                          ? `Penyesuaian jumlah PO sesuai hasil penerimaan QC (${suggestedNewQty} ${it.unit}).`
+                                          : '',
+                                    });
+                                    setIsReducePOQtyModalOpen(true);
+                                  }}
+                                  title={`Kurangi Jumlah PO untuk ${it.itemName}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shadow-xs transition-colors cursor-pointer"
+                                >
+                                  <MinusCircle className="w-3.5 h-3.5" />
+                                  <span>Kurangi Jumlah PO</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPO(po);
+                                    setSelectedPOItem(it);
+                                    const suggestedCover =
+                                      shortageAmount > 0 ? shortageAmount : 0;
+                                    setCoverShortageForm({
+                                      shortageQty: shortageAmount,
+                                      addedQty: suggestedCover > 0 ? suggestedCover : 1,
+                                      unit: it.unit,
+                                      deliveredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                                      condition: 'Baik',
+                                      qualityGrade: 'Grade A (Sangat Baik)',
+                                      notes:
+                                        shortageAmount > 0
+                                          ? `Pengiriman susulan untuk menutupi kekurangan ${shortageAmount} ${it.unit}.`
+                                          : `Pengiriman tambahan untuk ${it.itemName}.`,
+                                    });
+                                    setIsCoverShortageModalOpen(true);
+                                  }}
+                                  title={`Tutupi kekurangan untuk ${it.itemName}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-xs transition-colors cursor-pointer"
+                                >
+                                  <PlusCircle className="w-3.5 h-3.5" />
+                                  <span>Tutupi kekurangan</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedPO(po);
+                                    setSelectedPOItem(it);
+                                    setEditDeliveredForm({
+                                      deliveredAt: defaultStamp,
+                                      orderedQuantity: orderedQty,
+                                      deliveredQuantity: deliveredQty,
+                                      qcPassedQuantity: qcPassedQty,
+                                      unit: it.unit,
+                                      status: itemQCInfo.qcStatus,
+                                      notes: itemQCInfo.latestNotes || '',
+                                    });
+                                    setIsEditDeliveredModalOpen(true);
+                                  }}
+                                  title={`Edit data terkirim ${it.itemName}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] shadow-xs transition-colors cursor-pointer"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  <span>Edit</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Tab Riwayat PO Selesai & QC */
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+              <DataTable
+                title="Riwayat PO & Verifikasi QC"
+                subtitle="Menampilkan riwayat Purchase Order bahan & operasional dari Purchase Order PLOK"
+                columns={poColumns as any}
+                data={displayedPOs as any}
+                keyExtractor={(item: any) => item.id}
+                searchPlaceholder="Cari data pesanan..."
+                searchKeys={['poNumber', 'supplierDriverName']}
+                onExportPDF={handleExportPDF}
+                onExportExcel={handleExportExcel}
+                onPrint={triggerPrint}
+                stickyFirstColumn
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -764,21 +2201,46 @@ export const SupplierPortalModule: React.FC = () => {
       {selectedPO && (
         <Modal
           isOpen={isConfirmModalOpen}
-          onClose={() => setIsConfirmModalOpen(false)}
-          title={`Konfirmasi Pesanan: ${selectedPO.poNumber}`}
+          onClose={() => {
+            setIsConfirmModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={
+            selectedPOItem
+              ? `Konfirmasi Item PO: ${selectedPOItem.itemName} (${selectedPO.poNumber})`
+              : `Konfirmasi Pesanan: ${selectedPO.poNumber}`
+          }
           maxWidth="2xl"
         >
           <form onSubmit={handleConfirmSubmit} className="space-y-4">
             <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1">
-              <div className="text-slate-500">Rincian Bahan Dipesan:</div>
-              {selectedPO.items.map((it, idx) => (
-                <div key={idx} className="font-bold text-slate-800 dark:text-slate-200">
-                  • {it.itemName}: {formatNumber(it.quantity)} {it.unit} @ {formatRupiah(it.unitPrice)} = {formatRupiah(it.subtotal)}
-                </div>
-              ))}
-              <div className="text-blue-900 dark:text-sky-400 font-bold pt-1">
-                Total Nilai: {formatRupiah(selectedPO.totalAmount)}
+              <div className="text-slate-500">
+                {selectedPOItem ? 'Rincian Item yang Dikonfirmasi:' : 'Rincian Bahan Dipesan:'}
               </div>
+              {selectedPOItem ? (
+                <>
+                  <div className="font-bold text-slate-800 dark:text-slate-200">
+                    • {selectedPOItem.itemName}: {formatNumber(selectedPOItem.quantity)}{' '}
+                    {selectedPOItem.unit} @ {formatRupiah(selectedPOItem.unitPrice)} ={' '}
+                    {formatRupiah(selectedPOItem.subtotal)}
+                  </div>
+                  <div className="text-blue-900 dark:text-sky-400 font-bold pt-1">
+                    Nilai Item: {formatRupiah(selectedPOItem.subtotal)}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {selectedPO.items.map((it, idx) => (
+                    <div key={idx} className="font-bold text-slate-800 dark:text-slate-200">
+                      • {it.itemName}: {formatNumber(it.quantity)} {it.unit} @{' '}
+                      {formatRupiah(it.unitPrice)} = {formatRupiah(it.subtotal)}
+                    </div>
+                  ))}
+                  <div className="text-blue-900 dark:text-sky-400 font-bold pt-1">
+                    Total Nilai: {formatRupiah(selectedPO.totalAmount)}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -866,7 +2328,10 @@ export const SupplierPortalModule: React.FC = () => {
             <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setIsConfirmModalOpen(false)}
+                onClick={() => {
+                  setIsConfirmModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Batal
@@ -888,8 +2353,15 @@ export const SupplierPortalModule: React.FC = () => {
       {selectedPO && (
         <Modal
           isOpen={isUpdateStatusModalOpen}
-          onClose={() => setIsUpdateStatusModalOpen(false)}
-          title={`Perbarui Status Pengiriman: ${selectedPO.poNumber}`}
+          onClose={() => {
+            setIsUpdateStatusModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={
+            selectedPOItem
+              ? `Perbarui Status Item: ${selectedPOItem.itemName} (${selectedPO.poNumber})`
+              : `Perbarui Status Pengiriman: ${selectedPO.poNumber}`
+          }
           maxWidth="md"
         >
           <form onSubmit={handleUpdateStatusSubmit} className="space-y-4">
@@ -924,7 +2396,10 @@ export const SupplierPortalModule: React.FC = () => {
             <div className="pt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setIsUpdateStatusModalOpen(false)}
+                onClick={() => {
+                  setIsUpdateStatusModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Batal
@@ -946,7 +2421,10 @@ export const SupplierPortalModule: React.FC = () => {
       {selectedPO && (
         <Modal
           isOpen={isUploadDocModalOpen}
-          onClose={() => setIsUploadDocModalOpen(false)}
+          onClose={() => {
+            setIsUploadDocModalOpen(false);
+            setSelectedPOItem(null);
+          }}
           title={`Unggah Dokumen Pendukung: ${selectedPO.poNumber}`}
           maxWidth="md"
         >
@@ -1010,7 +2488,10 @@ export const SupplierPortalModule: React.FC = () => {
             <div className="pt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setIsUploadDocModalOpen(false)}
+                onClick={() => {
+                  setIsUploadDocModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Batal
@@ -1032,7 +2513,10 @@ export const SupplierPortalModule: React.FC = () => {
       {selectedPO && (
         <Modal
           isOpen={isDetailModalOpen}
-          onClose={() => setIsDetailModalOpen(false)}
+          onClose={() => {
+            setIsDetailModalOpen(false);
+            setSelectedPOItem(null);
+          }}
           title={`Rincian Purchase Order: ${selectedPO.poNumber}`}
           maxWidth="3xl"
         >
@@ -1048,11 +2532,11 @@ export const SupplierPortalModule: React.FC = () => {
                   <span className="font-bold text-slate-900 dark:text-white">{formatIndonesianDate(selectedPO.date)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Rekanan Dituju:</span>{' '}
-                  <span className="font-bold text-slate-900 dark:text-white">{selectedPO.supplierName}</span>
+                  <span className="text-slate-500">Kategori PO:</span>{' '}
+                  <span className="font-bold text-slate-900 dark:text-white">{selectedPO.poCategory || 'Bahan Pangan & Operasional'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Batas Waktu Kirim:</span>{' '}
+                  <span className="text-slate-500">Target Kirim (H-1):</span>{' '}
                   <span className="font-bold text-slate-900 dark:text-white">{formatIndonesianDate(selectedPO.deliveryDate)}</span>
                 </div>
               </div>
@@ -1061,28 +2545,40 @@ export const SupplierPortalModule: React.FC = () => {
             {/* Items Table */}
             <div>
               <div className="font-semibold text-xs text-slate-700 dark:text-slate-300 mb-2">
-                Daftar Barang & Harga Kesepakatan:
+                Daftar Nama Bahan &amp; Operasional (Purchase Order PLOK):
               </div>
               <table className="w-full text-xs text-left border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
                 <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                   <tr>
-                    <th className="p-2.5">Nama Bahan</th>
+                    <th className="p-2.5">Nama Bahan dan Operasional</th>
                     <th className="p-2.5 text-right">Kuantitas</th>
                     <th className="p-2.5 text-right">Harga Satuan</th>
+                    <th className="p-2.5 text-center">Status Item</th>
+                    <th className="p-2.5 text-center">Status QC</th>
                     <th className="p-2.5 text-right">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {selectedPO.items.map((it, idx) => (
-                    <tr key={idx}>
-                      <td className="p-2.5 font-bold text-slate-900 dark:text-white">{it.itemName}</td>
-                      <td className="p-2.5 text-right font-mono">{formatNumber(it.quantity)} {it.unit}</td>
-                      <td className="p-2.5 text-right font-mono">{formatRupiah(it.unitPrice)}</td>
-                      <td className="p-2.5 text-right font-mono font-bold text-blue-900 dark:text-sky-400">{formatRupiah(it.subtotal)}</td>
-                    </tr>
-                  ))}
+                  {sortPOItemsBahanThenOperasional(selectedPO.items || [], selectedPO, rabItems).map((it, idx) => {
+                    const stDelivery = resolvePOItemSupplierDeliveryStatus(it, selectedPO);
+                    const qcItem = resolvePOItemQCInfo(it, selectedPO, qualityControlRecords);
+                    const isFocused =
+                      selectedPOItem &&
+                      selectedPOItem.itemName === it.itemName &&
+                      selectedPOItem.itemId === it.itemId;
+                    return (
+                      <tr key={idx} className={isFocused ? 'bg-blue-50/60 dark:bg-blue-950/30' : ''}>
+                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">{it.itemName}</td>
+                        <td className="p-2.5 text-right font-mono">{formatNumber(it.quantity)} {it.unit}</td>
+                        <td className="p-2.5 text-right font-mono">{formatRupiah(it.unitPrice)}</td>
+                        <td className="p-2.5 text-center text-[10px] font-semibold">{stDelivery}</td>
+                        <td className="p-2.5 text-center text-[10px] font-semibold">{qcItem.qcStatus}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-blue-900 dark:text-sky-400">{formatRupiah(it.subtotal)}</td>
+                      </tr>
+                    );
+                  })}
                   <tr className="bg-slate-50 dark:bg-slate-800/80 font-bold">
-                    <td colSpan={3} className="p-2.5 text-right uppercase">Total PO:</td>
+                    <td colSpan={5} className="p-2.5 text-right uppercase">Total PO:</td>
                     <td className="p-2.5 text-right font-mono text-sm text-blue-900 dark:text-sky-300">{formatRupiah(selectedPO.totalAmount)}</td>
                   </tr>
                 </tbody>
@@ -1124,7 +2620,10 @@ export const SupplierPortalModule: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => setIsDetailModalOpen(false)}
+                onClick={() => {
+                  setIsDetailModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Tutup
@@ -1140,13 +2639,22 @@ export const SupplierPortalModule: React.FC = () => {
       {selectedPO && (
         <Modal
           isOpen={isRejectModalOpen}
-          onClose={() => setIsRejectModalOpen(false)}
-          title={`Tolak Pesanan: ${selectedPO.poNumber}`}
+          onClose={() => {
+            setIsRejectModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={
+            selectedPOItem
+              ? `Tolak Item PO: ${selectedPOItem.itemName} (${selectedPO.poNumber})`
+              : `Tolak Pesanan: ${selectedPO.poNumber}`
+          }
           maxWidth="md"
         >
           <form onSubmit={handleRejectSubmit} className="space-y-4">
             <div className="text-xs text-slate-600 dark:text-slate-300">
-              Apakah Anda yakin tidak sanggup memenuhi pesanan ini? Informasi penolakan akan dikirimkan ke Kepala SPPG & Admin Gudang untuk mencari rekanan cadangan.
+              {selectedPOItem
+                ? `Apakah Anda yakin tidak sanggup memenuhi item ${selectedPOItem.itemName} (${formatNumber(selectedPOItem.quantity)} ${selectedPOItem.unit}) pada PO ${selectedPO.poNumber}? Informasi penolakan item akan dikirimkan ke Kepala SPPG & Admin Gudang.`
+                : 'Apakah Anda yakin tidak sanggup memenuhi pesanan ini? Informasi penolakan akan dikirimkan ke Kepala SPPG & Admin Gudang untuk mencari rekanan cadangan.'}
             </div>
 
             <div>
@@ -1166,7 +2674,10 @@ export const SupplierPortalModule: React.FC = () => {
             <div className="pt-2 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setIsRejectModalOpen(false)}
+                onClick={() => {
+                  setIsRejectModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
               >
                 Batal
@@ -1176,6 +2687,406 @@ export const SupplierPortalModule: React.FC = () => {
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold"
               >
                 Konfirmasi Tolak Pesanan
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 6: KURANGI JUMLAH PO (DATA TERKIRIM) */}
+      {/* ========================================================================= */}
+      {selectedPO && selectedPOItem && (
+        <Modal
+          isOpen={isReducePOQtyModalOpen}
+          onClose={() => {
+            setIsReducePOQtyModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={`Kurangi Jumlah PO: ${selectedPOItem.itemName} (${selectedPO.poNumber})`}
+          maxWidth="md"
+        >
+          <form onSubmit={handleReducePOQtySubmit} className="space-y-4">
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-600 dark:text-slate-400">Jumlah yang dipesan saat ini:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                  {formatNumber(reducePOForm.currentOrderedQty)} {reducePOForm.unit}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600 dark:text-slate-400">Jumlah Hasil QC tercatat:</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                  {formatNumber(reducePOForm.qcPassedQty)} {reducePOForm.unit}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Jumlah PO Baru ({reducePOForm.unit})
+              </label>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                max={reducePOForm.currentOrderedQty}
+                value={reducePOForm.newOrderedQty}
+                onChange={(e) =>
+                  setReducePOForm({
+                    ...reducePOForm,
+                    newOrderedQty: Math.max(0, Number(e.target.value) || 0),
+                  })
+                }
+                required
+                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Pengurangan PO otomatis menyesuaikan nilai subtotal item, selisih QC, dan melepaskan sisa anggaran RAB.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Catatan Penyesuaian PO
+              </label>
+              <textarea
+                rows={2}
+                value={reducePOForm.notes}
+                onChange={(e) => setReducePOForm({ ...reducePOForm, notes: e.target.value })}
+                placeholder="Alasan penyesuaian jumlah PO..."
+                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsReducePOQtyModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold"
+              >
+                Simpan Pengurangan PO
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 7: TUTUPI KEKURANGAN (PENGIRIMAN SUSULAN) */}
+      {/* ========================================================================= */}
+      {selectedPO && selectedPOItem && (
+        <Modal
+          isOpen={isCoverShortageModalOpen}
+          onClose={() => {
+            setIsCoverShortageModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={`Tutupi Kekurangan: ${selectedPOItem.itemName} (${selectedPO.poNumber})`}
+          maxWidth="md"
+        >
+          <form onSubmit={handleCoverShortageSubmit} className="space-y-4">
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs flex justify-between items-center">
+              <span className="text-slate-600 dark:text-slate-300">Total Kekurangan Saat Ini:</span>
+              <span className="font-mono font-bold text-rose-700 dark:text-rose-400">
+                {formatNumber(coverShortageForm.shortageQty)} {coverShortageForm.unit}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Jumlah Tambahan Dikirim ({coverShortageForm.unit})
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0.01}
+                  value={coverShortageForm.addedQty}
+                  onChange={(e) =>
+                    setCoverShortageForm({
+                      ...coverShortageForm,
+                      addedQty: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Waktu Diterima Susulan
+                </label>
+                <input
+                  type="text"
+                  value={coverShortageForm.deliveredAt}
+                  onChange={(e) =>
+                    setCoverShortageForm({ ...coverShortageForm, deliveredAt: e.target.value })
+                  }
+                  placeholder="YYYY-MM-DD HH:mm"
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Kondisi Bahan / Barang
+                </label>
+                <select
+                  value={coverShortageForm.condition}
+                  onChange={(e) =>
+                    setCoverShortageForm({
+                      ...coverShortageForm,
+                      condition: e.target.value as QualityControlRecord['condition'],
+                    })
+                  }
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value="Baik">Baik</option>
+                  <option value="Kemasan Cacat">Kemasan Cacat</option>
+                  <option value="Rusak Ringan">Rusak Ringan</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Mutu QC
+                </label>
+                <select
+                  value={coverShortageForm.qualityGrade}
+                  onChange={(e) =>
+                    setCoverShortageForm({
+                      ...coverShortageForm,
+                      qualityGrade: e.target.value as QualityControlRecord['qualityGrade'],
+                    })
+                  }
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value="Grade A (Sangat Baik)">Grade A (Sangat Baik)</option>
+                  <option value="Grade B (Standar)">Grade B (Standar)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Catatan Pengiriman Susulan
+              </label>
+              <textarea
+                rows={2}
+                value={coverShortageForm.notes}
+                onChange={(e) =>
+                  setCoverShortageForm({ ...coverShortageForm, notes: e.target.value })
+                }
+                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCoverShortageModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+              >
+                Simpan Penutupan Kekurangan
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 8: EDIT DATA BAHAN & OPERASIONAL TERKIRIM */}
+      {/* ========================================================================= */}
+      {selectedPO && selectedPOItem && (
+        <Modal
+          isOpen={isEditDeliveredModalOpen}
+          onClose={() => {
+            setIsEditDeliveredModalOpen(false);
+            setSelectedPOItem(null);
+          }}
+          title={`Edit Data Terkirim: ${selectedPOItem.itemName} (${selectedPO.poNumber})`}
+          maxWidth="lg"
+        >
+          <form onSubmit={handleEditDeliveredSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Waktu Bahan dan Operasional diterima (YYYY-MM-DD HH:mm)
+                </label>
+                <input
+                  type="text"
+                  value={editDeliveredForm.deliveredAt}
+                  onChange={(e) =>
+                    setEditDeliveredForm({ ...editDeliveredForm, deliveredAt: e.target.value })
+                  }
+                  placeholder="2026-11-08 06:10"
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Jumlah yang pesan ({editDeliveredForm.unit})
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={editDeliveredForm.orderedQuantity}
+                  onChange={(e) =>
+                    setEditDeliveredForm({
+                      ...editDeliveredForm,
+                      orderedQuantity: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Jumlah yang diterima ({editDeliveredForm.unit})
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={editDeliveredForm.deliveredQuantity}
+                  onChange={(e) => {
+                    const nextVal = Math.max(0, Number(e.target.value) || 0);
+                    setEditDeliveredForm(prev => ({
+                      ...prev,
+                      deliveredQuantity: nextVal,
+                      qcPassedQuantity:
+                        prev.status !== 'Ditolak' &&
+                        prev.qcPassedQuantity === prev.deliveredQuantity
+                          ? nextVal
+                          : prev.qcPassedQuantity,
+                    }));
+                  }}
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Jumlah Hasil QC ({editDeliveredForm.unit})
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={editDeliveredForm.qcPassedQuantity}
+                  onChange={(e) =>
+                    setEditDeliveredForm({
+                      ...editDeliveredForm,
+                      qcPassedQuantity: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  required
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Status QC / Penerimaan
+                </label>
+                <select
+                  value={editDeliveredForm.status}
+                  onChange={(e) =>
+                    setEditDeliveredForm({
+                      ...editDeliveredForm,
+                      status: e.target.value as QCStatusPLOK,
+                    })
+                  }
+                  className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
+                >
+                  <option value="Diterima">Diterima</option>
+                  <option value="Diterima sebagian">Diterima sebagian</option>
+                  <option value="Lolos Penuh">Lolos Penuh</option>
+                  <option value="Lolos Sebagian">Lolos Sebagian</option>
+                  <option value="Perlu pemeriksaan ulang">Perlu pemeriksaan ulang</option>
+                  <option value="Ditolak">Ditolak</option>
+                  <option value="Belum QC">Belum QC</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs flex justify-between items-center">
+              <span className="text-slate-600 dark:text-slate-300 font-semibold">
+                Total Selisih (Hasil QC − Dipesan):
+              </span>
+              <span
+                className={`font-mono font-extrabold ${
+                  editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity < 0
+                    ? 'text-rose-700 dark:text-rose-400'
+                    : editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity > 0
+                    ? 'text-sky-700 dark:text-sky-400'
+                    : 'text-emerald-700 dark:text-emerald-400'
+                }`}
+              >
+                {editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity > 0
+                  ? `+${formatNumber(editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity)}`
+                  : formatNumber(editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity)}{' '}
+                {editDeliveredForm.unit}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Catatan Penerimaan &amp; QC
+              </label>
+              <textarea
+                rows={2}
+                value={editDeliveredForm.notes}
+                onChange={(e) =>
+                  setEditDeliveredForm({ ...editDeliveredForm, notes: e.target.value })
+                }
+                className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditDeliveredModalOpen(false);
+                  setSelectedPOItem(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold"
+              >
+                Simpan Perubahan
               </button>
             </div>
           </form>

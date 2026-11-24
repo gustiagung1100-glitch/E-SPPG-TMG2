@@ -2013,18 +2013,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           'Hari/tgl',
           'Menu',
           'Bahan Makanan',
-          'Kecil - Berat',
+          'Kecil - Berat (g)',
           'Kecil - Energi (kkal)',
           'Kecil - Protein (g)',
           'Kecil - Lemak (g)',
           'Kecil - KH (g)',
-          'Kecil - Serat (mg)',
-          'Besar - Berat',
+          'Kecil - Serat (g)',
+          'Besar - Berat (g)',
           'Besar - Energi (kkal)',
           'Besar - Protein (g)',
           'Besar - Lemak (g)',
           'Besar - KH (g)',
-          'Besar - Serat (mg)',
+          'Besar - Serat (g)',
         ];
 
         const flattenedRows: (string | number)[][] = [];
@@ -2060,13 +2060,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 'Porsi Kecil - Protein (g)': Number(ing.proteinSmall.toFixed(2)),
                 'Porsi Kecil - Lemak (g)': Number(ing.lemakSmall.toFixed(2)),
                 'Porsi Kecil - KH (g)': Number(ing.khSmall.toFixed(2)),
-                'Porsi Kecil - Serat (mg)': Number(ing.seratSmall.toFixed(2)),
+                'Porsi Kecil - Serat (g)': Number(ing.seratSmall.toFixed(2)),
                 'Porsi Besar - Berat (g)': Number(ing.beratLarge.toFixed(2)),
                 'Porsi Besar - Energi (kkal)': Number(ing.energiLarge.toFixed(2)),
                 'Porsi Besar - Protein (g)': Number(ing.proteinLarge.toFixed(2)),
                 'Porsi Besar - Lemak (g)': Number(ing.lemakLarge.toFixed(2)),
                 'Porsi Besar - KH (g)': Number(ing.khLarge.toFixed(2)),
-                'Porsi Besar - Serat (mg)': Number(ing.seratLarge.toFixed(2)),
+                'Porsi Besar - Serat (g)': Number(ing.seratLarge.toFixed(2)),
               });
             });
           });
@@ -2104,7 +2104,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           },
           {
             label: useSmall ? 'Serat Porsi Kecil' : 'Serat Porsi Besar',
-            value: `${activeSerat.toFixed(2)} mg`,
+            value: `${activeSerat.toFixed(2)} g`,
             color: 'text-[#0D9488]',
           },
           {

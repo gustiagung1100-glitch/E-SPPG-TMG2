@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
-import { db, auth, OperationType, handleFirestoreError } from './firebase';
+import { db, auth, OperationType, handleFirestoreError, sanitizeFirestoreData } from './firebase';
 import {
   FirestoreCollectionKey,
   BaseEntityMetadata,
@@ -137,21 +137,21 @@ export async function saveDocument<T extends Record<string, any>>(
         changesSummary: `Pembaruan data pada koleksi ${collectionName}`,
       };
 
-      const updatedPayload = {
+      const updatedPayload = sanitizeFirestoreData({
         ...data,
         updatedAt: now,
         updatedBy: userUid,
         changeHistory: [historyItem, ...(existingData.changeHistory || []).slice(0, 19)], // Keep last 20 history
-      };
+      });
 
       await setDoc(docRef, updatedPayload, { merge: true });
       await recordAuditLog('UPDATE', collectionName, `Memperbarui dokumen ${docId}`, userUid, userName, docId);
     } else {
       const metadata = createEntityMetadata(docId, userUid, data.status || 'Aktif', data.sppgId || CURRENT_SPPG_ID);
-      const fullDoc = {
+      const fullDoc = sanitizeFirestoreData({
         ...metadata,
         ...data,
-      };
+      });
 
       await setDoc(docRef, fullDoc);
       await recordAuditLog('CREATE', collectionName, `Membuat dokumen baru ${docId}`, userUid, userName, docId);

@@ -38,6 +38,12 @@ import {
   getInitialCustomFieldValues,
 } from '../../lib/dynamicFormSchemas';
 import { defaultRABItems, defaultQualityControlRecords } from '../../lib/plokData';
+import { defaultFoodCompositions } from '../../lib/plogData';
+import {
+  buildMasterUnitSelectOptions,
+  MasterUnitSelectOption,
+  resolveAutoUnitForItem,
+} from '../../lib/unitResolver';
 import {
   ShoppingCart,
   Plus,
@@ -192,10 +198,64 @@ const areRincianLinesEqual = (a: RABRincianItem[], b: RABRincianItem[]): boolean
   });
 };
 
+const UnitSelectControl: React.FC<{
+  value: string;
+  options: MasterUnitSelectOption[];
+  disabled?: boolean;
+  onChange: (val: string) => void;
+  onKeyDown?: React.KeyboardEventHandler<HTMLSelectElement>;
+  className?: string;
+  ariaLabel?: string;
+}> = ({ value, options, disabled, onChange, onKeyDown, className = '', ariaLabel }) => {
+  const trimmedVal = (value || '').trim();
+  const hasExact = options.some(o => o.value === trimmedVal);
+  const grouped = useMemo(() => {
+    const groups: Array<{
+      name: MasterUnitSelectOption['group'];
+      items: MasterUnitSelectOption[];
+    }> = [
+      { name: 'Master Satuan & Dimensi Bahan', items: [] },
+      { name: 'Dimensi Bahan', items: [] },
+      { name: 'Satuan Operasional / Kustom', items: [] },
+    ];
+    options.forEach(opt => {
+      const target = groups.find(g => g.name === opt.group);
+      if (target) target.items.push(opt);
+    });
+    return groups.filter(g => g.items.length > 0);
+  }, [options]);
+
+  return (
+    <select
+      value={trimmedVal}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      className={className}
+    >
+      {trimmedVal && !hasExact && (
+        <option value={trimmedVal}>{trimmedVal} (Kustom)</option>
+      )}
+      {grouped.map(grp => (
+        <optgroup key={grp.name} label={grp.name}>
+          {grp.items.map(opt => (
+            <option key={opt.value} value={opt.value} title={opt.label}>
+              {opt.label}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+};
+
 const RABRincianCell: React.FC<{
   rab: RABItem;
   autoRincian: RABRincianItem[];
   canEdit: boolean;
+  unitOptions?: MasterUnitSelectOption[];
+  onAutoResolveUnit?: (itemName: string) => string | null;
   onSaveRincian: (rab: RABItem, lines: RABRincianItem[], isManual: boolean) => Promise<void> | void;
   onDeleteRABRow: (rab: RABItem) => void;
   onSyncVolumeFromRincian: (rab: RABItem, totalQty: number, unit: string) => Promise<void> | void;
@@ -203,6 +263,8 @@ const RABRincianCell: React.FC<{
   rab,
   autoRincian,
   canEdit,
+  unitOptions,
+  onAutoResolveUnit,
   onSaveRincian,
   onDeleteRABRow,
   onSyncVolumeFromRincian,
@@ -215,10 +277,12 @@ const RABRincianCell: React.FC<{
   }, [rab.rincianItems, rab.isRincianManual, autoRincian]);
 
   const [draftLines, setDraftLines] = useState<RABRincianItem[]>(baselineLines);
+  const [manualUnitIds, setManualUnitIds] = useState<Record<string, boolean>>({});
   const [savedFlash, setSavedFlash] = useState(false);
 
   React.useEffect(() => {
     setDraftLines(baselineLines);
+    setManualUnitIds({});
   }, [baselineLines]);
 
   const isDirty = useMemo(
@@ -243,12 +307,32 @@ const RABRincianCell: React.FC<{
     field: 'menuName' | 'ingredientName' | 'quantity' | 'unit',
     value: string
   ) => {
+    const lineKey = draftLines[idx]?.id || String(idx);
+    if (field === 'unit') {
+      setManualUnitIds(prev => ({ ...prev, [lineKey]: true }));
+    } else if (field === 'ingredientName' && !value.trim()) {
+      setManualUnitIds(prev => ({ ...prev, [lineKey]: false }));
+    }
+
     setDraftLines(prev =>
       prev.map((line, i) => {
         if (i !== idx) return line;
         if (field === 'quantity') {
           const parsed = value === '' ? 0 : Math.max(0, Number(value));
           return { ...line, quantity: Number.isFinite(parsed) ? parsed : 0, isManual: true };
+        }
+        if (field === 'ingredientName') {
+          const isManualUnit = Boolean(manualUnitIds[lineKey]);
+          const resolvedUnit =
+            !isManualUnit && onAutoResolveUnit && value.trim()
+              ? onAutoResolveUnit(value)
+              : null;
+          return {
+            ...line,
+            ingredientName: value,
+            ...(resolvedUnit ? { unit: resolvedUnit } : {}),
+            isManual: true,
+          };
         }
         return { ...line, [field]: value, isManual: true };
       })
@@ -388,15 +472,25 @@ const RABRincianCell: React.FC<{
                     onChange={e => handleFieldChange(idx, 'quantity', e.target.value)}
                     className="w-20 px-2 py-1 text-[11px] font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
                   />
-                  <input
-                    type="text"
-                    value={line.unit}
-                    disabled={!canEdit}
-                    list="rab-rincian-unit-options"
-                    onChange={e => handleFieldChange(idx, 'unit', e.target.value)}
-                    placeholder="Satuan"
-                    className="w-16 px-2 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
-                  />
+                  {unitOptions && unitOptions.length > 0 ? (
+                    <UnitSelectControl
+                      value={line.unit}
+                      options={unitOptions}
+                      disabled={!canEdit}
+                      onChange={val => handleFieldChange(idx, 'unit', val)}
+                      className="w-24 px-1.5 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 cursor-pointer"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={line.unit}
+                      disabled={!canEdit}
+                      list="rab-rincian-unit-options"
+                      onChange={e => handleFieldChange(idx, 'unit', e.target.value)}
+                      placeholder="Satuan"
+                      className="w-16 px-2 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+                    />
+                  )}
                   {canEdit && (
                     <button
                       type="button"
@@ -487,6 +581,7 @@ export const ProcurementModule: React.FC = () => {
     masterBahan,
     masterSuppliers,
     masterUnits,
+    materialConversions,
     currentUser,
     hasPermission,
     sppgConfig,
@@ -524,15 +619,6 @@ export const ProcurementModule: React.FC = () => {
         masterBahan,
       }),
     [menuItems, menuIngredientsMap, masterUnits, institutions, inventory, masterBahan]
-  );
-
-  const unitOptions = useMemo(
-    () =>
-      masterUnits.map(u => ({
-        value: u.code,
-        label: `${u.code} — ${u.name}`,
-      })),
-    [masterUnits]
   );
 
   // Dynamic Form Builder States (RAB)
@@ -590,6 +676,7 @@ export const ProcurementModule: React.FC = () => {
         unit: string;
         unitPrice: number;
         totalBudget: number;
+        unitManuallyEdited?: boolean;
       }
     >
   >({});
@@ -602,6 +689,7 @@ export const ProcurementModule: React.FC = () => {
       unit: string;
       unitPrice: number;
       totalBudget: number;
+      unitManuallyEdited?: boolean;
     }>
   >([]);
   const [operasionalSasaranOverrides, setOperasionalSasaranOverrides] = useState<
@@ -625,6 +713,7 @@ export const ProcurementModule: React.FC = () => {
         unit: string;
         unitPrice: number;
         totalBudget: number;
+        unitManuallyEdited?: boolean;
       }
     >
   >({});
@@ -637,6 +726,7 @@ export const ProcurementModule: React.FC = () => {
       unit: string;
       unitPrice: number;
       totalBudget: number;
+      unitManuallyEdited?: boolean;
     }>
   >([]);
 
@@ -659,6 +749,52 @@ export const ProcurementModule: React.FC = () => {
     isRincianManual: false,
     customFields: {},
   });
+  const [rabModalUnitManual, setRabModalUnitManual] = useState(false);
+  const [rincianManualUnits, setRincianManualUnits] = useState<Record<string, boolean>>({});
+
+  const unitOptions = useMemo(
+    () =>
+      buildMasterUnitSelectOptions({
+        masterUnits,
+        materialConversions,
+        extraUnits: [
+          ...defaultRABItems.map(r => r.unit),
+          ...rabList.map(r => r.unit),
+          ...inventory.map(i => i.unit),
+          ...Object.values(panganRowDrafts).map(d => d.unit),
+          ...newPanganRows.map(d => d.unit),
+          ...Object.values(operasionalRowDrafts).map(d => d.unit),
+          ...newOperasionalRows.map(d => d.unit),
+          rabForm.unit,
+        ],
+      }),
+    [
+      masterUnits,
+      materialConversions,
+      rabList,
+      inventory,
+      panganRowDrafts,
+      newPanganRows,
+      operasionalRowDrafts,
+      newOperasionalRows,
+      rabForm.unit,
+    ]
+  );
+
+  const resolveAutoUnit = React.useCallback(
+    (itemName: string, categoryHint: 'bahan' | 'operasional' | 'all') =>
+      resolveAutoUnitForItem({
+        itemName,
+        categoryHint,
+        masterUnits,
+        materialConversions,
+        masterBahan,
+        inventory,
+        foodCompositions: defaultFoodCompositions,
+        existingRABItems: [...rabList, ...defaultRABItems],
+      }),
+    [masterUnits, materialConversions, masterBahan, inventory, rabList]
+  );
 
   // --- STATE SUBMODUL B: PURCHASE ORDER (PO TERIKAT RAB) ---
   const [isCreatePOOpen, setIsCreatePOOpen] = useState(false);
@@ -958,11 +1094,17 @@ export const ProcurementModule: React.FC = () => {
     masterBahan.forEach(b => {
       if (b.name && b.name.trim()) names.add(b.name.trim());
     });
+    materialConversions.forEach(c => {
+      if (c.materialName && c.materialName.trim()) names.add(c.materialName.trim());
+    });
     inventory.forEach(inv => {
       if (inv.name && inv.name.trim()) names.add(inv.name.trim());
     });
+    defaultFoodCompositions.forEach(fc => {
+      if (fc.name && fc.name.trim()) names.add(fc.name.trim());
+    });
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'id'));
-  }, [masterBahan, inventory]);
+  }, [masterBahan, materialConversions, inventory]);
 
   const getPanganEffectiveRowValues = (row: RABItem) => {
     const draft = panganRowDrafts[row.id];
@@ -1011,8 +1153,17 @@ export const ProcurementModule: React.FC = () => {
       const next = { ...base };
       if (field === 'itemName') {
         next.itemName = rawValue;
+        if (!rawValue.trim()) {
+          next.unitManuallyEdited = false;
+        } else if (!next.unitManuallyEdited) {
+          const auto = resolveAutoUnit(rawValue, 'bahan');
+          if (auto) {
+            next.unit = auto.unit;
+          }
+        }
       } else if (field === 'unit') {
         next.unit = rawValue;
+        next.unitManuallyEdited = true;
       } else if (field === 'sasaran') {
         const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
         next.sasaran = Number.isFinite(parsed) ? parsed : 0;
@@ -1111,24 +1262,23 @@ export const ProcurementModule: React.FC = () => {
         const next = { ...row };
         if (field === 'itemName') {
           next.itemName = rawValue;
-          const normalized = rawValue.trim().toLowerCase();
-          if (normalized && next.unitPrice === 0) {
-            const matchedMaster = masterBahan.find(
-              b => b.name.trim().toLowerCase() === normalized
-            );
-            if (matchedMaster) {
-              if (!next.unit || next.unit === 'kg') {
-                next.unit = matchedMaster.unit || next.unit || 'kg';
+          if (!rawValue.trim()) {
+            next.unitManuallyEdited = false;
+          } else {
+            const auto = resolveAutoUnit(rawValue, 'bahan');
+            if (auto) {
+              if (!next.unitManuallyEdited) {
+                next.unit = auto.unit;
               }
-              const refPrice = matchedMaster.actualPrice || matchedMaster.referencePrice || 0;
-              if (refPrice > 0) {
-                next.unitPrice = refPrice;
-                next.totalBudget = next.volume * refPrice;
+              if (next.unitPrice === 0 && auto.unitPrice && auto.unitPrice > 0) {
+                next.unitPrice = auto.unitPrice;
+                next.totalBudget = next.volume * auto.unitPrice;
               }
             }
           }
         } else if (field === 'unit') {
           next.unit = rawValue;
+          next.unitManuallyEdited = true;
         } else if (field === 'sasaran') {
           const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
           next.sasaran = Number.isFinite(parsed) ? parsed : 0;
@@ -1258,8 +1408,13 @@ export const ProcurementModule: React.FC = () => {
       .forEach(r => {
         if (r.itemName && r.itemName.trim()) names.add(r.itemName.trim());
       });
+    inventory
+      .filter(inv => inv.category === 'Kemasan & Higiene' || inv.category === 'Pelengkap')
+      .forEach(inv => {
+        if (inv.name && inv.name.trim()) names.add(inv.name.trim());
+      });
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'id'));
-  }, [rabList]);
+  }, [rabList, inventory]);
 
   const getOperasionalEffectiveRowValues = (row: RABItem) => {
     const draft = operasionalRowDrafts[row.id];
@@ -1308,8 +1463,17 @@ export const ProcurementModule: React.FC = () => {
       const next = { ...base };
       if (field === 'itemName') {
         next.itemName = rawValue;
+        if (!rawValue.trim()) {
+          next.unitManuallyEdited = false;
+        } else if (!next.unitManuallyEdited) {
+          const auto = resolveAutoUnit(rawValue, 'operasional');
+          if (auto) {
+            next.unit = auto.unit;
+          }
+        }
       } else if (field === 'unit') {
         next.unit = rawValue;
+        next.unitManuallyEdited = true;
       } else if (field === 'sasaran') {
         const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
         next.sasaran = Number.isFinite(parsed) ? parsed : 0;
@@ -1411,31 +1575,23 @@ export const ProcurementModule: React.FC = () => {
         const next = { ...row };
         if (field === 'itemName') {
           next.itemName = rawValue;
-          const normalized = rawValue.trim().toLowerCase();
-          if (normalized && next.unitPrice === 0) {
-            const matchedOps =
-              rabList.find(
-                r =>
-                  r.category === 'RAB Operasional' &&
-                  r.itemName.trim().toLowerCase() === normalized
-              ) ||
-              defaultRABItems.find(
-                r =>
-                  r.category === 'RAB Operasional' &&
-                  r.itemName.trim().toLowerCase() === normalized
-              );
-            if (matchedOps) {
-              if (!next.unit || next.unit === 'paket') {
-                next.unit = matchedOps.unit || next.unit || 'paket';
+          if (!rawValue.trim()) {
+            next.unitManuallyEdited = false;
+          } else {
+            const auto = resolveAutoUnit(rawValue, 'operasional');
+            if (auto) {
+              if (!next.unitManuallyEdited) {
+                next.unit = auto.unit;
               }
-              if (matchedOps.unitPrice > 0) {
-                next.unitPrice = matchedOps.unitPrice;
-                next.totalBudget = next.volume * matchedOps.unitPrice;
+              if (next.unitPrice === 0 && auto.unitPrice && auto.unitPrice > 0) {
+                next.unitPrice = auto.unitPrice;
+                next.totalBudget = next.volume * auto.unitPrice;
               }
             }
           }
         } else if (field === 'unit') {
           next.unit = rawValue;
+          next.unitManuallyEdited = true;
         } else if (field === 'sasaran') {
           const parsed = rawValue === '' ? 0 : Math.max(0, Number(rawValue));
           next.sasaran = Number.isFinite(parsed) ? parsed : 0;
@@ -1889,6 +2045,8 @@ export const ProcurementModule: React.FC = () => {
 
   const handleOpenCreateRAB = () => {
     setSelectedRAB(null);
+    setRabModalUnitManual(false);
+    setRincianManualUnits({});
     const nextNum = rabList.length + 1;
     const targetPlanDate =
       filterRABDate !== 'ALL' ? filterRABDate : plogMenuDays[0]?.date || '2026-11-08';
@@ -1916,6 +2074,8 @@ export const ProcurementModule: React.FC = () => {
 
   const handleOpenEditRAB = (rab: RABItem) => {
     setSelectedRAB(rab);
+    setRabModalUnitManual(false);
+    setRincianManualUnits({});
     const effectiveRincian = getEffectiveRincianForRAB(rab);
     setRabForm({
       category: rab.category,
@@ -3255,8 +3415,8 @@ export const ProcurementModule: React.FC = () => {
             ))}
           </datalist>
           <datalist id="rab-rincian-unit-options">
-            {masterUnits.map(u => (
-              <option key={u.id} value={u.code} />
+            {unitOptions.map(u => (
+              <option key={u.value} value={u.value} label={u.label} />
             ))}
           </datalist>
 
@@ -3485,6 +3645,7 @@ export const ProcurementModule: React.FC = () => {
                                   <td className="border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 align-top sticky left-0 z-10 bg-white dark:bg-slate-900">
                                     <input
                                       type="text"
+                                      list="rab-pangan-master-options"
                                       value={eff.itemName}
                                       disabled={!canEditRAB}
                                       onChange={e => updatePanganCellDraft(row, 'itemName', e.target.value)}
@@ -3555,21 +3716,21 @@ export const ProcurementModule: React.FC = () => {
                                     />
                                   </td>
 
-                                  {/* Col 5: Satuan (Editable) */}
+                                  {/* Col 5: Satuan (Editable - Master Satuan & Dimensi Bahan) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="text"
+                                    <UnitSelectControl
                                       value={eff.unit}
+                                      options={unitOptions}
                                       disabled={!canEditRAB}
-                                      list="rab-rincian-unit-options"
-                                      onChange={e => updatePanganCellDraft(row, 'unit', e.target.value)}
+                                      ariaLabel={`Satuan ${eff.itemName || row.itemName}`}
+                                      onChange={val => updatePanganCellDraft(row, 'unit', val)}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
                                           e.preventDefault();
                                           handleSavePanganRowDraft(row);
                                         }
                                       }}
-                                      className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75"
+                                      className="w-28 mx-auto block px-1.5 py-1 text-xs font-semibold rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75 cursor-pointer"
                                     />
                                   </td>
 
@@ -3833,14 +3994,14 @@ export const ProcurementModule: React.FC = () => {
                                   />
                                 </td>
 
-                                {/* Col 5: Satuan */}
+                                {/* Col 5: Satuan (Master Satuan & Dimensi Bahan) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="text"
-                                    list="rab-rincian-unit-options"
+                                  <UnitSelectControl
                                     value={draft.unit}
-                                    onChange={e =>
-                                      updateNewPanganRowField(draft.tempId, 'unit', e.target.value)
+                                    options={unitOptions}
+                                    ariaLabel={`Satuan baris baru ${draft.itemName || 'bahan pangan'}`}
+                                    onChange={val =>
+                                      updateNewPanganRowField(draft.tempId, 'unit', val)
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -3848,8 +4009,7 @@ export const ProcurementModule: React.FC = () => {
                                         handleSaveNewPanganRow(draft.tempId, newIdx);
                                       }
                                     }}
-                                    placeholder="kg/pcs"
-                                    className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                    className="w-28 mx-auto block px-1.5 py-1 text-xs font-semibold rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30 cursor-pointer"
                                   />
                                 </td>
 
@@ -4337,15 +4497,15 @@ export const ProcurementModule: React.FC = () => {
                                     />
                                   </td>
 
-                                  {/* Col 5: Satuan (Editable) */}
+                                  {/* Col 5: Satuan (Editable - Master Satuan & Dimensi Bahan) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="text"
+                                    <UnitSelectControl
                                       value={eff.unit}
+                                      options={unitOptions}
                                       disabled={!canEditRAB}
-                                      list="rab-rincian-unit-options"
-                                      onChange={e =>
-                                        updateOperasionalCellDraft(row, 'unit', e.target.value)
+                                      ariaLabel={`Satuan ${eff.itemName || row.itemName}`}
+                                      onChange={val =>
+                                        updateOperasionalCellDraft(row, 'unit', val)
                                       }
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
@@ -4353,7 +4513,7 @@ export const ProcurementModule: React.FC = () => {
                                           handleSaveOperasionalRowDraft(row);
                                         }
                                       }}
-                                      className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75"
+                                      className="w-28 mx-auto block px-1.5 py-1 text-xs font-semibold rounded border border-transparent hover:border-slate-300 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-800 bg-transparent text-slate-700 dark:text-slate-300 focus:outline-none disabled:opacity-75 cursor-pointer"
                                     />
                                   </td>
 
@@ -4637,18 +4797,14 @@ export const ProcurementModule: React.FC = () => {
                                   />
                                 </td>
 
-                                {/* Col 5: Satuan */}
+                                {/* Col 5: Satuan (Master Satuan & Dimensi Bahan) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="text"
-                                    list="rab-rincian-unit-options"
+                                  <UnitSelectControl
                                     value={draft.unit}
-                                    onChange={e =>
-                                      updateNewOperasionalRowField(
-                                        draft.tempId,
-                                        'unit',
-                                        e.target.value
-                                      )
+                                    options={unitOptions}
+                                    ariaLabel={`Satuan baris baru ${draft.itemName || 'operasional'}`}
+                                    onChange={val =>
+                                      updateNewOperasionalRowField(draft.tempId, 'unit', val)
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -4656,8 +4812,7 @@ export const ProcurementModule: React.FC = () => {
                                         handleSaveNewOperasionalRow(draft.tempId, newIdx);
                                       }
                                     }}
-                                    placeholder="paket/pcs/hari"
-                                    className="w-20 mx-auto block px-1.5 py-1 text-center text-xs rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30"
+                                    className="w-28 mx-auto block px-1.5 py-1 text-xs font-semibold rounded border border-teal-300 dark:border-teal-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500/30 cursor-pointer"
                                   />
                                 </td>
 
@@ -6324,6 +6479,7 @@ export const ProcurementModule: React.FC = () => {
                 if (val.startsWith('menuagg:')) {
                   const need = menuPlannedNeeds.aggregated.find(a => a.key === val.slice(8));
                   if (need) {
+                    setRabModalUnitManual(false);
                     setRabForm(prev => ({
                       ...prev,
                       category: 'RAB Bahan Pangan',
@@ -6344,6 +6500,7 @@ export const ProcurementModule: React.FC = () => {
                 } else if (val.startsWith('menuitem:')) {
                   const need = menuPlannedNeeds.perMenuItems.find(m => m.key === val.slice(9));
                   if (need) {
+                    setRabModalUnitManual(false);
                     setRabForm(prev => ({
                       ...prev,
                       category: 'RAB Bahan Pangan',
@@ -6375,6 +6532,7 @@ export const ProcurementModule: React.FC = () => {
                 } else if (val.startsWith('mb:')) {
                   const mb = masterBahan.find(m => m.id === val.slice(3));
                   if (mb) {
+                    setRabModalUnitManual(false);
                     setRabForm(prev => ({
                       ...prev,
                       category: 'RAB Bahan Pangan',
@@ -6472,114 +6630,135 @@ export const ProcurementModule: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                {(rabForm.rincianItems || []).map((line, idx) => (
-                  <div
-                    key={line.id || idx}
-                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700"
-                  >
-                    <div className="sm:col-span-4">
-                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
-                        Menu (PLOG)
-                      </label>
-                      <input
-                        type="text"
-                        value={line.menuName}
-                        list="rab-rincian-menu-options"
-                        onChange={e =>
-                          setRabForm(prev => ({
-                            ...prev,
-                            isRincianManual: true,
-                            rincianItems: (prev.rincianItems || []).map((l, i) =>
-                              i === idx ? { ...l, menuName: e.target.value, isManual: true } : l
-                            ),
-                          }))
-                        }
-                        placeholder="Kode & nama menu"
-                        className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
+                {(rabForm.rincianItems || []).map((line, idx) => {
+                  const lineKey = line.id || String(idx);
+                  return (
+                    <div
+                      key={lineKey}
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700"
+                    >
+                      <div className="sm:col-span-3">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                          Menu (PLOG)
+                        </label>
+                        <input
+                          type="text"
+                          value={line.menuName}
+                          list="rab-rincian-menu-options"
+                          onChange={e =>
+                            setRabForm(prev => ({
+                              ...prev,
+                              isRincianManual: true,
+                              rincianItems: (prev.rincianItems || []).map((l, i) =>
+                                i === idx ? { ...l, menuName: e.target.value, isManual: true } : l
+                              ),
+                            }))
+                          }
+                          placeholder="Kode & nama menu"
+                          className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div className="sm:col-span-4">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                          Nama Bahan
+                        </label>
+                        <input
+                          type="text"
+                          value={line.ingredientName}
+                          list="rab-pangan-master-options"
+                          onChange={e => {
+                            const nextName = e.target.value;
+                            const isManualUnit = Boolean(rincianManualUnits[lineKey]);
+                            if (!nextName.trim()) {
+                              setRincianManualUnits(prev => ({ ...prev, [lineKey]: false }));
+                            }
+                            const auto =
+                              !isManualUnit && nextName.trim()
+                                ? resolveAutoUnit(nextName, 'bahan')
+                                : null;
+                            setRabForm(prev => ({
+                              ...prev,
+                              isRincianManual: true,
+                              rincianItems: (prev.rincianItems || []).map((l, i) =>
+                                i === idx
+                                  ? {
+                                      ...l,
+                                      ingredientName: nextName,
+                                      ...(auto ? { unit: auto.unit } : {}),
+                                      isManual: true,
+                                    }
+                                  : l
+                              ),
+                            }));
+                          }}
+                          placeholder="Nama bahan"
+                          className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                          Kuantiti
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={line.quantity}
+                          onChange={e => {
+                            const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value));
+                            setRabForm(prev => ({
+                              ...prev,
+                              isRincianManual: true,
+                              rincianItems: (prev.rincianItems || []).map((l, i) =>
+                                i === idx
+                                  ? { ...l, quantity: Number.isFinite(val) ? val : 0, isManual: true }
+                                  : l
+                              ),
+                            }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                          Satuan
+                        </label>
+                        <UnitSelectControl
+                          value={line.unit}
+                          options={unitOptions}
+                          ariaLabel={`Satuan rincian ${line.ingredientName || idx + 1}`}
+                          onChange={val => {
+                            setRincianManualUnits(prev => ({ ...prev, [lineKey]: true }));
+                            setRabForm(prev => ({
+                              ...prev,
+                              isRincianManual: true,
+                              rincianItems: (prev.rincianItems || []).map((l, i) =>
+                                i === idx ? { ...l, unit: val, isManual: true } : l
+                              ),
+                            }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs font-semibold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white cursor-pointer"
+                        />
+                      </div>
+                      <div className="sm:col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRabForm(prev => ({
+                              ...prev,
+                              isRincianManual: true,
+                              rincianItems: (prev.rincianItems || []).filter((_, i) => i !== idx),
+                            }))
+                          }
+                          className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 transition"
+                          title="Hapus baris rincian"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="sm:col-span-4">
-                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
-                        Nama Bahan
-                      </label>
-                      <input
-                        type="text"
-                        value={line.ingredientName}
-                        onChange={e =>
-                          setRabForm(prev => ({
-                            ...prev,
-                            isRincianManual: true,
-                            rincianItems: (prev.rincianItems || []).map((l, i) =>
-                              i === idx ? { ...l, ingredientName: e.target.value, isManual: true } : l
-                            ),
-                          }))
-                        }
-                        placeholder="Nama bahan"
-                        className="w-full px-2 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
-                        Kuantiti
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={line.quantity}
-                        onChange={e => {
-                          const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value));
-                          setRabForm(prev => ({
-                            ...prev,
-                            isRincianManual: true,
-                            rincianItems: (prev.rincianItems || []).map((l, i) =>
-                              i === idx
-                                ? { ...l, quantity: Number.isFinite(val) ? val : 0, isManual: true }
-                                : l
-                            ),
-                          }));
-                        }}
-                        className="w-full px-2 py-1.5 text-xs font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
-                    </div>
-                    <div className="sm:col-span-1">
-                      <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
-                        Satuan
-                      </label>
-                      <input
-                        type="text"
-                        value={line.unit}
-                        list="rab-rincian-unit-options"
-                        onChange={e =>
-                          setRabForm(prev => ({
-                            ...prev,
-                            isRincianManual: true,
-                            rincianItems: (prev.rincianItems || []).map((l, i) =>
-                              i === idx ? { ...l, unit: e.target.value, isManual: true } : l
-                            ),
-                          }))
-                        }
-                        className="w-full px-2 py-1.5 text-xs font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
-                    </div>
-                    <div className="sm:col-span-1 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setRabForm(prev => ({
-                            ...prev,
-                            isRincianManual: true,
-                            rincianItems: (prev.rincianItems || []).filter((_, i) => i !== idx),
-                          }))
-                        }
-                        className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-[#E11D48] dark:bg-rose-950/60 dark:text-rose-300 transition"
-                        title="Hapus baris rincian"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -6595,6 +6774,11 @@ export const ProcurementModule: React.FC = () => {
             }}
             onChange={(key, value, field) => {
               if (field.isSystem) {
+                if (key === 'unit') {
+                  setRabModalUnitManual(true);
+                } else if (key === 'itemName' && !String(value || '').trim()) {
+                  setRabModalUnitManual(false);
+                }
                 setRabForm(prev => {
                   const next = { ...prev, [key]: value };
                   if (key === 'category' && !selectedRAB) {
@@ -6602,6 +6786,29 @@ export const ProcurementModule: React.FC = () => {
                       value === 'RAB Bahan Pangan'
                         ? `RAB-BP-2026-11-00${rabList.length + 1}`
                         : `RAB-OP-2026-11-00${rabList.length + 1}`;
+                  }
+                  const categoryHint =
+                    next.category === 'RAB Operasional' ? 'operasional' : 'bahan';
+                  if (key === 'itemName') {
+                    const strName = String(value || '');
+                    if (!rabModalUnitManual && strName.trim()) {
+                      const auto = resolveAutoUnit(strName, categoryHint);
+                      if (auto) {
+                        next.unit = auto.unit;
+                        if (!selectedRAB && auto.unitPrice && auto.unitPrice > 0) {
+                          next.unitPrice = auto.unitPrice;
+                        }
+                      }
+                    }
+                  } else if (key === 'category' && !rabModalUnitManual) {
+                    if (next.itemName.trim()) {
+                      const auto = resolveAutoUnit(next.itemName, categoryHint);
+                      if (auto) {
+                        next.unit = auto.unit;
+                      }
+                    } else if (!selectedRAB) {
+                      next.unit = categoryHint === 'operasional' ? 'paket' : 'kg';
+                    }
                   }
                   return next;
                 });

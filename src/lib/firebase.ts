@@ -1,6 +1,12 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  Firestore,
+  doc,
+  getDocFromServer,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
@@ -8,7 +14,45 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Services
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+function createFirestoreInstance(firebaseApp: FirebaseApp): Firestore {
+  try {
+    return initializeFirestore(
+      firebaseApp,
+      { ignoreUndefinedProperties: true },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+export const db: Firestore = createFirestoreInstance(app);
+
+/**
+ * Recursively removes undefined fields from plain objects/arrays before writing to Firestore.
+ */
+export function sanitizeFirestoreData<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter(item => item !== undefined)
+      .map(item => sanitizeFirestoreData(item)) as unknown as T;
+  }
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    Object.getPrototypeOf(value) === Object.prototype
+  ) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        out[k] = sanitizeFirestoreData(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
 
 const SECONDARY_APP_NAME = 'sppg-user-provisioner';
 

@@ -31,6 +31,10 @@ import {
 } from '../../types';
 import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import {
+  buildMasterUnitSelectOptions,
+  resolveAutoUnitForItem,
+} from '../../lib/unitResolver';
+import {
   DynamicFormRenderer,
   validateDynamicFormFields,
 } from '../common/DynamicFormBuilder';
@@ -44,6 +48,7 @@ import {
   buildDefaultGrammagesForMenu,
   resolveMenuGrammages,
   resolveFoodNutritionLookup,
+  buildRecipeIngredientsForMenu,
   getFoodNutritionSuggestions,
 } from '../../lib/plogData';
 import {
@@ -215,6 +220,7 @@ export const NutritionMenuModule: React.FC = () => {
     syncMenuNeedsToRAB,
     institutions,
     masterUnits,
+    materialConversions,
     currentUser,
     hasPermission,
     sppgConfig,
@@ -562,17 +568,29 @@ export const NutritionMenuModule: React.FC = () => {
       );
 
       // Nutrition contribution of this ingredient for small vs large portion:
-      const calSmall = (ing.netWeightSmall / 100) * ing.calories100g;
-      const protSmall = (ing.netWeightSmall / 100) * ing.protein100g;
-      const fatSmall = (ing.netWeightSmall / 100) * ing.fat100g;
-      const carbSmall = (ing.netWeightSmall / 100) * ing.carb100g;
-      const fibSmall = (ing.netWeightSmall / 100) * ing.fiber100g;
+      const safePos = (val: unknown): number => {
+        const n = Number(val);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      };
+      const wSmall = safePos(ing.netWeightSmall);
+      const wLarge = safePos(ing.netWeightLarge);
+      const c100 = safePos(ing.calories100g);
+      const p100 = safePos(ing.protein100g);
+      const f100 = safePos(ing.fat100g);
+      const k100 = safePos(ing.carb100g);
+      const s100 = safePos(ing.fiber100g);
 
-      const calLarge = (ing.netWeightLarge / 100) * ing.calories100g;
-      const protLarge = (ing.netWeightLarge / 100) * ing.protein100g;
-      const fatLarge = (ing.netWeightLarge / 100) * ing.fat100g;
-      const carbLarge = (ing.netWeightLarge / 100) * ing.carb100g;
-      const fibLarge = (ing.netWeightLarge / 100) * ing.fiber100g;
+      const calSmall = (wSmall / 100) * c100;
+      const protSmall = (wSmall / 100) * p100;
+      const fatSmall = (wSmall / 100) * f100;
+      const carbSmall = (wSmall / 100) * k100;
+      const fibSmall = (wSmall / 100) * s100;
+
+      const calLarge = (wLarge / 100) * c100;
+      const protLarge = (wLarge / 100) * p100;
+      const fatLarge = (wLarge / 100) * f100;
+      const carbLarge = (wLarge / 100) * k100;
+      const fibLarge = (wLarge / 100) * s100;
 
       return {
         ...ing,
@@ -807,6 +825,23 @@ export const NutritionMenuModule: React.FC = () => {
     defaultBufferLargePct,
   ]);
 
+  const masterUnitSelectOptions = useMemo(
+    () =>
+      buildMasterUnitSelectOptions({
+        masterUnits,
+        materialConversions,
+        extraUnits: [
+          customPurchaseUnit,
+          ...(menuIngredientsMap[activeMenuId] || []).flatMap(ing => [
+            ing.purchaseUnit,
+            ing.manualOverrides?.unitSmall,
+            ing.manualOverrides?.unitLarge,
+          ]),
+        ],
+      }),
+    [masterUnits, materialConversions, customPurchaseUnit, menuIngredientsMap, activeMenuId]
+  );
+
   const handleOpenAddIngredient = () => {
     setManualIngredientName('');
     setManualIngredientCategory('Lauk Hewani');
@@ -828,6 +863,10 @@ export const NutritionMenuModule: React.FC = () => {
 
   const handleManualIngredientNameChange = (rawName: string) => {
     setManualIngredientName(rawName);
+    if (!rawName.trim()) {
+      setModalTouchedFields(prev => ({ ...prev, unit: false }));
+      return;
+    }
     const match = resolveFoodNutritionLookup(rawName, foodCompositions, masterBahan);
     if (match) {
       if (match.category && !modalTouchedFields.category) {
@@ -840,12 +879,19 @@ export const NutritionMenuModule: React.FC = () => {
         if (!modalTouchedFields.gramSmall) setCustomGramSmall('85');
         if (!modalTouchedFields.gramLarge) setCustomGramLarge('125');
       }
-      if (!modalTouchedFields.unit) {
-        const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, rawName));
-        const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, rawName));
-        const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, rawName));
-        const liveUnit = invMatch?.unit || mbMatch?.unit || compMatch?.purchaseUnit;
-        if (liveUnit) setCustomPurchaseUnit(liveUnit);
+    }
+    if (!modalTouchedFields.unit) {
+      const auto = resolveAutoUnitForItem({
+        itemName: rawName,
+        categoryHint: 'bahan',
+        masterUnits,
+        materialConversions,
+        masterBahan,
+        inventory,
+        foodCompositions,
+      });
+      if (auto) {
+        setCustomPurchaseUnit(auto.unit);
       }
     }
   };
@@ -931,12 +977,16 @@ export const NutritionMenuModule: React.FC = () => {
         }
         delete nextOverrides.totalKuantiti;
       }
-      return {
+      const updated: RecipeIngredient = {
         ...item,
         [field]: safeVal,
-        manualOverrides:
-          nextOverrides && Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
       };
+      if (nextOverrides && Object.keys(nextOverrides).length > 0) {
+        updated.manualOverrides = nextOverrides;
+      } else {
+        delete updated.manualOverrides;
+      }
+      return updated;
     });
     updateMenuIngredients(activeMenuId, nextList);
   };
@@ -955,14 +1005,67 @@ export const NutritionMenuModule: React.FC = () => {
         const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, cleaned));
         const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, cleaned));
         const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, cleaned));
+        const autoUnit = resolveAutoUnitForItem({
+          itemName: cleaned,
+          categoryHint: 'bahan',
+          masterUnits,
+          materialConversions,
+          masterBahan,
+          inventory,
+          foodCompositions,
+        });
         const nextPrice =
           invMatch?.pricePerUnit || mbMatch?.actualPrice || compMatch?.defaultUnitPrice;
-        return {
+        const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
+        if (match && nextOverrides) {
+          delete nextOverrides.bddSmall;
+          delete nextOverrides.bkSmall;
+          delete nextOverrides.kebutuhanSmall;
+          delete nextOverrides.bufferSmall;
+          delete nextOverrides.totalSmall;
+          delete nextOverrides.pembulatanSmall;
+          delete nextOverrides.bddLarge;
+          delete nextOverrides.bkLarge;
+          delete nextOverrides.kebutuhanLarge;
+          delete nextOverrides.bufferLarge;
+          delete nextOverrides.totalLarge;
+          delete nextOverrides.pembulatanLarge;
+          delete nextOverrides.totalKuantiti;
+        }
+        const canAutoUpdateUnit =
+          Boolean(autoUnit) && !nextOverrides?.unitSmall && !nextOverrides?.unitLarge;
+        const nextPurchaseUnit = canAutoUpdateUnit
+          ? autoUnit!.unit
+          : item.purchaseUnit;
+        const nextUnitMeta = canAutoUpdateUnit
+          ? masterUnits.find(
+              u => u.code.trim().toLowerCase() === nextPurchaseUnit.trim().toLowerCase()
+            )
+          : undefined;
+        const nextConvFactor = canAutoUpdateUnit
+          ? nextUnitMeta &&
+            (nextUnitMeta.baseUnit === 'gram' || nextUnitMeta.baseUnit === 'ml') &&
+            nextUnitMeta.conversionToBase > 0
+            ? Number((1 / nextUnitMeta.conversionToBase).toFixed(6))
+            : nextPurchaseUnit === 'pcs'
+            ? 1
+            : item.conversionFactorToBase
+          : item.conversionFactorToBase;
+
+        const updated: RecipeIngredient = {
           ...item,
           name: cleaned,
+          ...(canAutoUpdateUnit
+            ? {
+                purchaseUnit: nextPurchaseUnit,
+                unit: nextUnitMeta?.baseUnit === 'satuan' ? nextPurchaseUnit : 'gram',
+                conversionFactorToBase: nextConvFactor,
+              }
+            : {}),
           ...(match
             ? {
                 category: match.category || item.category,
+                ediblePortionPercent: match.ediblePortionPercent,
                 calories100g: match.calories100g,
                 protein100g: match.protein100g,
                 fat100g: match.fat100g,
@@ -973,6 +1076,14 @@ export const NutritionMenuModule: React.FC = () => {
             : {}),
           ...(typeof nextPrice === 'number' && nextPrice > 0 ? { unitPrice: nextPrice } : {}),
         };
+        if (match) {
+          if (nextOverrides && Object.keys(nextOverrides).length > 0) {
+            updated.manualOverrides = nextOverrides;
+          } else {
+            delete updated.manualOverrides;
+          }
+        }
+        return updated;
       }
       const parsed = Number(value);
       const safeNum = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
@@ -993,12 +1104,16 @@ export const NutritionMenuModule: React.FC = () => {
         }
         delete nextOverrides.totalKuantiti;
       }
-      return {
+      const updatedWeightItem: RecipeIngredient = {
         ...item,
         [field]: safeNum,
-        manualOverrides:
-          nextOverrides && Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
       };
+      if (nextOverrides && Object.keys(nextOverrides).length > 0) {
+        updatedWeightItem.manualOverrides = nextOverrides;
+      } else {
+        delete updatedWeightItem.manualOverrides;
+      }
+      return updatedWeightItem;
     });
     updateMenuIngredients(activeMenuId, nextList);
   };
@@ -1056,18 +1171,24 @@ export const NutritionMenuModule: React.FC = () => {
         delete nextOverrides[downstreamKey];
       }
 
-      return {
-        ...item,
-        manualOverrides: Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined,
-      };
+      const updatedOverrideItem: RecipeIngredient = { ...item };
+      if (Object.keys(nextOverrides).length > 0) {
+        updatedOverrideItem.manualOverrides = nextOverrides;
+      } else {
+        delete updatedOverrideItem.manualOverrides;
+      }
+      return updatedOverrideItem;
     });
     updateMenuIngredients(activeMenuId, nextList);
   };
 
   const handleResetIngredientOverrides = (ingId: string) => {
-    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item =>
-      item.id === ingId ? { ...item, manualOverrides: undefined } : item
-    );
+    const nextList = (menuIngredientsMap[activeMenuId] || []).map(item => {
+      if (item.id !== ingId) return item;
+      const nextItem = { ...item };
+      delete nextItem.manualOverrides;
+      return nextItem;
+    });
     updateMenuIngredients(activeMenuId, nextList);
     addToast(
       'info',
@@ -1137,10 +1258,13 @@ export const NutritionMenuModule: React.FC = () => {
           };
         }
       }
-      return {
-        ...item,
-        menuName: cleaned || undefined,
-      };
+      const updatedMenuRow: RecipeIngredient = { ...item };
+      if (cleaned) {
+        updatedMenuRow.menuName = cleaned;
+      } else {
+        delete updatedMenuRow.menuName;
+      }
+      return updatedMenuRow;
     });
     updateMenuIngredients(menuId, nextList);
     addToast(
@@ -1158,9 +1282,16 @@ export const NutritionMenuModule: React.FC = () => {
     nextMenuName: string | undefined
   ) => {
     const cleaned = nextMenuName ? nextMenuName.trim() : undefined;
-    const nextList = (menuIngredientsMap[menuId] || []).map(item =>
-      item.id === ingredientId ? { ...item, menuName: cleaned || undefined } : item
-    );
+    const nextList = (menuIngredientsMap[menuId] || []).map(item => {
+      if (item.id !== ingredientId) return item;
+      const updatedItem: RecipeIngredient = { ...item };
+      if (cleaned) {
+        updatedItem.menuName = cleaned;
+      } else {
+        delete updatedItem.menuName;
+      }
+      return updatedItem;
+    });
     updateMenuIngredients(menuId, nextList);
     addToast(
       'success',
@@ -1179,12 +1310,35 @@ export const NutritionMenuModule: React.FC = () => {
     const cleaned = nextName.trim();
     if (!cleaned) return;
     const match = resolveFoodNutritionLookup(cleaned, foodCompositions, masterBahan);
+    const invMatch = inventory.find(inv => isMatchingMaterialName(inv.name, cleaned));
+    const mbMatch = masterBahan.find(mb => isMatchingMaterialName(mb.name, cleaned));
+    const compMatch = foodCompositions.find(c => isMatchingMaterialName(c.name, cleaned));
+    const nextPrice =
+      invMatch?.pricePerUnit || mbMatch?.actualPrice || compMatch?.defaultUnitPrice;
+
     const nextList = (menuIngredientsMap[menuId] || []).map(item => {
       if (item.id !== ingredientId) return item;
       if (match) {
-        return {
+        const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
+        if (nextOverrides) {
+          delete nextOverrides.bddSmall;
+          delete nextOverrides.bkSmall;
+          delete nextOverrides.kebutuhanSmall;
+          delete nextOverrides.bufferSmall;
+          delete nextOverrides.totalSmall;
+          delete nextOverrides.pembulatanSmall;
+          delete nextOverrides.bddLarge;
+          delete nextOverrides.bkLarge;
+          delete nextOverrides.kebutuhanLarge;
+          delete nextOverrides.bufferLarge;
+          delete nextOverrides.totalLarge;
+          delete nextOverrides.pembulatanLarge;
+          delete nextOverrides.totalKuantiti;
+        }
+        const updatedIng: RecipeIngredient = {
           ...item,
           name: cleaned,
+          category: match.category || item.category,
           calories100g: match.calories100g,
           protein100g: match.protein100g,
           fat100g: match.fat100g,
@@ -1192,7 +1346,14 @@ export const NutritionMenuModule: React.FC = () => {
           fiber100g: match.fiber100g,
           ediblePortionPercent: match.ediblePortionPercent,
           referenceSource: match.referenceSource,
+          ...(typeof nextPrice === 'number' && nextPrice > 0 ? { unitPrice: nextPrice } : {}),
         };
+        if (nextOverrides && Object.keys(nextOverrides).length > 0) {
+          updatedIng.manualOverrides = nextOverrides;
+        } else {
+          delete updatedIng.manualOverrides;
+        }
+        return updatedIng;
       }
       return {
         ...item,
@@ -1222,11 +1383,75 @@ export const NutritionMenuModule: React.FC = () => {
     nextWeight: number
   ) => {
     const safeWeight = Number.isFinite(nextWeight) ? Math.max(0, nextWeight) : 0;
-    const field = portionType === 'small' ? 'netWeightSmall' : 'netWeightLarge';
-    const nextList = (menuIngredientsMap[menuId] || []).map(item =>
-      item.id === ingredientId ? { ...item, [field]: safeWeight } : item
-    );
+    const isSmall = portionType === 'small';
+    const field = isSmall ? 'netWeightSmall' : 'netWeightLarge';
+    const nextList = (menuIngredientsMap[menuId] || []).map(item => {
+      if (item.id !== ingredientId) return item;
+      const nextOverrides = item.manualOverrides ? { ...item.manualOverrides } : undefined;
+      if (nextOverrides) {
+        if (isSmall) {
+          delete nextOverrides.bkSmall;
+          delete nextOverrides.kebutuhanSmall;
+          delete nextOverrides.bufferSmall;
+          delete nextOverrides.totalSmall;
+          delete nextOverrides.pembulatanSmall;
+        } else {
+          delete nextOverrides.bkLarge;
+          delete nextOverrides.kebutuhanLarge;
+          delete nextOverrides.bufferLarge;
+          delete nextOverrides.totalLarge;
+          delete nextOverrides.pembulatanLarge;
+        }
+        delete nextOverrides.totalKuantiti;
+      }
+      const updatedIng: RecipeIngredient = {
+        ...item,
+        [field]: safeWeight,
+      };
+      if (nextOverrides && Object.keys(nextOverrides).length > 0) {
+        updatedIng.manualOverrides = nextOverrides;
+      } else {
+        delete updatedIng.manualOverrides;
+      }
+      return updatedIng;
+    });
     updateMenuIngredients(menuId, nextList);
+  };
+
+  const handleRecalculateTkpiForActiveMenu = () => {
+    const existing = menuIngredientsMap[activeMenuId] || [];
+    if (existing.length === 0) return;
+    let updatedCount = 0;
+    const nextList = existing.map(item => {
+      const match = resolveFoodNutritionLookup(item.name, foodCompositions, masterBahan);
+      if (!match) return item;
+      const changed =
+        Math.abs((item.calories100g || 0) - match.calories100g) > 0.01 ||
+        Math.abs((item.protein100g || 0) - match.protein100g) > 0.01 ||
+        Math.abs((item.fat100g || 0) - match.fat100g) > 0.01 ||
+        Math.abs((item.carb100g || 0) - match.carb100g) > 0.01 ||
+        Math.abs((item.fiber100g || 0) - match.fiber100g) > 0.01 ||
+        Math.abs((item.ediblePortionPercent || 100) - match.ediblePortionPercent) > 0.01;
+      if (changed) updatedCount += 1;
+      return {
+        ...item,
+        calories100g: match.calories100g,
+        protein100g: match.protein100g,
+        fat100g: match.fat100g,
+        carb100g: match.carb100g,
+        fiber100g: match.fiber100g,
+        ediblePortionPercent: match.ediblePortionPercent,
+        referenceSource: match.referenceSource,
+      };
+    });
+    updateMenuIngredients(activeMenuId, nextList);
+    addToast(
+      'success',
+      'Sinkronisasi TKPI 2020 Selesai',
+      updatedCount > 0
+        ? `${updatedCount} bahan pada ${currentMenu?.menuCode || 'menu aktif'} diperbarui ke nilai TKPI terbaru & dihitung ulang otomatis.`
+        : `Seluruh ${existing.length} bahan pada ${currentMenu?.menuCode || 'menu aktif'} sudah sesuai referensi TKPI 2020 & terhitung akurat.`
+    );
   };
 
   const handleUpdateIngredientNutritionPer100g = (
@@ -1304,9 +1529,10 @@ export const NutritionMenuModule: React.FC = () => {
     const liveMat = masterBahan.find(mb => isMatchingMaterialName(mb.name, ingName));
     const liveInv = inventory.find(inv => isMatchingMaterialName(inv.name, ingName));
 
+    const trimmedMenuName = newNutritionRowForm.menuName.trim();
     const newIng: RecipeIngredient = {
       id: `ing-${Date.now()}`,
-      menuName: newNutritionRowForm.menuName.trim() || undefined,
+      ...(trimmedMenuName ? { menuName: trimmedMenuName } : {}),
       name: ingName,
       category: newNutritionRowForm.category || match?.category || 'Lauk Hewani',
       netWeightSmall: Math.max(0, Number(newNutritionRowForm.netWeightSmall) || 0),
@@ -1404,8 +1630,25 @@ export const NutritionMenuModule: React.FC = () => {
       milkOrExtra: (newMenuForm.milkOrExtra || '').trim() || 'Susu UHT Plain 125ml',
     };
 
-    const initialRecipes = sampleIngredientsMenu1.map(ing => ({ ...ing }));
+    const generatedRecipes = buildRecipeIngredientsForMenu(
+      tempMenuStub,
+      foodCompositions,
+      masterBahan,
+      inventory
+    );
+    const initialRecipes =
+      generatedRecipes.length > 0 ? generatedRecipes : sampleIngredientsMenu1.map(ing => ({ ...ing }));
     const initialGrammages = buildDefaultGrammagesForMenu(tempMenuStub, initialRecipes);
+
+    const calcSum = (getter: (ing: RecipeIngredient) => number, weightKey: 'netWeightSmall' | 'netWeightLarge') =>
+      initialRecipes.reduce((acc, ing) => acc + ((Number(ing[weightKey]) || 0) / 100) * getter(ing), 0);
+
+    const newCalSmall = Math.round(calcSum(i => Number(i.calories100g) || 0, 'netWeightSmall'));
+    const newCalLarge = Math.round(calcSum(i => Number(i.calories100g) || 0, 'netWeightLarge'));
+    const newProtSmall = Number(calcSum(i => Number(i.protein100g) || 0, 'netWeightSmall').toFixed(1));
+    const newCarbSmall = Number(calcSum(i => Number(i.carb100g) || 0, 'netWeightSmall').toFixed(1));
+    const newFatSmall = Number(calcSum(i => Number(i.fat100g) || 0, 'netWeightSmall').toFixed(1));
+    const newFibSmall = Number(calcSum(i => Number(i.fiber100g) || 0, 'netWeightSmall').toFixed(1));
 
     const payload: Omit<MenuItem, 'id'> = {
       date: safeDate,
@@ -1418,12 +1661,12 @@ export const NutritionMenuModule: React.FC = () => {
       vegetable: tempMenuStub.vegetable,
       fruit: tempMenuStub.fruit,
       milkOrExtra: tempMenuStub.milkOrExtra,
-      caloriesSmall: Math.round(nutritionSummarySmall.calories || 620),
-      caloriesLarge: Math.round(nutritionSummaryLarge.calories || 870),
-      proteinGrams: Number(nutritionSummaryLarge.protein.toFixed(1)) || 28.5,
-      carbGrams: Number(nutritionSummaryLarge.carbs.toFixed(1)) || 95.0,
-      fatGrams: Number(nutritionSummaryLarge.fat.toFixed(1)) || 20.0,
-      fiberGrams: Number(nutritionSummaryLarge.fiber.toFixed(1)) || 7.0,
+      caloriesSmall: newCalSmall,
+      caloriesLarge: newCalLarge,
+      proteinGrams: newProtSmall,
+      carbGrams: newCarbSmall,
+      fatGrams: newFatSmall,
+      fiberGrams: newFibSmall,
       targetPortions: totalBeneficiaries,
       estimatedCostPerPortion: Math.round(avgFoodCostPerPortion || 9000),
       status: 'Draft',
@@ -2614,6 +2857,7 @@ export const NutritionMenuModule: React.FC = () => {
                     const unitOptions = Array.from(
                       new Set([
                         ...masterUnits.map(u => u.code),
+                        ...materialConversions.map(c => c.unit),
                         item.purchaseUnit,
                         item.unitSmall,
                         item.unitLarge,
@@ -3799,14 +4043,25 @@ export const NutritionMenuModule: React.FC = () => {
                   </button>
                 </div>
                 {hasPermission('menu', 'edit') && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenAddNutritionRowModal(activeMenuId)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Tambah Baris Menu &amp; Bahan</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleRecalculateTkpiForActiveMenu}
+                      title="Cocokkan ulang semua bahan pada menu aktif dengan referensi TKPI 2020 terbaru"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-bold transition-all duration-200 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-[#1E3A8A] dark:text-sky-400" />
+                      <span>Sinkron TKPI/100g</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddNutritionRowModal(activeMenuId)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-bold transition-all duration-200 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Baris Menu &amp; Bahan</span>
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
@@ -5501,7 +5756,7 @@ export const NutritionMenuModule: React.FC = () => {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Satuan Beli (Master Satuan) *
+                Satuan Beli (Master Satuan &amp; Dimensi Bahan) *
               </label>
               <select
                 required
@@ -5512,14 +5767,11 @@ export const NutritionMenuModule: React.FC = () => {
                 }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold"
               >
-                {masterUnits.map(u => (
-                  <option key={u.id} value={u.code}>
-                    {u.code} — {u.name}
+                {masterUnitSelectOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
-                {customPurchaseUnit && !masterUnits.some(u => u.code === customPurchaseUnit) && (
-                  <option value={customPurchaseUnit}>{customPurchaseUnit}</option>
-                )}
               </select>
             </div>
           </div>
@@ -6333,7 +6585,7 @@ export const NutritionMenuModule: React.FC = () => {
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
-                  Serat (mg/100g)
+                  Serat (g/100g)
                 </label>
                 <input
                   type="number"
@@ -6363,7 +6615,7 @@ export const NutritionMenuModule: React.FC = () => {
                 P: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
                 L: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
                 KH: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
-                S: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fiber100g, 2)}
+                S: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fiber100g, 2)}g
               </div>
             </div>
             <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
@@ -6375,7 +6627,7 @@ export const NutritionMenuModule: React.FC = () => {
                 P: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
                 L: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
                 KH: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
-                S: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fiber100g, 2)}
+                S: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fiber100g, 2)}g
               </div>
             </div>
           </div>
