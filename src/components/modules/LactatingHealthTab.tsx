@@ -65,6 +65,22 @@ const getRiskBadgeClasses = (level: LactatingRiskLevel): string => {
   }
 };
 
+const sanitizeIntegerInput = (raw: string): string => raw.replace(/[^\d]/g, '');
+
+const sanitizeDecimalInput = (raw: string): string => {
+  const normalized = raw.replace(/,/g, '.').replace(/[^\d.]/g, '');
+  const dotIdx = normalized.indexOf('.');
+  if (dotIdx === -1) return normalized;
+  return `${normalized.slice(0, dotIdx + 1)}${normalized.slice(dotIdx + 1).replace(/\./g, '')}`;
+};
+
+const parseOptionalNumber = (raw: string): number | null => {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '.') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const LactatingHealthTab: React.FC = () => {
   const {
     institutions,
@@ -89,10 +105,10 @@ export const LactatingHealthTab: React.FC = () => {
   const [phaseFilter, setPhaseFilter] = useState<string>('ALL');
   const [conditionFilter, setConditionFilter] = useState<string>('ALL');
 
-  // Form / Calculator Inputs
+  // Form / Calculator Inputs (string-backed numeric fields so clearing leaves them empty, not 0)
   const [nik, setNik] = useState('');
   const [fullName, setFullName] = useState('');
-  const [ageYears, setAgeYears] = useState<number>(27);
+  const [ageYears, setAgeYears] = useState<string>('27');
   const [phone, setPhone] = useState('');
   const [institutionId, setInstitutionId] = useState<string>('posyandu-temenggungan');
   const [villageOrPosyandu, setVillageOrPosyandu] = useState('Dusun Krajan, Desa Temenggungan');
@@ -104,13 +120,13 @@ export const LactatingHealthTab: React.FC = () => {
   const [feedingPattern, setFeedingPattern] = useState<LactationFeedingPattern>('ASI Eksklusif');
   const [breastStatus, setBreastStatus] = useState<BreastHealthStatus>('Normal & ASI Lancar');
 
-  const [weightKg, setWeightKg] = useState<number>(54.0);
-  const [heightCm, setHeightCm] = useState<number>(156.0);
-  const [lilaCm, setLilaCm] = useState<number>(25.0);
-  const [hemoglobinGdL, setHemoglobinGdL] = useState<number>(12.4);
-  const [systolicBp, setSystolicBp] = useState<number>(115);
-  const [diastolicBp, setDiastolicBp] = useState<number>(75);
-  const [fluidIntakeMl, setFluidIntakeMl] = useState<number>(3000);
+  const [weightKg, setWeightKg] = useState<string>('54.0');
+  const [heightCm, setHeightCm] = useState<string>('156.0');
+  const [lilaCm, setLilaCm] = useState<string>('25.0');
+  const [hemoglobinGdL, setHemoglobinGdL] = useState<string>('12.4');
+  const [systolicBp, setSystolicBp] = useState<string>('115');
+  const [diastolicBp, setDiastolicBp] = useState<string>('75');
+  const [fluidIntakeMl, setFluidIntakeMl] = useState<string>('3000');
   const [vitaminAPostpartum, setVitaminAPostpartum] = useState<boolean>(true);
   const [ttdOrMultivitaminCompliant, setTtdOrMultivitaminCompliant] = useState<boolean>(true);
   const [notes, setNotes] = useState<string>('');
@@ -119,7 +135,7 @@ export const LactatingHealthTab: React.FC = () => {
     setEditingId(null);
     setNik('');
     setFullName('');
-    setAgeYears(27);
+    setAgeYears('27');
     setPhone('');
     setInstitutionId('posyandu-temenggungan');
     setVillageOrPosyandu('Dusun Krajan, Desa Temenggungan');
@@ -128,13 +144,13 @@ export const LactatingHealthTab: React.FC = () => {
     setDeliveryDate('2026-08-20');
     setFeedingPattern('ASI Eksklusif');
     setBreastStatus('Normal & ASI Lancar');
-    setWeightKg(54.0);
-    setHeightCm(156.0);
-    setLilaCm(25.0);
-    setHemoglobinGdL(12.4);
-    setSystolicBp(115);
-    setDiastolicBp(75);
-    setFluidIntakeMl(3000);
+    setWeightKg('54.0');
+    setHeightCm('156.0');
+    setLilaCm('25.0');
+    setHemoglobinGdL('12.4');
+    setSystolicBp('115');
+    setDiastolicBp('75');
+    setFluidIntakeMl('3000');
     setVitaminAPostpartum(true);
     setTtdOrMultivitaminCompliant(true);
     setNotes('');
@@ -145,7 +161,7 @@ export const LactatingHealthTab: React.FC = () => {
     setCalculatorMode('save');
     setNik(rec.nik);
     setFullName(rec.fullName);
-    setAgeYears(rec.ageYears);
+    setAgeYears(String(rec.ageYears));
     setPhone(rec.phone || '');
     setInstitutionId(rec.institutionId);
     setVillageOrPosyandu(rec.villageOrPosyandu);
@@ -154,13 +170,13 @@ export const LactatingHealthTab: React.FC = () => {
     setDeliveryDate(rec.deliveryDate);
     setFeedingPattern(rec.feedingPattern);
     setBreastStatus(rec.breastStatus);
-    setWeightKg(rec.weightKg);
-    setHeightCm(rec.heightCm);
-    setLilaCm(rec.lilaCm);
-    setHemoglobinGdL(rec.hemoglobinGdL);
-    setSystolicBp(rec.systolicBp);
-    setDiastolicBp(rec.diastolicBp);
-    setFluidIntakeMl(rec.fluidIntakeMl);
+    setWeightKg(String(rec.weightKg));
+    setHeightCm(String(rec.heightCm));
+    setLilaCm(String(rec.lilaCm));
+    setHemoglobinGdL(String(rec.hemoglobinGdL));
+    setSystolicBp(String(rec.systolicBp));
+    setDiastolicBp(String(rec.diastolicBp));
+    setFluidIntakeMl(String(rec.fluidIntakeMl));
     setVitaminAPostpartum(rec.vitaminAPostpartum);
     setTtdOrMultivitaminCompliant(rec.ttdOrMultivitaminCompliant);
     setNotes(rec.notes || '');
@@ -176,18 +192,18 @@ export const LactatingHealthTab: React.FC = () => {
   // Real-time clinical calculation
   const liveAssessment = useMemo(() => {
     return calculateLactatingHealthAssessment({
-      ageYears,
+      ageYears: parseOptionalNumber(ageYears) ?? 27,
       deliveryDate,
       measurementDate,
-      weightKg,
-      heightCm,
-      lilaCm,
-      hemoglobinGdL,
-      systolicBp,
-      diastolicBp,
+      weightKg: parseOptionalNumber(weightKg) ?? 54,
+      heightCm: parseOptionalNumber(heightCm) ?? 156,
+      lilaCm: parseOptionalNumber(lilaCm) ?? 25,
+      hemoglobinGdL: parseOptionalNumber(hemoglobinGdL) ?? 12.4,
+      systolicBp: parseOptionalNumber(systolicBp) ?? 115,
+      diastolicBp: parseOptionalNumber(diastolicBp) ?? 75,
       feedingPattern,
       breastStatus,
-      fluidIntakeMl,
+      fluidIntakeMl: parseOptionalNumber(fluidIntakeMl) ?? 3000,
       vitaminAPostpartum,
       ttdOrMultivitaminCompliant,
     });
@@ -247,12 +263,39 @@ export const LactatingHealthTab: React.FC = () => {
       return;
     }
 
+    const parsedAge = parseOptionalNumber(ageYears);
+    const parsedWeight = parseOptionalNumber(weightKg);
+    const parsedHeight = parseOptionalNumber(heightCm);
+    const parsedLila = parseOptionalNumber(lilaCm);
+    const parsedHb = parseOptionalNumber(hemoglobinGdL);
+    const parsedSysBp = parseOptionalNumber(systolicBp);
+    const parsedDiaBp = parseOptionalNumber(diastolicBp);
+    const parsedFluid = parseOptionalNumber(fluidIntakeMl);
+
+    if (
+      parsedAge === null ||
+      parsedWeight === null ||
+      parsedHeight === null ||
+      parsedLila === null ||
+      parsedHb === null ||
+      parsedSysBp === null ||
+      parsedDiaBp === null ||
+      parsedFluid === null
+    ) {
+      addToast(
+        'error',
+        'Data Angka Belum Lengkap',
+        'Mohon lengkapi seluruh kolom angka usia ibu, antropometri (BB/TB), LILA, Hb, tekanan darah, dan asupan cairan.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const payload = {
         nik: nikValidation.cleanNik,
         fullName: fullName.trim(),
-        ageYears,
+        ageYears: Math.max(15, Math.min(50, Math.round(parsedAge))),
         phone,
         institutionId,
         institutionNameOverride: selectedInstitutionName,
@@ -261,13 +304,13 @@ export const LactatingHealthTab: React.FC = () => {
         deliveryDate,
         feedingPattern,
         breastStatus,
-        weightKg,
-        heightCm,
-        lilaCm,
-        hemoglobinGdL,
-        systolicBp,
-        diastolicBp,
-        fluidIntakeMl,
+        weightKg: Math.max(30, Math.min(150, parsedWeight)),
+        heightCm: Math.max(120, Math.min(200, parsedHeight)),
+        lilaCm: Math.max(14, Math.min(45, parsedLila)),
+        hemoglobinGdL: Math.max(4, Math.min(18, parsedHb)),
+        systolicBp: Math.max(70, Math.min(230, Math.round(parsedSysBp))),
+        diastolicBp: Math.max(40, Math.min(140, Math.round(parsedDiaBp))),
+        fluidIntakeMl: Math.max(500, Math.min(5000, Math.round(parsedFluid))),
         vitaminAPostpartum,
         ttdOrMultivitaminCompliant,
         measurementDate,
@@ -1042,12 +1085,13 @@ export const LactatingHealthTab: React.FC = () => {
                       Usia Ibu (Tahun)
                     </label>
                     <input
-                      type="number"
-                      min={15}
-                      max={50}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="27"
                       value={ageYears}
-                      onChange={e => setAgeYears(Number(e.target.value) || 26)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setAgeYears(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1136,13 +1180,13 @@ export const LactatingHealthTab: React.FC = () => {
                       BB Ibu (kg)
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={30}
-                      max={150}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="54.0"
                       value={weightKg}
-                      onChange={e => setWeightKg(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setWeightKg(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1151,13 +1195,13 @@ export const LactatingHealthTab: React.FC = () => {
                       TB Ibu (cm)
                     </label>
                     <input
-                      type="number"
-                      step="0.5"
-                      min={120}
-                      max={200}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="156.0"
                       value={heightCm}
-                      onChange={e => setHeightCm(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setHeightCm(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1166,13 +1210,13 @@ export const LactatingHealthTab: React.FC = () => {
                       <Ruler className="w-3 h-3 text-[#0D9488]" /> LILA (cm)
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={14}
-                      max={45}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="25.0"
                       value={lilaCm}
-                      onChange={e => setLilaCm(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setLilaCm(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1181,13 +1225,13 @@ export const LactatingHealthTab: React.FC = () => {
                       <Droplets className="w-3 h-3 text-[#E11D48]" /> Hb (g/dL)
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={4}
-                      max={18}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="12.4"
                       value={hemoglobinGdL}
-                      onChange={e => setHemoglobinGdL(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setHemoglobinGdL(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
                 </div>
@@ -1198,12 +1242,13 @@ export const LactatingHealthTab: React.FC = () => {
                       TD Sistolik (mmHg)
                     </label>
                     <input
-                      type="number"
-                      min={70}
-                      max={230}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="115"
                       value={systolicBp}
-                      onChange={e => setSystolicBp(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setSystolicBp(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1212,12 +1257,13 @@ export const LactatingHealthTab: React.FC = () => {
                       TD Diastolik (mmHg)
                     </label>
                     <input
-                      type="number"
-                      min={40}
-                      max={140}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="75"
                       value={diastolicBp}
-                      onChange={e => setDiastolicBp(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setDiastolicBp(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
 
@@ -1226,13 +1272,13 @@ export const LactatingHealthTab: React.FC = () => {
                       <GlassWater className="w-3 h-3 text-sky-600" /> Asupan Cairan (mL/hr)
                     </label>
                     <input
-                      type="number"
-                      step="100"
-                      min={500}
-                      max={5000}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="3000"
                       value={fluidIntakeMl}
-                      onChange={e => setFluidIntakeMl(Number(e.target.value) || 0)}
-                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                      onChange={e => setFluidIntakeMl(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[38px] px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-[#0D9488] outline-none"
                     />
                   </div>
                 </div>

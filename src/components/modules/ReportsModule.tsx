@@ -1458,7 +1458,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             ? `${(
                 avgTempCandidates.reduce((a, b) => a + b, 0) / avgTempCandidates.length
               ).toFixed(1)}°C`
-            : 'Standar ≥ 60°C';
+            : 'Belum Dicatat';
 
         const baseRows = bastSheetsList.map((s, idx) => [
           idx + 1,
@@ -1968,11 +1968,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           });
         } else {
           rows = [
-            [1, 'Makanan Pokok', todayMenu.stapleFood, '85 gram', '125 gram', 'Karbohidrat Kompleks', 'TKPI 2020'],
-            [2, 'Lauk Hewani', todayMenu.animalProtein, '45 gram', '70 gram', 'Protein Tinggi, Zat Besi', 'TKPI 2020'],
-            [3, 'Lauk Nabati', todayMenu.plantProtein, '40 gram', '60 gram', 'Protein Nabati', 'TKPI 2020'],
-            [4, 'Sayuran', todayMenu.vegetable, '60 gram', '90 gram', 'Vitamin A, C, Serat', 'TKPI 2020'],
-            [5, 'Buah Segar', todayMenu.fruit, '100 gram', '140 gram', 'Kalium, Antioksidan', 'TKPI 2020'],
+            [1, 'Makanan Pokok', todayMenu.stapleFood, 'Belum diatur (PLOG)', 'Belum diatur (PLOG)', 'Menunggu Resep PLOG', '-'],
+            [2, 'Lauk Hewani', todayMenu.animalProtein, 'Belum diatur (PLOG)', 'Belum diatur (PLOG)', 'Menunggu Resep PLOG', '-'],
+            [3, 'Lauk Nabati', todayMenu.plantProtein, 'Belum diatur (PLOG)', 'Belum diatur (PLOG)', 'Menunggu Resep PLOG', '-'],
+            [4, 'Sayuran', todayMenu.vegetable, 'Belum diatur (PLOG)', 'Belum diatur (PLOG)', 'Menunggu Resep PLOG', '-'],
+            [5, 'Buah Segar', todayMenu.fruit, 'Belum diatur (PLOG)', 'Belum diatur (PLOG)', 'Menunggu Resep PLOG', '-'],
           ];
         }
 
@@ -2243,28 +2243,22 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       // 9. Sampel Menu (Retention Sample 3x24 Jam) — Sinkron Live dari Menu Aktif, Pengolahan, Pemorsian & Persiapan
       case 'sampel_menu': {
         headers = ['No', 'Kode Lot Sampel', 'Waktu Pengambilan', 'Komponen Menu Terkunci', 'Wadah Steril', 'Suhu Simpan Freezer', 'Petugas QC Gizi', 'Masa Retensi (3x24 Jam)', 'Status'];
-        const cookRec =
-          cookingRecords.find(r => r.date === selectedDate) ||
-          cookingRecords[0];
-        const portRec =
-          portioningRecords.find(r => r.date === selectedDate) ||
-          portioningRecords[0];
-        const prepRec =
-          prepRecords.find(r => r.date === selectedDate) ||
-          prepRecords[0];
+        const cookRec = cookingRecords.find(r => r.date === selectedDate);
+        const portRec = portioningRecords.find(r => r.date === selectedDate);
+        const prepRec = prepRecords.find(r => r.date === selectedDate);
 
         const rawFreezerTemp =
           prepRec?.facilityTemps?.freezer1Temp ??
           cookRec?.facilityTemps?.freezer1Temp ??
-          portRec?.facilityTemps?.freezer1Temp ??
-          -18.5;
+          portRec?.facilityTemps?.freezer1Temp;
         const freezerTemp =
           typeof rawFreezerTemp === 'number' && Number.isFinite(rawFreezerTemp)
             ? rawFreezerTemp
-            : -18.5;
-        const freezerTempDisplay = `${freezerTemp.toFixed(1)}°C`;
-        const dateStamp = (selectedDate || '2026-11-08').replace(/-/g, '');
-        const baseTime = portRec?.portioningTime || cookRec?.time || '06:30';
+            : null;
+        const freezerTempDisplay =
+          freezerTemp !== null ? `${freezerTemp.toFixed(1)}°C` : 'Belum Dicatat';
+        const dateStamp = (selectedDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '');
+        const baseTime = portRec?.portioningTime || cookRec?.time || prepRec?.time || 'Belum dicatat';
         const qcOfficer =
           sppgConfig.nutritionOfficer ||
           portRec?.officerName ||
@@ -2273,41 +2267,55 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         const retentionUntil = formatIndonesianDate(addDaysToIso(selectedDate, 3));
         const retentionLabel = `3x24 Jam (s/d ${retentionUntil})`;
 
+        const menuRecipeList = menuIngredientsMap[todayMenu.id] || [];
+        const getRecipeWeightLabel = (catKeywords: string[], portWeight?: number): string => {
+          if (typeof portWeight === 'number' && Number.isFinite(portWeight) && portWeight > 0) {
+            return `${portWeight}g`;
+          }
+          const matchedSum = menuRecipeList
+            .filter(ing => catKeywords.some(kw => (ing.category || '').toLowerCase().includes(kw)))
+            .reduce((s, ing) => s + (Number(ing.netWeightLarge) || 0), 0);
+          return matchedSum > 0 ? `${Math.round(matchedSum)}g (PLOG)` : 'Belum ditimbang';
+        };
+
+        const sampleStatus =
+          cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Menunggu Input Produksi';
+
         const sampleComponents = [
           {
             code: `SMPL-${dateStamp}-01`,
-            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
-            menuDesc: `${todayMenu.stapleFood} (${portRec?.foodTemps?.rice?.cookedWeightGrams || 100}g)`,
+            time: baseTime === 'Belum dicatat' || baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.stapleFood} (${getRecipeWeightLabel(['pokok', 'karbo'], portRec?.foodTemps?.rice?.cookedWeightGrams)})`,
             container: 'Sterile Container #A1',
-            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+            status: sampleStatus,
           },
           {
             code: `SMPL-${dateStamp}-02`,
-            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
-            menuDesc: `${todayMenu.animalProtein} (${portRec?.foodTemps?.animalProtein?.cookedWeightGrams || 60}g)`,
+            time: baseTime === 'Belum dicatat' || baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.animalProtein} (${getRecipeWeightLabel(['hewani'], portRec?.foodTemps?.animalProtein?.cookedWeightGrams)})`,
             container: 'Sterile Container #A2',
-            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+            status: sampleStatus,
           },
           {
             code: `SMPL-${dateStamp}-03`,
-            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
-            menuDesc: `${todayMenu.plantProtein} (${portRec?.foodTemps?.plantProtein?.cookedWeightGrams || 50}g)`,
+            time: baseTime === 'Belum dicatat' || baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.plantProtein} (${getRecipeWeightLabel(['nabati'], portRec?.foodTemps?.plantProtein?.cookedWeightGrams)})`,
             container: 'Sterile Container #A3',
-            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+            status: sampleStatus,
           },
           {
             code: `SMPL-${dateStamp}-04`,
-            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
-            menuDesc: `${todayMenu.vegetable} (${portRec?.foodTemps?.vegetable?.cookedWeightGrams || 80}g)`,
+            time: baseTime === 'Belum dicatat' || baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.vegetable} (${getRecipeWeightLabel(['sayur'], portRec?.foodTemps?.vegetable?.cookedWeightGrams)})`,
             container: 'Sterile Vial #B1',
-            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+            status: sampleStatus,
           },
           {
             code: `SMPL-${dateStamp}-05`,
-            time: baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
-            menuDesc: `${todayMenu.fruit}${todayMenu.milkOrExtra ? ` / ${todayMenu.milkOrExtra}` : ''} (${portRec?.foodTemps?.fruit?.cookedWeightGrams || 100}g)`,
+            time: baseTime === 'Belum dicatat' || baseTime.includes('WIB') ? baseTime : `${baseTime} WIB`,
+            menuDesc: `${todayMenu.fruit}${todayMenu.milkOrExtra ? ` / ${todayMenu.milkOrExtra}` : ''} (${getRecipeWeightLabel(['buah', 'pelengkap', 'susu'], portRec?.foodTemps?.fruit?.cookedWeightGrams)})`,
             container: 'Sterile Container #B2',
-            status: cookRec || portRec ? 'Tersimpan Baik (Tercatat)' : 'Terjadwal Simpan',
+            status: sampleStatus,
           },
         ].filter(item =>
           !searchKeyword.trim() ||

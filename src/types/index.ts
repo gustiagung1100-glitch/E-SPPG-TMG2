@@ -760,6 +760,7 @@ export interface QualityControlRecord {
   inspectorName: string;
   status: QCStatusPLOK;
   inspectedAt: string;
+  acceptedStatusAt?: string;
   inventoryAdded: boolean;
 }
 
@@ -1024,6 +1025,7 @@ export interface PreparationInspectionRecord {
   damagedVegetable: DamagedMaterialItem;
   damagedAnimal: DamagedMaterialItem;
   damagedFruit: DamagedMaterialItem;
+  additionalDamagedItems?: DamagedMaterialItem[];
   facilityTemps?: FacilityTemperatures;
   notes: string;
 }
@@ -1474,7 +1476,7 @@ export interface PettyCashTransaction {
   counterparty: string;
   amount: number;
   recordedBy: string;
-  sourceModule?: 'manual' | 'pic_incentives' | 'volunteer_incentives';
+  sourceModule?: 'manual' | 'pic_incentives' | 'volunteer_incentives' | 'fuel_logs';
   sourceRefId?: string;
   proofNumber?: string;
   proofFileUrl?: string;
@@ -1490,6 +1492,7 @@ export type DashboardSectionId =
   | 'today_menu'
   | 'kitchen_progress'
   | 'distribution_status'
+  | 'menu_material_adjustment'
   | 'finance_petty_cash'
   | 'inventory_admin_kpi'
   | 'waste_rejected_charts'

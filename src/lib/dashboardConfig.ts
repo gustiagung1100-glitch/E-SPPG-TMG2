@@ -64,6 +64,14 @@ export const DASHBOARD_SECTIONS_META: readonly DashboardSectionMeta[] = [
     defaultWidth: 'third',
   },
   {
+    id: 'menu_material_adjustment',
+    title: 'Penyesuaian Bahan & Gramasi Menu (PLOG · PLOK · Persiapan)',
+    description:
+      'Kalkulasi bahan dipesan dikurangi buffer, QC diterima PLOK, dan bahan rusak persiapan terhadap kebutuhan porsi kecil & besar PLOG.',
+    category: 'Operasional Dapur',
+    defaultWidth: 'full',
+  },
+  {
     id: 'finance_petty_cash',
     title: '2. Kas Petty Cash & Purchase Order',
     description: 'Saldo awal, total PO pengadaan, pemasukan, pengeluaran, & saldo akhir kas kecil.',

@@ -102,6 +102,7 @@ import {
   getPODisplayCategoryRank,
   resolvePOItemApprovalStatus,
   isMatchingMaterialNameShared,
+  isQCAcceptedStatus,
 } from '../../lib/supplyChainSync';
 
 type SubModuleTab = 'rab' | 'purchase_order' | 'quality_control';
@@ -2746,11 +2747,7 @@ export const ProcurementModule: React.FC = () => {
       if (!draft) return;
       const receivedQty = Number(draft.receivedQuantity) || 0;
       const orderedQty = Number(draft.orderedQuantity) || 0;
-      const shouldAddStock =
-        (draft.status === 'Diterima' ||
-          draft.status === 'Diterima sebagian' ||
-          draft.status === 'Lolos Penuh') &&
-        receivedQty > 0;
+      const shouldAddStock = isQCAcceptedStatus(draft.status) && receivedQty > 0;
 
       await updateQualityControlRecord(editingQCRecord.id, {
         receivedQuantity: receivedQty,
@@ -2787,11 +2784,7 @@ export const ProcurementModule: React.FC = () => {
       const diffQty = receivedQty - orderedQty;
 
       // Stok gudang HANYA bertambah berdasarkan hasil input Quality Control yang diterima!
-      const shouldAddStock =
-        (draft.status === 'Diterima' ||
-          draft.status === 'Diterima sebagian' ||
-          draft.status === 'Lolos Penuh') &&
-        receivedQty > 0;
+      const shouldAddStock = isQCAcceptedStatus(draft.status) && receivedQty > 0;
 
       if (draft.existingQcId) {
         await updateQualityControlRecord(draft.existingQcId, {
@@ -6397,27 +6390,57 @@ export const ProcurementModule: React.FC = () => {
               {
                 key: 'stockStatus',
                 header: 'Status QC & Stok',
-                render: row => (
-                  <div className="space-y-0.5">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                        row.status === 'Diterima' || row.status === 'Lolos Penuh'
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : row.status === 'Diterima sebagian' || row.status === 'Lolos Sebagian'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                      }`}
-                    >
-                      {row.status}
-                    </span>
-                    {row.inventoryAdded && (
-                      <div className="text-[9px] text-emerald-600 font-bold flex items-center gap-0.5">
-                        <Check className="w-3 h-3" />
-                        <span>Masuk Stok Gudang +{row.receivedQuantity} {row.unit}</span>
-                      </div>
-                    )}
-                  </div>
-                ),
+                render: row => {
+                  const acceptedRecordedAt = isQCAcceptedStatus(row.status)
+                    ? row.acceptedStatusAt || row.inspectedAt
+                    : '';
+                  return (
+                    <div className="space-y-1 min-w-[165px]">
+                      <select
+                        value={row.status}
+                        onChange={e => {
+                          const nextStatus = e.target.value as QCStatusPLOK;
+                          const shouldAddStock =
+                            isQCAcceptedStatus(nextStatus) &&
+                            Number(row.receivedQuantity || 0) > 0;
+                          updateQualityControlRecord(row.id, {
+                            status: nextStatus,
+                            inventoryAdded: shouldAddStock,
+                          });
+                        }}
+                        aria-label={`Ubah Status QC & Stok ${row.itemName}`}
+                        className={`w-full px-2 py-1 rounded text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${
+                          row.status === 'Diterima' || row.status === 'Lolos Penuh'
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800'
+                            : row.status === 'Diterima sebagian' || row.status === 'Lolos Sebagian'
+                            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800'
+                            : row.status === 'Perlu pemeriksaan ulang'
+                            ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800'
+                            : 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'
+                        }`}
+                      >
+                        <option value="Diterima">Diterima</option>
+                        <option value="Diterima sebagian">Diterima sebagian</option>
+                        <option value="Lolos Penuh">Lolos Penuh</option>
+                        <option value="Lolos Sebagian">Lolos Sebagian</option>
+                        <option value="Perlu pemeriksaan ulang">Perlu pemeriksaan ulang</option>
+                        <option value="Ditolak">Ditolak</option>
+                        <option value="Belum QC">Belum QC</option>
+                      </select>
+                      {acceptedRecordedAt && (
+                        <div className="text-[9px] font-mono text-slate-600 dark:text-slate-300">
+                          Terekam diterima: {acceptedRecordedAt}
+                        </div>
+                      )}
+                      {row.inventoryAdded && (
+                        <div className="text-[9px] text-emerald-600 font-bold flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Masuk Stok Gudang +{row.receivedQuantity} {row.unit}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                },
               },
               {
                 key: 'actions',

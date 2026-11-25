@@ -7,6 +7,8 @@ import {
   PurchaseOrder,
   PurchaseOrderItem,
   POItemApprovalStatus,
+  PreparationInspectionRecord,
+  DamagedMaterialItem,
   QCStatusPLOK,
   QualityControlRecord,
   RABItem,
@@ -849,12 +851,22 @@ export function resolvePOItemSupplierDeliveryStatus(
   );
 }
 
+export function isQCAcceptedStatus(status: QCStatusPLOK | undefined): boolean {
+  return (
+    status === 'Diterima' ||
+    status === 'Diterima sebagian' ||
+    status === 'Lolos Penuh' ||
+    status === 'Lolos Sebagian'
+  );
+}
+
 export interface POItemQCInfo {
   qcStatus: QCStatusPLOK;
   receivedQuantity: number;
   deliveredQuantity: number;
   qcCount: number;
   latestInspectedAt?: string;
+  acceptedAt?: string;
   latestGrade?: QualityControlRecord['qualityGrade'];
   latestCondition?: QualityControlRecord['condition'];
   latestNotes?: string;
@@ -879,14 +891,25 @@ export function resolvePOItemQCInfo(
   const linkedQCs = sourceQCs.filter(
     q => q.poId === po.id || (q.poNumber && q.poNumber === po.poNumber)
   );
-  const itemQCs = linkedQCs.filter(q =>
-    isMatchingMaterialNameShared(q.itemName, item.itemName)
+  const exactItemQCs = linkedQCs.filter(
+    q => normalizeMaterialSyncName(q.itemName) === normalizeMaterialSyncName(item.itemName)
   );
+  const itemQCs =
+    exactItemQCs.length > 0
+      ? exactItemQCs
+      : linkedQCs.filter(q => isMatchingMaterialNameShared(q.itemName, item.itemName));
 
   if (itemQCs.length > 0) {
     const sortedQCs = [...itemQCs].sort((a, b) =>
-      (b.inspectedAt || '').localeCompare(a.inspectedAt || '')
+      (b.acceptedStatusAt || b.inspectedAt || '').localeCompare(
+        a.acceptedStatusAt || a.inspectedAt || ''
+      )
     );
+    const acceptedQCs = sortedQCs.filter(q => isQCAcceptedStatus(q.status));
+    const latestAcceptedAt =
+      acceptedQCs.length > 0
+        ? acceptedQCs[0].acceptedStatusAt || acceptedQCs[0].inspectedAt
+        : undefined;
     const totalReceived = itemQCs.reduce(
       (sum, q) => sum + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)),
       0
@@ -919,7 +942,8 @@ export function resolvePOItemQCInfo(
       receivedQuantity: totalReceived,
       deliveredQuantity: totalQCRecordedReceived,
       qcCount: itemQCs.length,
-      latestInspectedAt: item.deliveredAt || sortedQCs[0].inspectedAt,
+      latestInspectedAt: latestAcceptedAt || sortedQCs[0].inspectedAt,
+      acceptedAt: latestAcceptedAt,
       latestGrade: sortedQCs[0].qualityGrade,
       latestCondition: sortedQCs[0].condition,
       latestNotes: sortedQCs.map(q => q.notes).filter(Boolean).join(' | '),
@@ -943,7 +967,7 @@ export function resolvePOItemQCInfo(
     (po.status === 'Diterima di Gudang' || po.status === 'Selesai diterima') &&
     po.qcStatus !== 'Belum QC'
   ) {
-    const qtyVal = Number(item.receivedQuantity ?? item.quantity ?? 0);
+    const qtyVal = Number(item.receivedQuantity || 0);
     return {
       qcStatus: po.qcStatus,
       receivedQuantity: qtyVal,
@@ -963,6 +987,298 @@ export function resolvePOItemQCInfo(
     qcCount: 0,
     latestInspectedAt: item.deliveredAt,
     itemQCs: [],
+  };
+}
+
+const PREP_DAMAGE_DESCRIPTOR_WORDS = new Set([
+  'rusak',
+  'layu',
+  'patah',
+  'memar',
+  'lembek',
+  'lemak',
+  'berlebih',
+  'kulit',
+  'ujung',
+  'potong',
+  'sisa',
+  'sayatan',
+  'tipis',
+  'terlalu',
+  'busuk',
+  'kotor',
+  'pecah',
+  'retak',
+  'basi',
+  'menguning',
+  'berlendir',
+  'trimming',
+  'reject',
+  'rijek',
+  'cacat',
+  'penyok',
+  'bocor',
+  'tercemar',
+  'terkulai',
+  'kutu',
+  'berkutu',
+  'menggumpal',
+  'basah',
+  'kering',
+  'kemasan',
+  'bagian',
+  'luar',
+]);
+
+export function isMatchingPrepDamagedMaterial(
+  damagedName: string,
+  poItemName: string
+): boolean {
+  const cleanDamaged = (damagedName || '').trim();
+  const cleanItem = (poItemName || '').trim();
+  if (!cleanDamaged || !cleanItem || cleanDamaged === '-') return false;
+
+  if (isMatchingMaterialNameShared(cleanDamaged, cleanItem)) {
+    return true;
+  }
+
+  const strippedDamagedTokens = normalizeMaterialSyncName(cleanDamaged)
+    .split(' ')
+    .filter(
+      tok =>
+        tok.length >= 3 &&
+        !SYNC_STOP_WORDS.has(tok) &&
+        !PREP_DAMAGE_DESCRIPTOR_WORDS.has(tok) &&
+        !/^\d+$/.test(tok)
+    );
+
+  if (strippedDamagedTokens.length === 0) return false;
+
+  const strippedDamagedPhrase = strippedDamagedTokens.join(' ');
+  if (isMatchingMaterialNameShared(strippedDamagedPhrase, cleanItem)) {
+    return true;
+  }
+
+  const poTokens = extractMaterialTokens(cleanItem);
+  if (poTokens.length === 0) return false;
+
+  const hasTelurA = strippedDamagedTokens.includes('telur');
+  const hasTelurB = poTokens.includes('telur');
+  if (hasTelurA !== hasTelurB) return false;
+
+  const compoundHeads = new Set([
+    'bawang',
+    'cabai',
+    'gula',
+    'daging',
+    'ikan',
+    'kacang',
+    'tepung',
+    'daun',
+    'saus',
+    'minyak',
+  ]);
+
+  // Match if at least one core ingredient token (not a generic compound head alone) overlaps
+  return strippedDamagedTokens.some(tok => {
+    if (compoundHeads.has(tok)) return false;
+    return poTokens.includes(tok);
+  });
+}
+
+export function convertDamagedQuantityToPOUnit(
+  qty: number,
+  fromUnit: string | undefined,
+  toUnit: string | undefined,
+  masterUnits: MasterUnit[] = []
+): number {
+  const numericQty = Number(qty || 0);
+  if (!Number.isFinite(numericQty) || numericQty <= 0) return 0;
+
+  const normFrom = (fromUnit || 'kg').trim().toLowerCase();
+  const normTo = (toUnit || 'kg').trim().toLowerCase();
+  if (!normFrom || !normTo || normFrom === normTo) return numericQty;
+
+  const resolveWeightGrams = (u: string): number | null => {
+    if (u === 'kg' || u === 'kilogram') return 1000;
+    if (u === 'g' || u === 'gr' || u === 'gram') return 1;
+    if (u === 'ons') return 100;
+    if (u === 'kwintal') return 100000;
+    if (u === 'ton') return 1000000;
+    const found = masterUnits.find(m => m.code.trim().toLowerCase() === u);
+    if (found && found.baseUnit === 'gram' && found.conversionToBase > 0) {
+      return found.conversionToBase;
+    }
+    return null;
+  };
+
+  const fromGrams = resolveWeightGrams(normFrom);
+  const toGrams = resolveWeightGrams(normTo);
+  if (fromGrams !== null && toGrams !== null) {
+    return Math.round(((numericQty * fromGrams) / toGrams) * 1000) / 1000;
+  }
+
+  const resolveVolMl = (u: string): number | null => {
+    if (u === 'l' || u === 'liter' || u === 'ltr') return 1000;
+    if (u === 'ml' || u === 'cc') return 1;
+    const found = masterUnits.find(m => m.code.trim().toLowerCase() === u);
+    if (found && found.baseUnit === 'ml' && found.conversionToBase > 0) {
+      return found.conversionToBase;
+    }
+    return null;
+  };
+
+  const fromMl = resolveVolMl(normFrom);
+  const toMl = resolveVolMl(normTo);
+  if (fromMl !== null && toMl !== null) {
+    return Math.round(((numericQty * fromMl) / toMl) * 1000) / 1000;
+  }
+
+  return numericQty;
+}
+
+export interface PrepDamagedEntryMatch {
+  recordId: string;
+  date: string;
+  categoryLabel: 'Sayuran' | 'Hewani' | 'Buah' | 'Tambahan';
+  damagedName: string;
+  quantity: number;
+  unit: string;
+  convertedQuantity: number;
+  temp: number;
+  officerName: string;
+}
+
+export interface POItemPrepDamagedInfo {
+  damagedQuantity: number;
+  unit: string;
+  hasPrepRecordForDate: boolean;
+  matchedEntries: PrepDamagedEntryMatch[];
+  matchedDate?: string;
+}
+
+export function extractPrepRecordDamagedEntries(rec: PreparationInspectionRecord): Array<{
+  categoryLabel: PrepDamagedEntryMatch['categoryLabel'];
+  item: DamagedMaterialItem;
+}> {
+  const entries: Array<{
+    categoryLabel: PrepDamagedEntryMatch['categoryLabel'];
+    item: DamagedMaterialItem;
+  }> = [];
+
+  if (rec.damagedVegetable && (rec.damagedVegetable.name || rec.damagedVegetable.quantity > 0)) {
+    entries.push({ categoryLabel: 'Sayuran', item: rec.damagedVegetable });
+  }
+  if (rec.damagedAnimal && (rec.damagedAnimal.name || rec.damagedAnimal.quantity > 0)) {
+    entries.push({ categoryLabel: 'Hewani', item: rec.damagedAnimal });
+  }
+  if (rec.damagedFruit && (rec.damagedFruit.name || rec.damagedFruit.quantity > 0)) {
+    entries.push({ categoryLabel: 'Buah', item: rec.damagedFruit });
+  }
+  if (Array.isArray(rec.additionalDamagedItems)) {
+    rec.additionalDamagedItems.forEach(extra => {
+      if (extra && (extra.name || extra.quantity > 0)) {
+        entries.push({ categoryLabel: 'Tambahan', item: extra });
+      }
+    });
+  }
+  return entries;
+}
+
+export function resolvePOItemPrepDamagedInfo(params: {
+  item: Pick<PurchaseOrderItem, 'itemName' | 'unit' | 'rabId'>;
+  po: PurchaseOrder;
+  prepRecords: PreparationInspectionRecord[];
+  rabItems: RABItem[];
+  menuItems: MenuItem[];
+  masterUnits?: MasterUnit[];
+  qcTimestamp?: string;
+}): POItemPrepDamagedInfo {
+  const {
+    item,
+    po,
+    prepRecords,
+    rabItems,
+    menuItems,
+    masterUnits = [],
+    qcTimestamp,
+  } = params;
+
+  const targetUnit = item.unit || 'kg';
+  if (!Array.isArray(prepRecords) || prepRecords.length === 0) {
+    return {
+      damagedQuantity: 0,
+      unit: targetUnit,
+      hasPrepRecordForDate: false,
+      matchedEntries: [],
+    };
+  }
+
+  const distDate = resolvePOItemDistributionDate(item, po, rabItems, menuItems);
+  const deliveryDate = (po.deliveryDate || '').trim();
+  const qcDateMatch = /^(\d{4}-\d{2}-\d{2})/.exec((qcTimestamp || '').trim());
+  const qcDate = qcDateMatch ? qcDateMatch[1] : '';
+
+  const candidateDates: string[] = [];
+  [distDate, qcDate, deliveryDate].forEach(d => {
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !candidateDates.includes(d)) {
+      candidateDates.push(d);
+    }
+  });
+
+  const hasPrepRecordForDate = prepRecords.some(rec => candidateDates.includes(rec.date));
+
+  const collectMatchesForDate = (targetDate: string): PrepDamagedEntryMatch[] => {
+    const matches: PrepDamagedEntryMatch[] = [];
+    prepRecords
+      .filter(rec => rec.date === targetDate)
+      .forEach(rec => {
+        const entries = extractPrepRecordDamagedEntries(rec);
+        entries.forEach(({ categoryLabel, item: damaged }) => {
+          if (!isMatchingPrepDamagedMaterial(damaged.name, item.itemName)) return;
+          const rawQty = Number(damaged.quantity || 0);
+          const converted = convertDamagedQuantityToPOUnit(
+            rawQty,
+            damaged.unit,
+            targetUnit,
+            masterUnits
+          );
+          matches.push({
+            recordId: rec.id,
+            date: rec.date,
+            categoryLabel,
+            damagedName: damaged.name,
+            quantity: rawQty,
+            unit: damaged.unit || targetUnit,
+            convertedQuantity: converted,
+            temp: Number(damaged.temp || 0),
+            officerName: rec.officerName,
+          });
+        });
+      });
+    return matches;
+  };
+
+  for (const dateKey of candidateDates) {
+    const matched = collectMatchesForDate(dateKey);
+    if (matched.length > 0) {
+      const totalDamaged =
+        Math.round(matched.reduce((sum, m) => sum + m.convertedQuantity, 0) * 1000) / 1000;
+      return {
+        damagedQuantity: totalDamaged,
+        unit: targetUnit,
+        hasPrepRecordForDate: true,
+        matchedEntries: matched,
+        matchedDate: dateKey,
+      };
+    }
+  }
+
+  return {
+    damagedQuantity: 0,
+    unit: targetUnit,
+    hasPrepRecordForDate,
+    matchedEntries: [],
   };
 }
 
@@ -1520,9 +1836,13 @@ export function reconcilePurchaseOrdersWithQC(
     }
 
     const updatedItems = (po.items || []).map(it => {
-      const itemQCs = linkedQCs.filter(q =>
-        isMatchingMaterialNameShared(q.itemName, it.itemName)
+      const exactQCs = linkedQCs.filter(
+        q => normalizeMaterialSyncName(q.itemName) === normalizeMaterialSyncName(it.itemName)
       );
+      const itemQCs =
+        exactQCs.length > 0
+          ? exactQCs
+          : linkedQCs.filter(q => isMatchingMaterialNameShared(q.itemName, it.itemName));
       const totalReceivedForItem = itemQCs.reduce(
         (sum, q) => sum + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)),
         0

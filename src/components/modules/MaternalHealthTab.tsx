@@ -59,6 +59,22 @@ const getRiskBadgeClasses = (level: MaternalRiskLevel): string => {
   }
 };
 
+const sanitizeIntegerInput = (raw: string): string => raw.replace(/[^\d]/g, '');
+
+const sanitizeDecimalInput = (raw: string): string => {
+  const normalized = raw.replace(/,/g, '.').replace(/[^\d.]/g, '');
+  const dotIdx = normalized.indexOf('.');
+  if (dotIdx === -1) return normalized;
+  return `${normalized.slice(0, dotIdx + 1)}${normalized.slice(dotIdx + 1).replace(/\./g, '')}`;
+};
+
+const parseOptionalNumber = (raw: string): number | null => {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '.') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const MaternalHealthTab: React.FC = () => {
   const {
     institutions,
@@ -83,30 +99,30 @@ export const MaternalHealthTab: React.FC = () => {
   const [trimesterFilter, setTrimesterFilter] = useState<string>('ALL');
   const [conditionFilter, setConditionFilter] = useState<string>('ALL');
 
-  // Form / Calculator Inputs
+  // Form / Calculator Inputs (string-backed numeric fields so clearing leaves them empty, not 0)
   const [nik, setNik] = useState('');
   const [fullName, setFullName] = useState('');
-  const [ageYears, setAgeYears] = useState<number>(27);
+  const [ageYears, setAgeYears] = useState<string>('27');
   const [phone, setPhone] = useState('');
   const [institutionId, setInstitutionId] = useState<string>('posyandu-temenggungan');
   const [villageOrPosyandu, setVillageOrPosyandu] = useState('Dusun Krajan, Desa Temenggungan');
-  const [gravida, setGravida] = useState<number>(2);
-  const [para, setPara] = useState<number>(1);
-  const [abortus, setAbortus] = useState<number>(0);
+  const [gravida, setGravida] = useState<string>('2');
+  const [para, setPara] = useState<string>('1');
+  const [abortus, setAbortus] = useState<string>('0');
 
   const [measurementDate, setMeasurementDate] = useState<string>('2026-11-08');
   const [hphtDate, setHphtDate] = useState<string>('2026-05-20');
-  const [gestationalWeeks, setGestationalWeeks] = useState<number>(24);
+  const [gestationalWeeks, setGestationalWeeks] = useState<string>('24');
   const [gestationalDaysRemainder, setGestationalDaysRemainder] = useState<number>(4);
   const [dueDateHpl, setDueDateHpl] = useState<string>('2027-02-24');
 
-  const [prePregnancyWeightKg, setPrePregnancyWeightKg] = useState<number>(50.0);
-  const [currentWeightKg, setCurrentWeightKg] = useState<number>(56.5);
-  const [heightCm, setHeightCm] = useState<number>(156.0);
-  const [lilaCm, setLilaCm] = useState<number>(24.5);
-  const [hemoglobinGdL, setHemoglobinGdL] = useState<number>(11.4);
-  const [systolicBp, setSystolicBp] = useState<number>(115);
-  const [diastolicBp, setDiastolicBp] = useState<number>(75);
+  const [prePregnancyWeightKg, setPrePregnancyWeightKg] = useState<string>('50.0');
+  const [currentWeightKg, setCurrentWeightKg] = useState<string>('56.5');
+  const [heightCm, setHeightCm] = useState<string>('156.0');
+  const [lilaCm, setLilaCm] = useState<string>('24.5');
+  const [hemoglobinGdL, setHemoglobinGdL] = useState<string>('11.4');
+  const [systolicBp, setSystolicBp] = useState<string>('115');
+  const [diastolicBp, setDiastolicBp] = useState<string>('75');
   const [ttdCompliant, setTtdCompliant] = useState<boolean>(true);
   const [notes, setNotes] = useState<string>('');
 
@@ -114,26 +130,26 @@ export const MaternalHealthTab: React.FC = () => {
     setEditingId(null);
     setNik('');
     setFullName('');
-    setAgeYears(27);
+    setAgeYears('27');
     setPhone('');
     setInstitutionId('posyandu-temenggungan');
     setVillageOrPosyandu('Dusun Krajan, Desa Temenggungan');
-    setGravida(2);
-    setPara(1);
-    setAbortus(0);
+    setGravida('2');
+    setPara('1');
+    setAbortus('0');
     setMeasurementDate('2026-11-08');
     setHphtDate('2026-05-20');
     const gest = calculateGestationFromHPHT('2026-05-20', '2026-11-08');
-    setGestationalWeeks(gest?.gestationalWeeks ?? 24);
+    setGestationalWeeks(String(gest?.gestationalWeeks ?? 24));
     setGestationalDaysRemainder(gest?.gestationalDaysRemainder ?? 4);
     setDueDateHpl(gest?.dueDateHpl ?? '2027-02-24');
-    setPrePregnancyWeightKg(50.0);
-    setCurrentWeightKg(56.5);
-    setHeightCm(156.0);
-    setLilaCm(24.5);
-    setHemoglobinGdL(11.4);
-    setSystolicBp(115);
-    setDiastolicBp(75);
+    setPrePregnancyWeightKg('50.0');
+    setCurrentWeightKg('56.5');
+    setHeightCm('156.0');
+    setLilaCm('24.5');
+    setHemoglobinGdL('11.4');
+    setSystolicBp('115');
+    setDiastolicBp('75');
     setTtdCompliant(true);
     setNotes('');
   };
@@ -143,7 +159,7 @@ export const MaternalHealthTab: React.FC = () => {
     if (newHpht) {
       const gest = calculateGestationFromHPHT(newHpht, measurementDate);
       if (gest) {
-        setGestationalWeeks(gest.gestationalWeeks);
+        setGestationalWeeks(String(gest.gestationalWeeks));
         setGestationalDaysRemainder(gest.gestationalDaysRemainder);
         setDueDateHpl(gest.dueDateHpl);
       }
@@ -155,7 +171,7 @@ export const MaternalHealthTab: React.FC = () => {
     if (hphtDate) {
       const gest = calculateGestationFromHPHT(hphtDate, newDate);
       if (gest) {
-        setGestationalWeeks(gest.gestationalWeeks);
+        setGestationalWeeks(String(gest.gestationalWeeks));
         setGestationalDaysRemainder(gest.gestationalDaysRemainder);
         setDueDateHpl(gest.dueDateHpl);
       }
@@ -167,25 +183,25 @@ export const MaternalHealthTab: React.FC = () => {
     setCalculatorMode('save');
     setNik(rec.nik);
     setFullName(rec.fullName);
-    setAgeYears(rec.ageYears);
+    setAgeYears(String(rec.ageYears));
     setPhone(rec.phone || '');
     setInstitutionId(rec.institutionId);
     setVillageOrPosyandu(rec.villageOrPosyandu);
-    setGravida(rec.gravida);
-    setPara(rec.para);
-    setAbortus(rec.abortus);
+    setGravida(String(rec.gravida));
+    setPara(String(rec.para));
+    setAbortus(String(rec.abortus));
     setMeasurementDate(rec.measurementDate);
     setHphtDate(rec.hphtDate || '');
-    setGestationalWeeks(rec.gestationalWeeks);
+    setGestationalWeeks(String(rec.gestationalWeeks));
     setGestationalDaysRemainder(rec.gestationalDaysRemainder);
     setDueDateHpl(rec.dueDateHpl || '');
-    setPrePregnancyWeightKg(rec.prePregnancyWeightKg);
-    setCurrentWeightKg(rec.currentWeightKg);
-    setHeightCm(rec.heightCm);
-    setLilaCm(rec.lilaCm);
-    setHemoglobinGdL(rec.hemoglobinGdL);
-    setSystolicBp(rec.systolicBp);
-    setDiastolicBp(rec.diastolicBp);
+    setPrePregnancyWeightKg(String(rec.prePregnancyWeightKg));
+    setCurrentWeightKg(String(rec.currentWeightKg));
+    setHeightCm(String(rec.heightCm));
+    setLilaCm(String(rec.lilaCm));
+    setHemoglobinGdL(String(rec.hemoglobinGdL));
+    setSystolicBp(String(rec.systolicBp));
+    setDiastolicBp(String(rec.diastolicBp));
     setTtdCompliant(rec.ttdCompliant);
     setNotes(rec.notes || '');
     setIsCalculatorOpen(true);
@@ -195,15 +211,15 @@ export const MaternalHealthTab: React.FC = () => {
   // Real-time clinical calculation
   const liveAssessment = useMemo(() => {
     return calculateMaternalHealthAssessment({
-      ageYears,
-      gestationalWeeks,
-      prePregnancyWeightKg,
-      currentWeightKg,
-      heightCm,
-      lilaCm,
-      hemoglobinGdL,
-      systolicBp,
-      diastolicBp,
+      ageYears: parseOptionalNumber(ageYears) ?? 27,
+      gestationalWeeks: parseOptionalNumber(gestationalWeeks) ?? 24,
+      prePregnancyWeightKg: parseOptionalNumber(prePregnancyWeightKg) ?? 50,
+      currentWeightKg: parseOptionalNumber(currentWeightKg) ?? 56.5,
+      heightCm: parseOptionalNumber(heightCm) ?? 156,
+      lilaCm: parseOptionalNumber(lilaCm) ?? 24.5,
+      hemoglobinGdL: parseOptionalNumber(hemoglobinGdL) ?? 11.4,
+      systolicBp: parseOptionalNumber(systolicBp) ?? 115,
+      diastolicBp: parseOptionalNumber(diastolicBp) ?? 75,
       ttdCompliant,
     });
   }, [
@@ -258,30 +274,63 @@ export const MaternalHealthTab: React.FC = () => {
       return;
     }
 
+    const parsedAge = parseOptionalNumber(ageYears);
+    const parsedGravida = parseOptionalNumber(gravida);
+    const parsedPara = parseOptionalNumber(para) ?? 0;
+    const parsedAbortus = parseOptionalNumber(abortus) ?? 0;
+    const parsedGestWeeks = parseOptionalNumber(gestationalWeeks);
+    const parsedPreWeight = parseOptionalNumber(prePregnancyWeightKg);
+    const parsedCurWeight = parseOptionalNumber(currentWeightKg);
+    const parsedHeight = parseOptionalNumber(heightCm);
+    const parsedLila = parseOptionalNumber(lilaCm);
+    const parsedHb = parseOptionalNumber(hemoglobinGdL);
+    const parsedSysBp = parseOptionalNumber(systolicBp);
+    const parsedDiaBp = parseOptionalNumber(diastolicBp);
+
+    if (
+      parsedAge === null ||
+      parsedGravida === null ||
+      parsedGestWeeks === null ||
+      parsedPreWeight === null ||
+      parsedCurWeight === null ||
+      parsedHeight === null ||
+      parsedLila === null ||
+      parsedHb === null ||
+      parsedSysBp === null ||
+      parsedDiaBp === null
+    ) {
+      addToast(
+        'error',
+        'Data Angka Belum Lengkap',
+        'Mohon lengkapi seluruh kolom angka usia, kehamilan, antropometri, LILA, Hb, dan tekanan darah.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const payload = {
         nik: nikValidation.cleanNik,
         fullName: fullName.trim(),
-        ageYears,
+        ageYears: Math.max(14, Math.min(55, Math.round(parsedAge))),
         phone,
         institutionId,
         institutionNameOverride: selectedInstitutionName,
         villageOrPosyandu,
-        gravida,
-        para,
-        abortus,
+        gravida: Math.max(1, Math.min(15, Math.round(parsedGravida))),
+        para: Math.max(0, Math.min(15, Math.round(parsedPara))),
+        abortus: Math.max(0, Math.min(10, Math.round(parsedAbortus))),
         hphtDate: hphtDate || undefined,
-        gestationalWeeks,
+        gestationalWeeks: Math.max(1, Math.min(42, Math.round(parsedGestWeeks))),
         gestationalDaysRemainder,
         dueDateHpl: dueDateHpl || undefined,
-        prePregnancyWeightKg,
-        currentWeightKg,
-        heightCm,
-        lilaCm,
-        hemoglobinGdL,
-        systolicBp,
-        diastolicBp,
+        prePregnancyWeightKg: Math.max(30, Math.min(150, parsedPreWeight)),
+        currentWeightKg: Math.max(30, Math.min(170, parsedCurWeight)),
+        heightCm: Math.max(120, Math.min(200, parsedHeight)),
+        lilaCm: Math.max(12, Math.min(50, parsedLila)),
+        hemoglobinGdL: Math.max(3, Math.min(19, parsedHb)),
+        systolicBp: Math.max(60, Math.min(250, Math.round(parsedSysBp))),
+        diastolicBp: Math.max(40, Math.min(160, Math.round(parsedDiaBp))),
         ttdCompliant,
         measurementDate,
         notes,
@@ -1021,12 +1070,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Usia Ibu (Tahun)
                     </label>
                     <input
-                      type="number"
-                      min={14}
-                      max={55}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="27"
                       value={ageYears}
-                      onChange={e => setAgeYears(Math.max(14, Math.min(55, Number(e.target.value) || 20)))}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setAgeYears(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1034,12 +1084,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Gravida (G)
                     </label>
                     <input
-                      type="number"
-                      min={1}
-                      max={15}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="2"
                       value={gravida}
-                      onChange={e => setGravida(Math.max(1, Number(e.target.value) || 1))}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setGravida(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1047,12 +1098,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Para (P)
                     </label>
                     <input
-                      type="number"
-                      min={0}
-                      max={15}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="1"
                       value={para}
-                      onChange={e => setPara(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setPara(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1060,12 +1112,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Abortus (A)
                     </label>
                     <input
-                      type="number"
-                      min={0}
-                      max={10}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="0"
                       value={abortus}
-                      onChange={e => setAbortus(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setAbortus(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                 </div>
@@ -1088,12 +1141,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Usia Kehamilan (Minggu, 1–42)
                     </label>
                     <input
-                      type="number"
-                      min={1}
-                      max={42}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="24"
                       value={gestationalWeeks}
-                      onChange={e => setGestationalWeeks(Math.max(1, Math.min(42, Number(e.target.value) || 1)))}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setGestationalWeeks(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1123,13 +1177,13 @@ export const MaternalHealthTab: React.FC = () => {
                       <span>BB Pra-Hamil (kg)</span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={30}
-                      max={150}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="50.0"
                       value={prePregnancyWeightKg}
-                      onChange={e => setPrePregnancyWeightKg(Number(e.target.value) || 35)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setPrePregnancyWeightKg(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1138,13 +1192,13 @@ export const MaternalHealthTab: React.FC = () => {
                       <span>BB Saat Ini (kg)</span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={30}
-                      max={170}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="56.5"
                       value={currentWeightKg}
-                      onChange={e => setCurrentWeightKg(Number(e.target.value) || 35)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setCurrentWeightKg(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1153,13 +1207,13 @@ export const MaternalHealthTab: React.FC = () => {
                       <span>Tinggi Badan (cm)</span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={120}
-                      max={200}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="156.0"
                       value={heightCm}
-                      onChange={e => setHeightCm(Number(e.target.value) || 140)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setHeightCm(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                 </div>
@@ -1170,13 +1224,13 @@ export const MaternalHealthTab: React.FC = () => {
                       LILA (cm) <span className="text-[10px] text-slate-500">(&lt;23.5 KEK)</span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={14}
-                      max={50}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="24.5"
                       value={lilaCm}
-                      onChange={e => setLilaCm(Number(e.target.value) || 18)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setLilaCm(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1184,13 +1238,13 @@ export const MaternalHealthTab: React.FC = () => {
                       Hb (g/dL) <span className="text-[10px] text-slate-500">(&lt;11 Anemia)</span>
                     </label>
                     <input
-                      type="number"
-                      step="0.1"
-                      min={4}
-                      max={18}
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder="11.4"
                       value={hemoglobinGdL}
-                      onChange={e => setHemoglobinGdL(Number(e.target.value) || 8)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setHemoglobinGdL(sanitizeDecimalInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1198,12 +1252,13 @@ export const MaternalHealthTab: React.FC = () => {
                       TD Sistolik (mmHg)
                     </label>
                     <input
-                      type="number"
-                      min={70}
-                      max={240}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="115"
                       value={systolicBp}
-                      onChange={e => setSystolicBp(Number(e.target.value) || 110)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setSystolicBp(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                   <div>
@@ -1211,12 +1266,13 @@ export const MaternalHealthTab: React.FC = () => {
                       TD Diastolik (mmHg)
                     </label>
                     <input
-                      type="number"
-                      min={40}
-                      max={150}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="75"
                       value={diastolicBp}
-                      onChange={e => setDiastolicBp(Number(e.target.value) || 70)}
-                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      onChange={e => setDiastolicBp(sanitizeIntegerInput(e.target.value))}
+                      className="w-full min-h-[42px] px-3 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:bg-white dark:focus:bg-slate-900"
                     />
                   </div>
                 </div>

@@ -14,6 +14,7 @@ import {
   resolvePOItemSupplierConfirmed,
   resolvePOItemSupplierDeliveryStatus,
   resolvePOItemQCInfo,
+  resolvePOItemPrepDamagedInfo,
   getPODisplayCategoryRank,
 } from '../../lib/supplyChainSync';
 import {
@@ -63,6 +64,8 @@ export const SupplierPortalModule: React.FC = () => {
     rabItems,
     menuItems,
     qualityControlRecords,
+    prepRecords,
+    masterUnits,
     supplierConfirmPO,
     supplierUpdatePOStatus,
     supplierRejectPO,
@@ -127,6 +130,8 @@ export const SupplierPortalModule: React.FC = () => {
 
   const [reducePOForm, setReducePOForm] = useState({
     currentOrderedQty: 0,
+    deliveredQty: 0,
+    damagedQty: 0,
     qcPassedQty: 0,
     newOrderedQty: 0,
     unit: 'kg',
@@ -147,7 +152,7 @@ export const SupplierPortalModule: React.FC = () => {
     deliveredAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
     orderedQuantity: 0,
     deliveredQuantity: 0,
-    qcPassedQuantity: 0,
+    damagedQuantity: 0,
     unit: 'kg',
     status: 'Diterima' as QCStatusPLOK,
     notes: '',
@@ -202,23 +207,23 @@ export const SupplierPortalModule: React.FC = () => {
             (sum, q) => sum + Number(q.receivedQuantity || 0),
             0
           );
-          const deliveredQty =
-            itemQCInfo.qcCount > 0
-              ? qcRecordedReceivedQty
-              : Number(itemQCInfo.deliveredQuantity || 0);
+          const deliveredQty = itemQCInfo.qcCount > 0 ? qcRecordedReceivedQty : 0;
           const qcPassedQty = Number(itemQCInfo.receivedQuantity || 0);
-          const isWarehouseReceivedPO =
-            po.status === 'Diterima di Gudang' ||
-            po.status === 'Selesai diterima' ||
-            po.status === 'Sebagian diterima' ||
-            po.status === 'Dikirim ke supplier';
+          const prepDamagedInfo = resolvePOItemPrepDamagedInfo({
+            item: it,
+            po,
+            prepRecords,
+            rabItems,
+            menuItems,
+            masterUnits,
+            qcTimestamp: itemQCInfo.acceptedAt || itemQCInfo.latestInspectedAt,
+          });
+          const prepDamagedQty = prepDamagedInfo.damagedQuantity;
+          const isPOFullyReceivedWithQC =
+            (po.status === 'Diterima di Gudang' || po.status === 'Selesai diterima') &&
+            po.qcStatus !== 'Belum QC';
           const isDeliveredItem =
-            itemQCInfo.qcCount > 0 ||
-            itemDeliveryStatus === 'Telah Tiba di Gudang' ||
-            itemDeliveryStatus === 'Dalam Pengiriman' ||
-            isWarehouseReceivedPO ||
-            deliveredQty > 0 ||
-            qcPassedQty > 0;
+            itemQCInfo.qcStatus !== 'Belum QC' || isPOFullyReceivedWithQC;
 
           if (!isDeliveredItem) return null;
           if (itemApprovalStatus === 'Ditolak' && itemQCInfo.qcCount === 0) return null;
@@ -226,21 +231,22 @@ export const SupplierPortalModule: React.FC = () => {
           const hasQCEvaluation =
             itemQCInfo.qcCount > 0 ||
             qcPassedQty > 0 ||
+            prepDamagedQty > 0 ||
             po.status === 'Diterima di Gudang' ||
             po.status === 'Selesai diterima' ||
             itemQCInfo.qcStatus === 'Ditolak';
-          const totalSelisih = hasQCEvaluation
-            ? qcPassedQty - orderedQty
-            : deliveredQty > 0
-            ? deliveredQty - orderedQty
-            : 0;
+          const netUsableQty =
+            itemQCInfo.qcStatus === 'Ditolak'
+              ? 0
+              : Math.round((deliveredQty - prepDamagedQty) * 1000) / 1000;
+          const totalSelisih =
+            itemQCInfo.qcCount > 0 || deliveredQty > 0 || itemQCInfo.qcStatus === 'Ditolak'
+              ? Math.round((netUsableQty - orderedQty) * 1000) / 1000
+              : prepDamagedQty > 0
+              ? -prepDamagedQty
+              : 0;
 
-          const receivedTimeRaw =
-            itemQCInfo.latestInspectedAt ||
-            it.deliveredAt ||
-            (itemDeliveryStatus === 'Telah Tiba di Gudang' || isWarehouseReceivedPO
-              ? po.deliveryDate
-              : '');
+          const receivedTimeRaw = itemQCInfo.acceptedAt || '';
 
           return {
             po,
@@ -251,6 +257,9 @@ export const SupplierPortalModule: React.FC = () => {
             itemApprovalStatus,
             itemDeliveryStatus,
             itemQCInfo,
+            prepDamagedInfo,
+            prepDamagedQty,
+            netUsableQty,
             orderedQty,
             deliveredQty,
             qcPassedQty,
@@ -274,7 +283,7 @@ export const SupplierPortalModule: React.FC = () => {
       if (poDiff !== 0) return poDiff;
       return a.itemIdx - b.itemIdx;
     });
-  }, [supplierPOs, rabItems, qualityControlRecords]);
+  }, [supplierPOs, rabItems, menuItems, qualityControlRecords, prepRecords, masterUnits]);
 
   // Available Delivery Target Days (Hari Target Kirim) for current tab
   const deliveryDateOptions = useMemo(() => {
@@ -571,7 +580,12 @@ export const SupplierPortalModule: React.FC = () => {
     });
   };
 
-  const formatReceivedTimeLabel = (rawTime: string, fallbackDeliveryDate: string, deliveryStatus: string) => {
+  const formatReceivedTimeLabel = (
+    rawTime: string,
+    _fallbackDeliveryDate: string,
+    _deliveryStatus: string,
+    qcStatus?: QCStatusPLOK
+  ) => {
     const trimmed = (rawTime || '').trim();
     if (trimmed) {
       const dateMatch = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?/.exec(trimmed);
@@ -581,10 +595,13 @@ export const SupplierPortalModule: React.FC = () => {
       }
       return trimmed;
     }
-    if (deliveryStatus === 'Dalam Pengiriman') {
-      return `Dalam Pengiriman (Target: ${formatIndonesianDate(fallbackDeliveryDate)})`;
+    if (qcStatus === 'Ditolak') {
+      return 'Ditolak QC (Belum Diterima)';
     }
-    return fallbackDeliveryDate ? formatIndonesianDate(fallbackDeliveryDate) : '-';
+    if (qcStatus === 'Perlu pemeriksaan ulang') {
+      return 'Karantina / Perlu Pemeriksaan Ulang';
+    }
+    return 'Belum Diterima di QC PLOK';
   };
 
   const handleReducePOQtySubmit = async (e: React.FormEvent) => {
@@ -632,7 +649,7 @@ export const SupplierPortalModule: React.FC = () => {
         deliveredAt: editDeliveredForm.deliveredAt,
         orderedQuantity: editDeliveredForm.orderedQuantity,
         deliveredQuantity: editDeliveredForm.deliveredQuantity,
-        qcPassedQuantity: editDeliveredForm.qcPassedQuantity,
+        damagedQuantity: editDeliveredForm.damagedQuantity,
         status: editDeliveredForm.status,
         notes: editDeliveredForm.notes,
       }
@@ -660,10 +677,15 @@ export const SupplierPortalModule: React.FC = () => {
         rows: deliveredRows.map((row, idx) => [
           String(idx + 1),
           `${row.it.itemName} (${row.po.poNumber})`,
-          formatReceivedTimeLabel(row.receivedTimeRaw, row.po.deliveryDate, row.itemDeliveryStatus),
+          formatReceivedTimeLabel(
+            row.receivedTimeRaw,
+            row.po.deliveryDate,
+            row.itemDeliveryStatus,
+            row.itemQCInfo.qcStatus
+          ),
           `${formatNumber(row.orderedQty)} ${row.it.unit}`,
           `${formatNumber(row.deliveredQty)} ${row.it.unit}`,
-          `${formatNumber(row.qcPassedQty)} ${row.it.unit}`,
+          `${formatNumber(row.prepDamagedQty)} ${row.it.unit}`,
           `${row.totalSelisih > 0 ? `+${formatNumber(row.totalSelisih)}` : formatNumber(row.totalSelisih)} ${row.it.unit}`,
           row.itemQCInfo.qcStatus,
         ]),
@@ -707,11 +729,12 @@ export const SupplierPortalModule: React.FC = () => {
         'Waktu Bahan dan Operasional diterima': formatReceivedTimeLabel(
           row.receivedTimeRaw,
           row.po.deliveryDate,
-          row.itemDeliveryStatus
+          row.itemDeliveryStatus,
+          row.itemQCInfo.qcStatus
         ),
         'Jumlah yang pesan': row.orderedQty,
         'Jumlah yang diterima': row.deliveredQty,
-        'Jumlah Hasil QC': row.qcPassedQty,
+        'Jumlah Hasil QC (Rusak Persiapan)': row.prepDamagedQty,
         'Total Selisih': row.totalSelisih,
         'Satuan': row.it.unit,
         'Status QC': row.itemQCInfo.qcStatus,
@@ -1046,7 +1069,10 @@ export const SupplierPortalModule: React.FC = () => {
         <div className="flex flex-nowrap sm:flex-wrap overflow-x-auto no-scrollbar items-center gap-1.5 pb-1 sm:pb-0">
           <button
             type="button"
-            onClick={() => setActiveTab('active_po')}
+            onClick={() => {
+              setActiveTab('active_po');
+              setStatusFilter('ALL');
+            }}
             className={`inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'active_po'
                 ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
@@ -1066,7 +1092,10 @@ export const SupplierPortalModule: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setActiveTab('delivered')}
+            onClick={() => {
+              setActiveTab('delivered');
+              setStatusFilter('ALL');
+            }}
             className={`inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'delivered'
                 ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
@@ -1086,7 +1115,10 @@ export const SupplierPortalModule: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setActiveTab('history')}
+            onClick={() => {
+              setActiveTab('history');
+              setStatusFilter('ALL');
+            }}
             className={`inline-flex items-center gap-2 py-2 px-3.5 rounded-lg text-xs font-semibold transition-all duration-200 ease-in-out whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-[#1E3A8A] text-white shadow-sm dark:bg-sky-600'
@@ -1144,21 +1176,26 @@ export const SupplierPortalModule: React.FC = () => {
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="ALL">Semua Status Pengiriman & QC</option>
-                  <option value="Menunggu Konfirmasi">Menunggu Konfirmasi</option>
-                  <option value="Dikonfirmasi Supplier">Dikonfirmasi Supplier</option>
-                  <option value="Sedang Dipersiapkan">Sedang Dipersiapkan</option>
-                  <option value="Dalam Pengiriman">Dalam Pengiriman</option>
-                  <option value="Telah Tiba di Gudang">Telah Tiba di Gudang</option>
-                  <option value="Ditolak Supplier">Ditolak Supplier</option>
-                  {activeTab === 'delivered' && (
+                  {activeTab === 'delivered' ? (
                     <>
+                      <option value="ALL">Semua Status QC / Diterima</option>
                       <option value="Diterima">QC: Diterima</option>
                       <option value="Diterima sebagian">QC: Diterima sebagian</option>
                       <option value="Lolos Penuh">QC: Lolos Penuh</option>
                       <option value="Lolos Sebagian">QC: Lolos Sebagian</option>
+                      <option value="Perlu pemeriksaan ulang">QC: Perlu pemeriksaan ulang</option>
                       <option value="Ditolak">QC: Ditolak</option>
-                      <option value="Belum QC">QC: Belum QC</option>
+                      <option value="Telah Tiba di Gudang">Telah Tiba di Gudang</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="ALL">Semua Status Pengiriman & QC</option>
+                      <option value="Menunggu Konfirmasi">Menunggu Konfirmasi</option>
+                      <option value="Dikonfirmasi Supplier">Dikonfirmasi Supplier</option>
+                      <option value="Sedang Dipersiapkan">Sedang Dipersiapkan</option>
+                      <option value="Dalam Pengiriman">Dalam Pengiriman</option>
+                      <option value="Telah Tiba di Gudang">Telah Tiba di Gudang</option>
+                      <option value="Ditolak Supplier">Ditolak Supplier</option>
                     </>
                   )}
                 </select>
@@ -1802,10 +1839,10 @@ export const SupplierPortalModule: React.FC = () => {
                     title="Belum ada Data Bahan & Operasional Terkirim"
                     description={
                       deliveryDateFilter !== 'ALL'
-                        ? `Tidak ada data bahan atau operasional terkirim dengan target kirim hari ${formatIndonesianDate(deliveryDateFilter)}.`
+                        ? `Tidak ada data bahan atau operasional berstatus telah di-QC/diterima untuk target kirim hari ${formatIndonesianDate(deliveryDateFilter)}.`
                         : searchQuery || statusFilter !== 'ALL'
                         ? 'Tidak ada data terkirim yang cocok dengan pencarian atau filter status Anda.'
-                        : 'Belum ada item PO bahan pangan maupun operasional yang dikirim atau diterima di gudang.'
+                        : 'Belum ada item PO bahan pangan maupun operasional yang berstatus telah di-QC atau diterima di gudang.'
                     }
                     actionLabel={
                       deliveryDateFilter !== 'ALL' || statusFilter !== 'ALL' || searchQuery.trim() !== ''
@@ -1867,9 +1904,11 @@ export const SupplierPortalModule: React.FC = () => {
                           linkedRab,
                           itemDeliveryStatus,
                           itemQCInfo,
+                          prepDamagedInfo,
+                          prepDamagedQty,
+                          netUsableQty,
                           orderedQty,
                           deliveredQty,
-                          qcPassedQty,
                           totalSelisih,
                           hasQCEvaluation,
                           receivedTimeRaw,
@@ -1878,15 +1917,22 @@ export const SupplierPortalModule: React.FC = () => {
                         const receivedTimeLabel = formatReceivedTimeLabel(
                           receivedTimeRaw,
                           po.deliveryDate,
-                          itemDeliveryStatus
+                          itemDeliveryStatus,
+                          itemQCInfo.qcStatus
                         );
                         const isShortage = totalSelisih < 0;
                         const isSurplus = totalSelisih > 0;
-                        const shortageAmount = Math.max(0, orderedQty - qcPassedQty);
+                        const shortageAmount =
+                          totalSelisih < 0
+                            ? Math.abs(totalSelisih)
+                            : Math.max(0, Math.round((orderedQty - netUsableQty) * 1000) / 1000);
+                        const nowLocal = new Date();
+                        const pad2 = (n: number) => String(n).padStart(2, '0');
+                        const localNowStamp = `${nowLocal.getFullYear()}-${pad2(nowLocal.getMonth() + 1)}-${pad2(nowLocal.getDate())} ${pad2(nowLocal.getHours())}:${pad2(nowLocal.getMinutes())}`;
                         const defaultStamp =
                           receivedTimeRaw && /^\d{4}-\d{2}-\d{2}/.test(receivedTimeRaw)
                             ? receivedTimeRaw.slice(0, 16)
-                            : new Date().toISOString().replace('T', ' ').slice(0, 16);
+                            : localNowStamp;
 
                         return (
                           <tr
@@ -1929,14 +1975,22 @@ export const SupplierPortalModule: React.FC = () => {
                               </div>
                             </td>
 
-                            {/* 3. Waktu Bahan dan Operasional diterima */}
+                            {/* 3. Waktu Bahan dan Operasional diterima (Dari Rekam Status QC & Stok PLOK) */}
                             <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 align-top text-slate-700 dark:text-slate-300">
-                              <div className="font-semibold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                              <div
+                                className={`font-semibold text-xs flex items-center gap-1.5 ${
+                                  receivedTimeRaw
+                                    ? 'text-slate-900 dark:text-slate-100'
+                                    : 'text-slate-500 italic dark:text-slate-400'
+                                }`}
+                              >
                                 <Calendar className="w-3.5 h-3.5 text-[#0D9488] shrink-0" />
                                 <span>{receivedTimeLabel}</span>
                               </div>
                               <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                Target Kirim H-1: {formatIndonesianDate(po.deliveryDate)}
+                                {receivedTimeRaw
+                                  ? `Status QC & Stok PLOK: ${itemQCInfo.qcStatus}`
+                                  : 'Menunggu perubahan status diterima pada QC PLOK'}
                               </div>
                             </td>
 
@@ -1955,21 +2009,36 @@ export const SupplierPortalModule: React.FC = () => {
                               </div>
                             </td>
 
-                            {/* 6. Jumlah Hasil QC */}
+                            {/* 6. Jumlah Hasil QC (Diambil dari Jumlah Rusak masing-masing bahan di Divisi Persiapan) */}
                             <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
-                              <div className="font-mono font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                                {formatNumber(qcPassedQty)} {it.unit}
+                              <div
+                                className={`font-mono font-bold tabular-nums ${
+                                  prepDamagedQty > 0
+                                    ? 'text-rose-700 dark:text-rose-400'
+                                    : 'text-emerald-700 dark:text-emerald-400'
+                                }`}
+                              >
+                                {formatNumber(prepDamagedQty)} {it.unit}
                               </div>
-                              {itemQCInfo.latestGrade && (
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                  {itemQCInfo.latestGrade}
-                                </div>
-                              )}
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 max-w-[190px] whitespace-normal leading-tight">
+                                {prepDamagedInfo.matchedEntries.length > 0 ? (
+                                  <span>
+                                    Rusak Persiapan:{' '}
+                                    {prepDamagedInfo.matchedEntries
+                                      .map(m => `${m.damagedName}`)
+                                      .join(', ')}
+                                  </span>
+                                ) : prepDamagedInfo.hasPrepRecordForDate ? (
+                                  <span>Nihil bahan rusak (Div. Persiapan)</span>
+                                ) : (
+                                  <span>Belum input inspeksi Div. Persiapan</span>
+                                )}
+                              </div>
                             </td>
 
                             {/* 7. Total Selisih */}
                             <td className="border border-slate-300 dark:border-slate-700 px-3 py-2.5 text-center align-top whitespace-nowrap">
-                              {hasQCEvaluation || deliveredQty > 0 ? (
+                              {hasQCEvaluation || deliveredQty > 0 || prepDamagedQty > 0 ? (
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span
                                     className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-extrabold ${
@@ -2032,20 +2101,24 @@ export const SupplierPortalModule: React.FC = () => {
                                   onClick={() => {
                                     setSelectedPO(po);
                                     setSelectedPOItem(it);
-                                    const suggestedNewQty =
-                                      qcPassedQty > 0
-                                        ? Math.min(orderedQty, qcPassedQty)
+                                    const usableBase =
+                                      netUsableQty > 0
+                                        ? Math.min(orderedQty, netUsableQty)
                                         : deliveredQty > 0
                                         ? Math.min(orderedQty, deliveredQty)
                                         : orderedQty;
+                                    const suggestedNewQty =
+                                      Math.round(Math.max(0, usableBase) * 1000) / 1000;
                                     setReducePOForm({
                                       currentOrderedQty: orderedQty,
-                                      qcPassedQty,
+                                      deliveredQty,
+                                      damagedQty: prepDamagedQty,
+                                      qcPassedQty: Math.max(0, netUsableQty),
                                       newOrderedQty: suggestedNewQty,
                                       unit: it.unit,
                                       notes:
                                         shortageAmount > 0
-                                          ? `Penyesuaian jumlah PO sesuai hasil penerimaan QC (${suggestedNewQty} ${it.unit}).`
+                                          ? `Penyesuaian jumlah PO sesuai jumlah terima & rusak persiapan (${suggestedNewQty} ${it.unit}).`
                                           : '',
                                     });
                                     setIsReducePOQtyModalOpen(true);
@@ -2094,7 +2167,7 @@ export const SupplierPortalModule: React.FC = () => {
                                       deliveredAt: defaultStamp,
                                       orderedQuantity: orderedQty,
                                       deliveredQuantity: deliveredQty,
-                                      qcPassedQuantity: qcPassedQty,
+                                      damagedQuantity: prepDamagedQty,
                                       unit: it.unit,
                                       status: itemQCInfo.qcStatus,
                                       notes: itemQCInfo.latestNotes || '',
@@ -2715,7 +2788,19 @@ export const SupplierPortalModule: React.FC = () => {
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600 dark:text-slate-400">Jumlah Hasil QC tercatat:</span>
+                <span className="text-slate-600 dark:text-slate-400">Jumlah yang diterima (QC PLOK):</span>
+                <span className="font-mono font-bold text-blue-800 dark:text-sky-300">
+                  {formatNumber(reducePOForm.deliveredQty)} {reducePOForm.unit}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600 dark:text-slate-400">Jumlah Hasil QC / Rusak (Div. Persiapan):</span>
+                <span className="font-mono font-bold text-rose-700 dark:text-rose-400">
+                  {formatNumber(reducePOForm.damagedQty)} {reducePOForm.unit}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-amber-200/70 dark:border-amber-800/50 pt-1">
+                <span className="text-slate-600 dark:text-slate-300 font-semibold">Bersih layak pakai:</span>
                 <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
                   {formatNumber(reducePOForm.qcPassedQty)} {reducePOForm.unit}
                 </span>
@@ -2968,7 +3053,7 @@ export const SupplierPortalModule: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Jumlah yang diterima ({editDeliveredForm.unit})
+                  Jumlah yang diterima (QC PLOK) ({editDeliveredForm.unit})
                 </label>
                 <input
                   type="number"
@@ -2980,11 +3065,6 @@ export const SupplierPortalModule: React.FC = () => {
                     setEditDeliveredForm(prev => ({
                       ...prev,
                       deliveredQuantity: nextVal,
-                      qcPassedQuantity:
-                        prev.status !== 'Ditolak' &&
-                        prev.qcPassedQuantity === prev.deliveredQuantity
-                          ? nextVal
-                          : prev.qcPassedQuantity,
                     }));
                   }}
                   required
@@ -2994,17 +3074,17 @@ export const SupplierPortalModule: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Jumlah Hasil QC ({editDeliveredForm.unit})
+                  Jumlah Hasil QC / Rusak Persiapan ({editDeliveredForm.unit})
                 </label>
                 <input
                   type="number"
                   step="any"
                   min={0}
-                  value={editDeliveredForm.qcPassedQuantity}
+                  value={editDeliveredForm.damagedQuantity}
                   onChange={(e) =>
                     setEditDeliveredForm({
                       ...editDeliveredForm,
-                      qcPassedQuantity: Math.max(0, Number(e.target.value) || 0),
+                      damagedQuantity: Math.max(0, Number(e.target.value) || 0),
                     })
                   }
                   required
@@ -3037,25 +3117,35 @@ export const SupplierPortalModule: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-300 font-semibold">
-                Total Selisih (Hasil QC − Dipesan):
-              </span>
-              <span
-                className={`font-mono font-extrabold ${
-                  editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity < 0
-                    ? 'text-rose-700 dark:text-rose-400'
-                    : editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity > 0
-                    ? 'text-sky-700 dark:text-sky-400'
-                    : 'text-emerald-700 dark:text-emerald-400'
-                }`}
-              >
-                {editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity > 0
-                  ? `+${formatNumber(editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity)}`
-                  : formatNumber(editDeliveredForm.qcPassedQuantity - editDeliveredForm.orderedQuantity)}{' '}
-                {editDeliveredForm.unit}
-              </span>
-            </div>
+            {(() => {
+              const netEditDiff =
+                Math.round(
+                  ((editDeliveredForm.status === 'Ditolak'
+                    ? 0
+                    : editDeliveredForm.deliveredQuantity - editDeliveredForm.damagedQuantity) -
+                    editDeliveredForm.orderedQuantity) *
+                    1000
+                ) / 1000;
+              return (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-300 font-semibold">
+                    Total Selisih ((Diterima − Rusak Persiapan) − Dipesan):
+                  </span>
+                  <span
+                    className={`font-mono font-extrabold ${
+                      netEditDiff < 0
+                        ? 'text-rose-700 dark:text-rose-400'
+                        : netEditDiff > 0
+                        ? 'text-sky-700 dark:text-sky-400'
+                        : 'text-emerald-700 dark:text-emerald-400'
+                    }`}
+                  >
+                    {netEditDiff > 0 ? `+${formatNumber(netEditDiff)}` : formatNumber(netEditDiff)}{' '}
+                    {editDeliveredForm.unit}
+                  </span>
+                </div>
+              );
+            })()}
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">

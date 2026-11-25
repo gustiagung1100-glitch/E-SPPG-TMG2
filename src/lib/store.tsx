@@ -107,7 +107,9 @@ import {
   defaultOmprengReturns,
   defaultFuelLogs,
   defaultWashingWasteRecords,
+  defaultFacilityTemperatures,
 } from './productionData';
+import { getDefaultDivisionOfficerName } from './volunteerUtils';
 import {
   defaultOutgoingDocuments,
   defaultIncomingLetters,
@@ -153,6 +155,10 @@ import {
   reconcileRABWithPurchaseOrders as reconcileRABWithPurchaseOrdersShared,
   reconcilePurchaseOrdersWithQC,
   reconcileInventoryFromQualityControl,
+  isQCAcceptedStatus,
+  isMatchingPrepDamagedMaterial,
+  resolvePOItemDistributionDate,
+  convertDamagedQuantityToPOUnit,
 } from './supplyChainSync';
 import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType, sanitizeFirestoreData } from './firebase';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
@@ -574,7 +580,8 @@ interface AppContextType {
       deliveredAt: string;
       orderedQuantity: number;
       deliveredQuantity: number;
-      qcPassedQuantity: number;
+      qcPassedQuantity?: number;
+      damagedQuantity?: number;
       status: QCStatusPLOK;
       notes?: string;
     }
@@ -1859,15 +1866,6 @@ const initialAuditLogs: AuditLog[] = [
   },
 ];
 
-const initialKitchenProgress: KitchenProgress = {
-  preparation: 100,
-  cooking: 100,
-  portioning: 85,
-  distribution: 70,
-  washing: 45,
-  tasteCheckDone: true,
-  temperatureLogged: true,
-};
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -2893,6 +2891,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return defaultPrepRecords;
   });
 
+  const prepRecordsRef = React.useRef<PreparationInspectionRecord[]>(prepRecords);
+  useEffect(() => {
+    prepRecordsRef.current = prepRecords;
+  }, [prepRecords]);
+
   const [cookingRecords, setCookingRecords] = useState<CookingInspectionRecord[]>(() => {
     try {
       const saved = localStorage.getItem('esppg_cooking_records');
@@ -3065,7 +3068,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  const [kitchenProgress, setKitchenProgress] = useState<KitchenProgress>(initialKitchenProgress);
+  const [kitchenProgressOverride, setKitchenProgressOverride] = useState<Partial<KitchenProgress> | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
       return localStorage.getItem('esppg_dark_mode') === 'true';
@@ -7563,7 +7566,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     // Record QC records per PO item so Warehouse Stock strictly flows through QC -> Inventory
-    const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const inspectedAt = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
     const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
     const createdQCs: QualityControlRecord[] = eligibleItems.map((it, idx) => ({
       id: `qc-${Date.now()}-${idx}`,
@@ -7583,6 +7588,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       inspectorName: currentUser.name,
       status: 'Diterima',
       inspectedAt,
+      acceptedStatusAt: inspectedAt,
       inventoryAdded: true,
     }));
 
@@ -8044,7 +8050,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Modul PLOK: Quality Control Handlers with Strict 4-Stage Pipeline Reconciliation (Menu -> RAB -> PO -> QC -> Stok Gudang)
   const addQualityControlRecord = async (qc: Omit<QualityControlRecord, 'id' | 'inspectedAt'>) => {
-    const inspectedAt = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const inspectedAt = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
     const uniqueSuffix = Math.random().toString(36).slice(2, 6);
     const differenceQuantity =
       qc.differenceQuantity !== undefined
@@ -8055,7 +8063,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       differenceQuantity,
       id: `qc-${Date.now()}-${uniqueSuffix}`,
       inspectedAt,
+      ...(isQCAcceptedStatus(qc.status)
+        ? { acceptedStatusAt: qc.acceptedStatusAt || inspectedAt }
+        : {}),
     };
+    if (!isQCAcceptedStatus(qc.status)) {
+      delete newQC.acceptedStatusAt;
+    }
 
     const nextQCs = [newQC, ...qualityControlRecordsRef.current];
     const nextPOs = reconcilePurchaseOrdersWithQC(purchaseOrdersRef.current, nextQCs);
@@ -8086,13 +8100,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateQualityControlRecord = async (id: string, qc: Partial<QualityControlRecord>) => {
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const nowStamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
     const nextQCs = qualityControlRecordsRef.current.map(r => {
       if (r.id !== id) return r;
-      const merged = { ...r, ...qc };
+      const merged: QualityControlRecord = { ...r, ...qc };
       const ordered = Number(merged.orderedQuantity || 0);
       const received = Number(merged.receivedQuantity || 0);
       merged.differenceQuantity =
         qc.differenceQuantity !== undefined ? qc.differenceQuantity : received - ordered;
+      if (qc.status !== undefined) {
+        if (isQCAcceptedStatus(qc.status)) {
+          if (qc.acceptedStatusAt) {
+            merged.acceptedStatusAt = qc.acceptedStatusAt;
+          } else if (r.status !== qc.status || !r.acceptedStatusAt) {
+            merged.acceptedStatusAt = nowStamp;
+          }
+        } else {
+          delete merged.acceptedStatusAt;
+        }
+      }
       return merged;
     });
     const nextPOs = reconcilePurchaseOrdersWithQC(purchaseOrdersRef.current, nextQCs);
@@ -8635,9 +8663,158 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast('success', 'Surat Diperbarui', 'Status surat telah dimutakhirkan.');
   };
 
-  // Kitchen Progress
+  // Kitchen Progress (otomatis terhitung real-time dari catatan 5 Divisi Produksi + Distribusi)
+  const kitchenProgress = React.useMemo<KitchenProgress>(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const allOpsDates = [
+      ...prepRecords.map(r => r.date),
+      ...cookingRecords.map(r => r.date),
+      ...portioningRecords.map(r => r.date),
+      ...distributionDeliveries.map(r => r.date),
+      ...distributionLogs.map(r => r.date),
+      ...washingWasteRecords.map(r => r.date),
+    ].filter(Boolean);
+
+    const activeDate = allOpsDates.includes(todayIso)
+      ? todayIso
+      : allOpsDates.sort().reverse()[0] || todayIso;
+
+    const dayPrep = prepRecords.filter(r => r.date === activeDate);
+    const dayCook = cookingRecords.filter(r => r.date === activeDate);
+    const dayPort = portioningRecords.filter(r => r.date === activeDate);
+    const dayDeliv = distributionDeliveries.filter(r => r.date === activeDate);
+    const dayLogs = distributionLogs.filter(r => r.date === activeDate);
+    const dayReturns = omprengReturns.filter(r => r.date === activeDate);
+    const dayWaste = washingWasteRecords.filter(r => r.date === activeDate);
+
+    // 1. Divisi Persiapan
+    let preparation = 0;
+    if (dayPrep.length > 0) {
+      const latestPrep = dayPrep[0];
+      const hasDamagedCheck = Boolean(
+        latestPrep.damagedVegetable?.name ||
+          latestPrep.damagedAnimal?.name ||
+          latestPrep.damagedFruit?.name ||
+          (latestPrep.additionalDamagedItems && latestPrep.additionalDamagedItems.length > 0)
+      );
+      const hasFacilityTemp = Boolean(latestPrep.facilityTemps);
+      preparation = 40 + (hasDamagedCheck ? 30 : 0) + (hasFacilityTemp ? 30 : 0);
+    }
+
+    // 2. Divisi Pengolahan
+    let cooking = 0;
+    if (dayCook.length > 0) {
+      const latestCook = dayCook[0];
+      const tempsList = latestCook.itemEntries?.length
+        ? latestCook.itemEntries.map(it => it.temp)
+        : [
+            latestCook.cookedFoods.rice.temp,
+            latestCook.cookedFoods.animalProtein.temp,
+            latestCook.cookedFoods.plantProtein.temp,
+            latestCook.cookedFoods.vegetable.temp,
+            latestCook.cookedFoods.fruit.temp,
+          ];
+      const validTempCount = tempsList.filter(t => typeof t === 'number' && Number.isFinite(t)).length;
+      const tempRatio = tempsList.length > 0 ? Math.min(1, validTempCount / tempsList.length) : 0;
+      const hasFacTemp = Boolean(latestCook.facilityTemps);
+      cooking = Math.min(100, Math.round(40 + tempRatio * 40 + (hasFacTemp ? 20 : 0)));
+    }
+
+    // 3. Divisi Pemorsian
+    let portioning = 0;
+    if (dayPort.length > 0) {
+      const latestPort = dayPort[0];
+      const hasWeights =
+        latestPort.smallPortionWeightGrams > 0 && latestPort.largePortionWeightGrams > 0;
+      const hasFoodTemps = Boolean(
+        latestPort.foodTemps &&
+          typeof latestPort.foodTemps.rice?.temp === 'number' &&
+          Number.isFinite(latestPort.foodTemps.rice.temp)
+      );
+      const hasPhotos = Boolean(latestPort.smallPortionPhoto || latestPort.largePortionPhoto);
+      portioning =
+        40 + (hasWeights ? 25 : 0) + (hasFoodTemps ? 20 : 0) + (hasPhotos ? 15 : 0);
+    }
+
+    // 4. Divisi Distribusi
+    const activeInstitutions = institutions.filter(i => i.isActive !== false);
+    const normalizeInstName = (name?: string) => (name || '').trim().toLowerCase();
+    const resolveStatusWeight = (status?: string) => {
+      if (status === 'Selesai Serah Terima') return 1;
+      if (status === 'Tiba di Lokasi') return 0.75;
+      if (status === 'Dalam Perjalanan') return 0.5;
+      return 0;
+    };
+
+    let distribution = 0;
+    if (activeInstitutions.length > 0) {
+      const weightSum = activeInstitutions.reduce((sum, inst) => {
+        const matchedDeliv = dayDeliv.find(
+          d =>
+            d.institutionId === inst.id ||
+            normalizeInstName(d.institutionName) === normalizeInstName(inst.name)
+        );
+        const matchedLog = dayLogs.find(
+          l =>
+            l.institutionId === inst.id ||
+            normalizeInstName(l.institutionName) === normalizeInstName(inst.name)
+        );
+        const status = matchedDeliv?.status || matchedLog?.status;
+        return sum + resolveStatusWeight(status);
+      }, 0);
+      distribution = Math.min(100, Math.round((weightSum / activeInstitutions.length) * 100));
+    } else if (dayDeliv.length > 0 || dayLogs.length > 0) {
+      const sourceList = dayDeliv.length > 0 ? dayDeliv : dayLogs;
+      const weightSum = sourceList.reduce((sum, item) => sum + resolveStatusWeight(item.status), 0);
+      distribution = Math.min(100, Math.round((weightSum / sourceList.length) * 100));
+    }
+
+    // 5. Divisi Cuci Ompreng & Food Waste
+    let washing = 0;
+    if (dayWaste.length > 0 || dayReturns.length > 0) {
+      const returnDenominator = Math.max(
+        1,
+        dayDeliv.length || dayLogs.length || activeInstitutions.length
+      );
+      const uniqueReturnInsts = new Set(
+        dayReturns.map(r => r.institutionId || normalizeInstName(r.institutionName))
+      );
+      const returnRatio = Math.min(1, uniqueReturnInsts.size / returnDenominator);
+      const wasteScore =
+        dayWaste.length > 0 ? (dayWaste.some(w => w.sterilizationChecked) ? 50 : 35) : 0;
+      washing = Math.min(100, Math.round(returnRatio * 50 + wasteScore));
+    }
+
+    const tasteCheckDone =
+      dayCook.length > 0 ||
+      dayDeliv.some(d => Boolean(d.picOrganolepticPhoto) || d.status === 'Selesai Serah Terima');
+    const temperatureLogged =
+      dayPrep.some(r => Boolean(r.facilityTemps)) || dayCook.length > 0 || dayPort.length > 0;
+
+    return {
+      preparation,
+      cooking,
+      portioning,
+      distribution,
+      washing,
+      tasteCheckDone,
+      temperatureLogged,
+      ...(kitchenProgressOverride || {}),
+    };
+  }, [
+    prepRecords,
+    cookingRecords,
+    portioningRecords,
+    distributionDeliveries,
+    distributionLogs,
+    omprengReturns,
+    washingWasteRecords,
+    institutions,
+    kitchenProgressOverride,
+  ]);
+
   const updateKitchenProgress = (progress: Partial<KitchenProgress>) => {
-    setKitchenProgress(prev => ({ ...prev, ...progress }));
+    setKitchenProgressOverride(prev => ({ ...(prev || {}), ...progress }));
     addToast('info', 'Progres Dapur Diperbarui', 'Checklist kesiapan produksi harian dimutakhirkan.');
   };
 
@@ -8647,13 +8824,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...rec,
       id: `prep-${Date.now()}`,
     };
-    setPrepRecords(prev => [newRec, ...prev]);
+    const nextRecords = [newRec, ...prepRecordsRef.current];
+    prepRecordsRef.current = nextRecords;
+    setPrepRecords(nextRecords);
     addToast('success', 'Data Persiapan Tersimpan', `Pemeriksaan bahan rusak dan suhu oleh ${rec.officerName} berhasil dicatat.`);
     await logAudit('CREATE', 'production', `Mencatat inspeksi bahan rusak & suhu Divisi Persiapan: ${rec.damagedVegetable.name}`);
   };
 
   const updatePrepRecord = async (id: string, update: Partial<PreparationInspectionRecord>) => {
-    setPrepRecords(prev => prev.map(r => (r.id === id ? { ...r, ...update } : r)));
+    const nextRecords = prepRecordsRef.current.map(r => (r.id === id ? { ...r, ...update } : r));
+    prepRecordsRef.current = nextRecords;
+    setPrepRecords(nextRecords);
     addToast('success', 'Laporan Persiapan Diperbarui', 'Pembaruan suhu & bukti foto Divisi Persiapan berhasil disimpan.');
     await logAudit('UPDATE', 'production', `Memperbarui laporan suhu/foto Divisi Persiapan (${id})`);
   };
@@ -9413,6 +9594,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .filter(isItemQC)
       .reduce((s, q) => s + (q.status === 'Ditolak' ? 0 : Number(q.receivedQuantity || 0)), 0);
 
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const nowStamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+
     const nextQCs = qualityControlRecordsRef.current.map(q => {
       if (!isItemQC(q)) return q;
       const diff = Number(q.receivedQuantity || 0) - safeNewQty;
@@ -9425,6 +9610,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         orderedQuantity: safeNewQty,
         differenceQuantity: totalQcReceived >= safeNewQty ? 0 : diff,
         status: shouldUpgradeToReceived ? ('Diterima' as const) : q.status,
+        ...(shouldUpgradeToReceived
+          ? { acceptedStatusAt: q.acceptedStatusAt || nowStamp }
+          : {}),
         notes: notes ? `${q.notes ? q.notes + ' | ' : ''}${notes}` : q.notes,
       };
     });
@@ -9492,8 +9680,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (targetIdx === -1) return;
 
     const targetItem = items[targetIdx];
-    const stamp =
-      options?.deliveredAt?.trim() || new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const fallbackStamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+    const stamp = options?.deliveredAt?.trim() || fallbackStamp;
     const orderedQty = Number(targetItem.quantity || 0);
 
     const isItemQC = (q: QualityControlRecord) =>
@@ -9534,6 +9724,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       inspectorName: `${currentUser.name} (${currentUser.role})`,
       status: isNowFulfilled ? 'Diterima' : 'Diterima sebagian',
       inspectedAt: stamp,
+      acceptedStatusAt: stamp,
       inventoryAdded: true,
     };
 
@@ -9546,6 +9737,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return {
           ...q,
           status: 'Diterima' as const,
+          acceptedStatusAt: stamp,
           differenceQuantity: 0,
         };
       }
@@ -9614,7 +9806,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deliveredAt: string;
       orderedQuantity: number;
       deliveredQuantity: number;
-      qcPassedQuantity: number;
+      qcPassedQuantity?: number;
+      damagedQuantity?: number;
       status: QCStatusPLOK;
       notes?: string;
     }
@@ -9629,27 +9822,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetItem = items[targetIdx];
     const safeOrderedQty = Math.max(0, Number(payload.orderedQuantity) || 0);
     const safeDeliveredQty = Math.max(0, Number(payload.deliveredQuantity) || 0);
-    const safeQcPassedQty = Math.max(0, Number(payload.qcPassedQuantity) || 0);
-    const stamp =
-      payload.deliveredAt.trim() || new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const hasDamagedPayload =
+      typeof payload.damagedQuantity === 'number' && Number.isFinite(payload.damagedQuantity);
+    const safeDamagedQty = hasDamagedPayload
+      ? Math.max(0, Number(payload.damagedQuantity) || 0)
+      : 0;
+    const now = new Date();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const fallbackStamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+    const stamp = payload.deliveredAt.trim() || fallbackStamp;
 
     const isItemQC = (q: QualityControlRecord) =>
       (q.poId === targetPO.id || (q.poNumber && q.poNumber === targetPO.poNumber)) &&
       isMatchingMaterialNameShared(q.itemName, itemMatch.itemName);
 
     const existingItemQCs = qualityControlRecordsRef.current.filter(isItemQC);
-    const prevQcRecorded = existingItemQCs.reduce(
-      (s, q) => s + Number(q.receivedQuantity || 0),
-      0
-    );
-    const effectiveQcReceivedQty =
-      payload.status === 'Ditolak'
-        ? safeDeliveredQty
-        : safeQcPassedQty !== prevQcRecorded
-        ? safeQcPassedQty
-        : safeDeliveredQty;
+    const effectiveQcReceivedQty = safeDeliveredQty;
     const effectivePassedQty =
       payload.status === 'Ditolak' ? 0 : effectiveQcReceivedQty;
+    const isAccepted = isQCAcceptedStatus(payload.status);
     const defaultExp = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
     let nextQCs: QualityControlRecord[];
@@ -9659,16 +9850,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .filter(q => !isItemQC(q) || q.id === primaryId)
         .map(q => {
           if (q.id !== primaryId) return q;
-          return {
+          const updated: QualityControlRecord = {
             ...q,
             orderedQuantity: safeOrderedQty,
             receivedQuantity: effectiveQcReceivedQty,
-            differenceQuantity: effectivePassedQty - safeOrderedQty,
+            differenceQuantity: effectivePassedQty - safeDamagedQty - safeOrderedQty,
             inspectedAt: stamp,
             status: payload.status,
             notes: payload.notes !== undefined ? payload.notes : q.notes,
             inventoryAdded: payload.status !== 'Ditolak' && effectivePassedQty > 0,
           };
+          if (isAccepted) {
+            updated.acceptedStatusAt = stamp;
+          } else {
+            delete updated.acceptedStatusAt;
+          }
+          return updated;
         });
     } else {
       const newQC: QualityControlRecord = {
@@ -9680,7 +9877,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         orderedQuantity: safeOrderedQty,
         unit: targetItem.unit || 'kg',
         receivedQuantity: effectiveQcReceivedQty,
-        differenceQuantity: effectivePassedQty - safeOrderedQty,
+        differenceQuantity: effectivePassedQty - safeDamagedQty - safeOrderedQty,
         condition: payload.status === 'Ditolak' ? 'Busuk/Tercemar' : 'Baik',
         qualityGrade:
           payload.status === 'Diterima sebagian' || payload.status === 'Lolos Sebagian'
@@ -9693,9 +9890,144 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         inspectorName: `${currentUser.name} (${currentUser.role})`,
         status: payload.status,
         inspectedAt: stamp,
+        ...(isAccepted ? { acceptedStatusAt: stamp } : {}),
         inventoryAdded: payload.status !== 'Ditolak' && effectivePassedQty > 0,
       };
       nextQCs = [newQC, ...qualityControlRecordsRef.current];
+    }
+
+    // Sinkronkan jumlah rusak per bahan ke Data Inspeksi Bahan Rusak Divisi Persiapan jika dikirimkan
+    if (hasDamagedPayload) {
+      const distDate = resolvePOItemDistributionDate(
+        targetItem,
+        targetPO,
+        rabItemsRef.current,
+        menuItems
+      );
+      const qcDateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(stamp);
+      const qcDate = qcDateMatch ? qcDateMatch[1] : '';
+      const candidateDates: string[] = [];
+      [distDate, qcDate, (targetPO.deliveryDate || '').trim()].forEach(d => {
+        if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !candidateDates.includes(d)) {
+          candidateDates.push(d);
+        }
+      });
+      const itemUnit = targetItem.unit || 'kg';
+      let updatedExistingPrep = false;
+
+      const nextPrepRecords = prepRecordsRef.current.map(rec => {
+        if (!candidateDates.includes(rec.date)) return rec;
+        let recModified = false;
+        const applySlot = (slot: typeof rec.damagedVegetable) => {
+          if (isMatchingPrepDamagedMaterial(slot.name, targetItem.itemName)) {
+            recModified = true;
+            updatedExistingPrep = true;
+            const convertedBack = convertDamagedQuantityToPOUnit(
+              safeDamagedQty,
+              itemUnit,
+              slot.unit || itemUnit,
+              masterUnits
+            );
+            return { ...slot, quantity: convertedBack };
+          }
+          return slot;
+        };
+
+        const nextVeg = applySlot(rec.damagedVegetable);
+        const nextAnimal = applySlot(rec.damagedAnimal);
+        const nextFruit = applySlot(rec.damagedFruit);
+        const nextExtra = (rec.additionalDamagedItems || []).map(extra => {
+          if (isMatchingPrepDamagedMaterial(extra.name, targetItem.itemName)) {
+            recModified = true;
+            updatedExistingPrep = true;
+            const convertedBack = convertDamagedQuantityToPOUnit(
+              safeDamagedQty,
+              itemUnit,
+              extra.unit || itemUnit,
+              masterUnits
+            );
+            return { ...extra, quantity: convertedBack };
+          }
+          return extra;
+        });
+
+        if (!recModified) return rec;
+        return {
+          ...rec,
+          damagedVegetable: nextVeg,
+          damagedAnimal: nextAnimal,
+          damagedFruit: nextFruit,
+          ...(nextExtra.length > 0 ? { additionalDamagedItems: nextExtra } : {}),
+        };
+      });
+
+      if (updatedExistingPrep) {
+        prepRecordsRef.current = nextPrepRecords;
+        setPrepRecords(nextPrepRecords);
+      } else if (safeDamagedQty > 0) {
+        const targetDate = candidateDates[0] || new Date().toISOString().slice(0, 10);
+        const targetIdxPrep = nextPrepRecords.findIndex(r => r.date === targetDate);
+        if (targetIdxPrep >= 0) {
+          const targetRec = nextPrepRecords[targetIdxPrep];
+          const updatedRec: PreparationInspectionRecord = {
+            ...targetRec,
+            additionalDamagedItems: [
+              ...(targetRec.additionalDamagedItems || []),
+              {
+                name: targetItem.itemName,
+                quantity: safeDamagedQty,
+                unit: itemUnit,
+                temp: 18,
+              },
+            ],
+          };
+          const patched = nextPrepRecords.map((r, i) => (i === targetIdxPrep ? updatedRec : r));
+          prepRecordsRef.current = patched;
+          setPrepRecords(patched);
+        } else {
+          const newPrepRec: PreparationInspectionRecord = {
+            id: `prep-${Date.now()}`,
+            date: targetDate,
+            time: '04:30 WIB',
+            officerName: getDefaultDivisionOfficerName(
+              masterVolunteers,
+              'Persiapan',
+              currentUser.name
+            ),
+            damagedVegetable: {
+              name: '-',
+              quantity: 0,
+              unit: 'kg',
+              temp: 18,
+            },
+            damagedAnimal: {
+              name: '-',
+              quantity: 0,
+              unit: 'kg',
+              temp: 4,
+            },
+            damagedFruit: {
+              name: '-',
+              quantity: 0,
+              unit: 'kg',
+              temp: 18,
+            },
+            additionalDamagedItems: [
+              {
+                name: targetItem.itemName,
+                quantity: safeDamagedQty,
+                unit: itemUnit,
+                temp: 18,
+              },
+            ],
+            facilityTemps: { ...defaultFacilityTemperatures },
+            notes: `Pembaruan bahan rusak dari Portal Mitra (${targetPO.poNumber}).`,
+          };
+          const added = [newPrepRec, ...nextPrepRecords];
+          prepRecordsRef.current = added;
+          setPrepRecords(added);
+        }
+      }
     }
 
     const draftPOs = purchaseOrdersRef.current.map(po => {
@@ -9756,12 +10088,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast(
       'success',
       'Data Terkirim Diperbarui',
-      `Data pengiriman & QC item ${targetItem.itemName} berhasil diperbarui.`
+      `Data pengiriman, QC & inspeksi bahan rusak item ${targetItem.itemName} berhasil diperbarui.`
     );
     await logAudit(
       'UPDATE',
       'procurement',
-      `Memperbarui data terkirim item [${targetItem.itemName}] pada PO ${targetPO.poNumber} (Pesan: ${safeOrderedQty}, Terima: ${safeDeliveredQty}, QC: ${safeQcPassedQty})`
+      `Memperbarui data terkirim item [${targetItem.itemName}] pada PO ${targetPO.poNumber} (Pesan: ${safeOrderedQty}, Terima: ${safeDeliveredQty}, Rusak/Hasil QC: ${safeDamagedQty})`
     );
   };
 

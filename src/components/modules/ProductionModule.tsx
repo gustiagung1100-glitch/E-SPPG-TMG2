@@ -27,6 +27,7 @@ import { resolveMenuGrammages } from '../../lib/plogData';
 import {
   CookingInspectionRecord,
   CookingItemDetail,
+  DamagedMaterialItem,
   DistributionDeliveryRecord,
   FacilityTemperatures,
   MenuItem,
@@ -108,6 +109,9 @@ export const ProductionModule: React.FC = () => {
     beneficiaryAttendance,
     masterVolunteers,
     masterUnits,
+    masterBahan,
+    inventory,
+    purchaseOrders,
     menuItems,
     menuIngredientsMap,
     distributionLogs,
@@ -117,6 +121,23 @@ export const ProductionModule: React.FC = () => {
     addToast,
     dynamicFormSchemas,
   } = useApp();
+
+  const prepMaterialSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    const pushName = (raw: string | undefined) => {
+      const clean = (raw || '').trim();
+      if (!clean || clean === '-') return;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      names.push(clean);
+    };
+    purchaseOrders.forEach(po => (po.items || []).forEach(it => pushName(it.itemName)));
+    masterBahan.forEach(mb => pushName(mb.name));
+    inventory.forEach(inv => pushName(inv.name));
+    return names;
+  }, [purchaseOrders, masterBahan, inventory]);
 
   const prepVolunteerOptions = useMemo(
     () => getDivisionOfficerSelectOptions(masterVolunteers, 'Persiapan'),
@@ -192,6 +213,7 @@ export const ProductionModule: React.FC = () => {
     fruitUnit: 'kg',
     fruitTemp: 19.5,
     fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    additionalDamagedItems: [] as DamagedMaterialItem[],
     facilityTemps: { ...defaultFacilityTemperatures } as FacilityTemperatures,
     notes: 'Pembersihan dan sortir bahan segar batch subuh.',
   });
@@ -202,6 +224,7 @@ export const ProductionModule: React.FC = () => {
       ...f,
       date: new Date().toISOString().slice(0, 10),
       officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Persiapan', f.officerName),
+      additionalDamagedItems: [],
       facilityTemps: { ...defaultFacilityTemperatures },
     }));
     setIsPrepModalOpen(true);
@@ -228,6 +251,7 @@ export const ProductionModule: React.FC = () => {
       fruitUnit: rec.damagedFruit.unit,
       fruitTemp: rec.damagedFruit.temp,
       fruitPhoto: rec.damagedFruit.photoUrl || '',
+      additionalDamagedItems: (rec.additionalDamagedItems || []).map(item => ({ ...item })),
       facilityTemps: {
         ...defaultFacilityTemperatures,
         ...(rec.facilityTemps || {}),
@@ -239,7 +263,17 @@ export const ProductionModule: React.FC = () => {
 
   const handleSavePrep = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
+    const cleanedExtras: DamagedMaterialItem[] = (prepForm.additionalDamagedItems || [])
+      .filter(it => (it.name || '').trim() !== '' || Number(it.quantity || 0) > 0)
+      .map(it => ({
+        name: (it.name || '').trim() || '-',
+        quantity: Math.max(0, Number(it.quantity) || 0),
+        unit: it.unit || 'kg',
+        temp: Number(it.temp) || 0,
+        ...(it.photoUrl ? { photoUrl: it.photoUrl } : {}),
+      }));
+
+    const payload: Omit<PreparationInspectionRecord, 'id'> = {
       date: prepForm.date,
       time: prepForm.time,
       officerName: prepForm.officerName,
@@ -248,22 +282,23 @@ export const ProductionModule: React.FC = () => {
         quantity: Number(prepForm.vegQty),
         unit: prepForm.vegUnit,
         temp: Number(prepForm.vegTemp),
-        photoUrl: prepForm.vegPhoto,
+        ...(prepForm.vegPhoto ? { photoUrl: prepForm.vegPhoto } : {}),
       },
       damagedAnimal: {
         name: prepForm.animalName,
         quantity: Number(prepForm.animalQty),
         unit: prepForm.animalUnit,
         temp: Number(prepForm.animalTemp),
-        photoUrl: prepForm.animalPhoto,
+        ...(prepForm.animalPhoto ? { photoUrl: prepForm.animalPhoto } : {}),
       },
       damagedFruit: {
         name: prepForm.fruitName,
         quantity: Number(prepForm.fruitQty),
         unit: prepForm.fruitUnit,
         temp: Number(prepForm.fruitTemp),
-        photoUrl: prepForm.fruitPhoto,
+        ...(prepForm.fruitPhoto ? { photoUrl: prepForm.fruitPhoto } : {}),
       },
+      ...(cleanedExtras.length > 0 ? { additionalDamagedItems: cleanedExtras } : {}),
       facilityTemps: prepForm.facilityTemps,
       notes: prepForm.notes,
     };
@@ -1547,6 +1582,35 @@ export const ProductionModule: React.FC = () => {
             )}
           </div>
 
+          {prepRecords[0]?.additionalDamagedItems && prepRecords[0].additionalDamagedItems.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <div className="text-xs font-bold text-slate-800 dark:text-white mb-2.5 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span>Bahan Rusak Tambahan Per Item</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {prepRecords[0].additionalDamagedItems.map((extra, idx) => (
+                  <div
+                    key={`extra-card-${idx}`}
+                    className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">
+                        {extra.name}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                        {extra.temp}°C
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                      Jumlah Rusak: <strong>{extra.quantity} {extra.unit}</strong>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Suhu Ruang (Suhu, Kelembapan, Waktu & Foto) dan Suhu Freezer 1-2 & Chiller 1-4 (Suhu, Waktu & Foto) */}
           {prepRecords[0] && (
             <FacilityTempReportPanel
@@ -1580,31 +1644,50 @@ export const ProductionModule: React.FC = () => {
               <span>Log Riwayat Pemeriksaan Divisi Persiapan</span>
             </div>
             <div className="divide-y divide-slate-200 dark:divide-slate-800">
-              {prepRecords.map(r => (
-                <div key={r.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900 dark:text-white">{r.date}</span>
-                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                          {r.time}
-                        </span>
-                        <span className="text-xs text-slate-500">Oleh: <strong>{r.officerName}</strong></span>
+              {prepRecords.map(r => {
+                const extrasTotal = (r.additionalDamagedItems || []).reduce(
+                  (s, ex) => s + Number(ex.quantity || 0),
+                  0
+                );
+                return (
+                  <div key={r.id} className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-slate-900 dark:text-white">{r.date}</span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                            {r.time}
+                          </span>
+                          <span className="text-xs text-slate-500">Oleh: <strong>{r.officerName}</strong></span>
+                          <button
+                            type="button"
+                            onClick={() => openEditPrepModal(r)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[11px] font-semibold text-blue-900 dark:text-sky-300"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 italic">
+                          "{r.notes}"
+                        </p>
                       </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 italic">
-                        "{r.notes}"
-                      </p>
-                    </div>
 
-                    <div className="text-xs text-slate-500 space-y-0.5 sm:text-right">
-                      <div>Rusak: Sayur {r.damagedVegetable.quantity}kg • Hewani {r.damagedAnimal.quantity}kg • Buah {r.damagedFruit.quantity}kg</div>
-                      <div className="font-mono text-[11px] text-amber-700 dark:text-amber-400">
-                        Total Rijek: {(r.damagedVegetable.quantity + r.damagedAnimal.quantity + r.damagedFruit.quantity).toFixed(1)} kg
+                      <div className="text-xs text-slate-500 space-y-0.5 sm:text-right">
+                        <div>
+                          Rusak: Sayur {r.damagedVegetable.quantity} {r.damagedVegetable.unit} • Hewani {r.damagedAnimal.quantity} {r.damagedAnimal.unit} • Buah {r.damagedFruit.quantity} {r.damagedFruit.unit}
+                          {r.additionalDamagedItems && r.additionalDamagedItems.length > 0
+                            ? ` • Tambahan (${r.additionalDamagedItems.length} item): ${extrasTotal}`
+                            : ''}
+                        </div>
+                        <div className="font-mono text-[11px] text-amber-700 dark:text-amber-400">
+                          Total Rijek: {(r.damagedVegetable.quantity + r.damagedAnimal.quantity + r.damagedFruit.quantity + extrasTotal).toFixed(1)}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -2719,12 +2802,40 @@ export const ProductionModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Bahan Rusak 3 Kategori */}
+            {/* Bahan Rusak 3 Kategori + Tambahan Per Item */}
             <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
-              <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Data & Foto Bahan Rusak (Sayur, Lauk Hewani, Buah)
-              </span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  Data & Foto Bahan Rusak (Sayur, Lauk Hewani, Buah & Bahan Lain)
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPrepForm(f => ({
+                      ...f,
+                      additionalDamagedItems: [
+                        ...(f.additionalDamagedItems || []),
+                        {
+                          name: '',
+                          quantity: 0,
+                          unit: 'kg',
+                          temp: 18,
+                        },
+                      ],
+                    }))
+                  }
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Tambah Bahan Rusak</span>
+                </button>
+              </div>
+              <datalist id="prep-po-material-options">
+                {prepMaterialSuggestions.map(name => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
 
               {/* Sayur */}
               <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end">
@@ -2732,6 +2843,7 @@ export const ProductionModule: React.FC = () => {
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Sayur Rusak</label>
                   <input
                     type="text"
+                    list="prep-po-material-options"
                     value={prepForm.vegName}
                     onChange={e => setPrepForm(f => ({ ...f, vegName: e.target.value }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -2789,6 +2901,7 @@ export const ProductionModule: React.FC = () => {
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Hewani Rusak/Trimming</label>
                   <input
                     type="text"
+                    list="prep-po-material-options"
                     value={prepForm.animalName}
                     onChange={e => setPrepForm(f => ({ ...f, animalName: e.target.value }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -2846,6 +2959,7 @@ export const ProductionModule: React.FC = () => {
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Nama Buah Rusak/Memar</label>
                   <input
                     type="text"
+                    list="prep-po-material-options"
                     value={prepForm.fruitName}
                     onChange={e => setPrepForm(f => ({ ...f, fruitName: e.target.value }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
@@ -2896,6 +3010,127 @@ export const ProductionModule: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* Bahan Rusak Tambahan Per Item */}
+              {(prepForm.additionalDamagedItems || []).map((extra, extraIdx) => (
+                <div
+                  key={`extra-damaged-input-${extraIdx}`}
+                  className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end pt-2 border-t border-slate-200 dark:border-slate-700"
+                >
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">
+                      Nama Bahan Rusak Tambahan #{extraIdx + 1}
+                    </label>
+                    <input
+                      type="text"
+                      list="prep-po-material-options"
+                      placeholder="Pilih / ketik nama bahan..."
+                      value={extra.name}
+                      onChange={e =>
+                        setPrepForm(f => ({
+                          ...f,
+                          additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
+                            i === extraIdx ? { ...it, name: e.target.value } : it
+                          ),
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      value={extra.quantity}
+                      onChange={e =>
+                        setPrepForm(f => ({
+                          ...f,
+                          additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
+                            i === extraIdx ? { ...it, quantity: Number(e.target.value) } : it
+                          ),
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Satuan</label>
+                    <select
+                      value={extra.unit}
+                      onChange={e =>
+                        setPrepForm(f => ({
+                          ...f,
+                          additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
+                            i === extraIdx ? { ...it, unit: e.target.value } : it
+                          ),
+                        }))
+                      }
+                      className="w-full px-2 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-semibold"
+                    >
+                      {masterUnits.map(u => (
+                        <option key={u.id} value={u.code}>{u.code}</option>
+                      ))}
+                      {extra.unit && !masterUnits.some(u => u.code === extra.unit) && (
+                        <option value={extra.unit}>{extra.unit}</option>
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={extra.temp}
+                      onChange={e =>
+                        setPrepForm(f => ({
+                          ...f,
+                          additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
+                            i === extraIdx ? { ...it, temp: Number(e.target.value) } : it
+                          ),
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1">
+                      <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Foto</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e =>
+                          handleFileUpload(e, url =>
+                            setPrepForm(f => ({
+                              ...f,
+                              additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
+                                i === extraIdx ? { ...it, photoUrl: url } : it
+                              ),
+                            }))
+                          )
+                        }
+                        className="w-full text-[10px]"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPrepForm(f => ({
+                          ...f,
+                          additionalDamagedItems: (f.additionalDamagedItems || []).filter(
+                            (_, i) => i !== extraIdx
+                          ),
+                        }))
+                      }
+                      title="Hapus baris bahan rusak"
+                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Input Data & Upload Foto Suhu Ruang (Suhu, Kelembapan, Waktu) + Freezer 1-2 & Chiller 1-4 (Suhu, Waktu) */}
