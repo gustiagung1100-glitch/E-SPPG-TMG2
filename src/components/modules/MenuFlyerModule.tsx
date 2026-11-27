@@ -10,7 +10,9 @@ import {
 import { defaultNutritionTarget } from '../../lib/plogData';
 import { resolveRecipeIngredientFormula } from '../../lib/supplyChainSync';
 import { formatIndonesianDate, triggerPrint } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import { ClassicTimeInput } from '../common/ClassicTimeInput';
+import { NumericInput } from '../common/NumericInput';
 import { toPng } from 'html-to-image';
 import {
   Download,
@@ -286,12 +288,12 @@ export const MenuFlyerModule: React.FC = () => {
   const [customLargeCount, setCustomLargeCount] = useState<string>('');
 
   const displayedSmallPortions =
-    customSmallCount.trim() !== '' && Number.isFinite(Number(customSmallCount))
-      ? Number(customSmallCount)
+    customSmallCount.trim() !== ''
+      ? toNonNegativeNumber(customSmallCount, institutionTotals.small)
       : institutionTotals.small;
   const displayedLargePortions =
-    customLargeCount.trim() !== '' && Number.isFinite(Number(customLargeCount))
-      ? Number(customLargeCount)
+    customLargeCount.trim() !== ''
+      ? toNonNegativeNumber(customLargeCount, institutionTotals.large)
       : institutionTotals.large;
 
   const [isDownloading, setIsDownloading] = useState(false);
@@ -1160,23 +1162,27 @@ ${largeLines}
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-[10px] text-slate-500 mb-0.5">Porsi Kecil</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
+                    allowEmpty
                     placeholder={String(institutionTotals.small)}
                     value={customSmallCount}
-                    onChange={e => setCustomSmallCount(e.target.value)}
+                    onOptionalValueChange={val =>
+                      setCustomSmallCount(val === undefined ? '' : String(val))
+                    }
                     className="w-full text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] text-slate-500 mb-0.5">Porsi Besar</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
+                    allowEmpty
                     placeholder={String(institutionTotals.large)}
                     value={customLargeCount}
-                    onChange={e => setCustomLargeCount(e.target.value)}
+                    onOptionalValueChange={val =>
+                      setCustomLargeCount(val === undefined ? '' : String(val))
+                    }
                     className="w-full text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-slate-900 dark:text-white"
                   />
                 </div>

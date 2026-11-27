@@ -565,7 +565,7 @@ export async function recordAuditLog(
       affectedDocumentId: affectedDocId,
     };
 
-    await setDoc(logRef, auditEntry);
+    await setDoc(logRef, sanitizeFirestoreData(auditEntry));
   } catch (error) {
     console.warn('Gagal mencatat audit log:', error);
   }

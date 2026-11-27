@@ -3,7 +3,9 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { NumericInput } from '../common/NumericInput';
 import { exportTableToPDF, exportToExcel, formatRupiah, formatNumber, triggerPrint } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import { defaultFoodCompositions } from '../../lib/plogData';
 import {
   buildMasterUnitSelectOptions,
@@ -184,7 +186,9 @@ export const MasterDataModule: React.FC = () => {
   const [calcInputUnitQty, setCalcInputUnitQty] = useState<number>(3);
 
   const selectedConv = materialConversions.find(c => c.materialName === calcMaterial) || materialConversions[0];
-  const calculatedTotalGrams = selectedConv ? calcInputUnitQty * selectedConv.gramsPerUnit : 0;
+  const calculatedTotalGrams = selectedConv
+    ? toNonNegativeNumber(calcInputUnitQty, 0) * toNonNegativeNumber(selectedConv.gramsPerUnit, 0)
+    : 0;
   const calculatedTotalKg = (calculatedTotalGrams / 1000).toFixed(2);
   const [isBahanUnitManual, setIsBahanUnitManual] = useState(false);
 
@@ -308,14 +312,27 @@ export const MasterDataModule: React.FC = () => {
   const handleSaveModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (modalType === 'penerima') {
-      const small = Number(formInst.smallPortions);
-      const large = Number(formInst.largePortions);
+      const small = toNonNegativeNumber(formInst.smallPortions, 0);
+      const large = toNonNegativeNumber(formInst.largePortions, 0);
       const payload = { ...formInst, smallPortions: small, largePortions: large, totalPortions: small + large };
       if (editItem) await updateInstitution(editItem.id, payload);
       else await addInstitution(payload);
     } else if (modalType === 'bahan') {
-      if (editItem) await updateMasterBahan(editItem.id, formBahan);
-      else await addMasterBahan(formBahan);
+      const cleanBahan: Omit<MasterBahan, 'id'> = {
+        ...formBahan,
+        referencePrice: toNonNegativeNumber(formBahan.referencePrice, 0),
+        actualPrice: toNonNegativeNumber(formBahan.actualPrice, 0),
+        minimumStock: toNonNegativeNumber(formBahan.minimumStock, 0),
+        calories100g: toNonNegativeNumber(formBahan.calories100g, 0),
+        protein100g: toNonNegativeNumber(formBahan.protein100g, 0),
+        fat100g: toNonNegativeNumber(formBahan.fat100g, 0),
+        carb100g: toNonNegativeNumber(formBahan.carb100g, 0),
+        fiber100g: toNonNegativeNumber(formBahan.fiber100g, 0),
+        calcium100g: toNonNegativeNumber(formBahan.calcium100g, 0),
+        iron100g: toNonNegativeNumber(formBahan.iron100g, 0),
+      };
+      if (editItem) await updateMasterBahan(editItem.id, cleanBahan);
+      else await addMasterBahan(cleanBahan);
     } else if (modalType === 'supplier') {
       if (editItem) await updateMasterSupplier(editItem.id, formSupplier);
       else await addMasterSupplier(formSupplier);
@@ -324,19 +341,28 @@ export const MasterDataModule: React.FC = () => {
       else await addMasterVolunteer(formVolunteer);
     } else if (modalType === 'satuan') {
       const cleanCode = formUnit.code.trim();
+      const cleanUnit: Omit<MasterUnit, 'id'> = {
+        ...formUnit,
+        code: cleanCode,
+        conversionToBase: Math.max(0.0001, toNonNegativeNumber(formUnit.conversionToBase, 1)),
+      };
       const duplicate = masterUnits.some(
         u => u.code.trim().toLowerCase() === cleanCode.toLowerCase() && (!editItem || u.id !== editItem.id)
       );
       if (!cleanCode || duplicate) {
-        if (editItem) await updateMasterUnit(editItem.id, formUnit);
-        else await addMasterUnit(formUnit);
+        if (editItem) await updateMasterUnit(editItem.id, cleanUnit);
+        else await addMasterUnit(cleanUnit);
         return;
       }
-      if (editItem) await updateMasterUnit(editItem.id, formUnit);
-      else await addMasterUnit(formUnit);
+      if (editItem) await updateMasterUnit(editItem.id, cleanUnit);
+      else await addMasterUnit(cleanUnit);
     } else if (modalType === 'konversi') {
-      if (editItem) await updateMaterialConversion(editItem.materialName, formConv);
-      else await addMaterialConversion(formConv);
+      const cleanConv: MaterialDimensionConversion = {
+        ...formConv,
+        gramsPerUnit: Math.max(1, toNonNegativeNumber(formConv.gramsPerUnit, 1)),
+      };
+      if (editItem) await updateMaterialConversion(editItem.materialName, cleanConv);
+      else await addMaterialConversion(cleanConv);
     }
     setIsModalOpen(false);
   };
@@ -929,12 +955,10 @@ export const MasterDataModule: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
                   Jumlah Satuan ({selectedConv?.unit || 'unit'})
                 </label>
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.5"
+                <NumericInput
+                  min={0.1}
                   value={calcInputUnitQty}
-                  onChange={e => setCalcInputUnitQty(Number(e.target.value))}
+                  onValueChange={val => setCalcInputUnitQty(val)}
                   className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white font-mono font-bold"
                 />
               </div>
@@ -1267,21 +1291,19 @@ export const MasterDataModule: React.FC = () => {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Porsi Kecil (PAUD/SD 1-3)</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumericInput
+                    min={0}
                     value={formInst.smallPortions}
-                    onChange={e => setFormInst({ ...formInst, smallPortions: Number(e.target.value) })}
+                    onValueChange={val => setFormInst({ ...formInst, smallPortions: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Porsi Besar (SD 4-6, SMP, SMA)</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumericInput
+                    min={0}
                     value={formInst.largePortions}
-                    onChange={e => setFormInst({ ...formInst, largePortions: Number(e.target.value) })}
+                    onValueChange={val => setFormInst({ ...formInst, largePortions: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
                   />
                 </div>
@@ -1290,7 +1312,7 @@ export const MasterDataModule: React.FC = () => {
                   <input
                     type="text"
                     disabled
-                    value={Number(formInst.smallPortions) + Number(formInst.largePortions)}
+                    value={toNonNegativeNumber(formInst.smallPortions, 0) + toNonNegativeNumber(formInst.largePortions, 0)}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-100 dark:bg-slate-900 font-mono font-bold"
                   />
                 </div>
@@ -1399,28 +1421,28 @@ export const MasterDataModule: React.FC = () => {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Harga Acuan (Rp) *</label>
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={formBahan.referencePrice}
-                    onChange={e => setFormBahan({ ...formBahan, referencePrice: Number(e.target.value) })}
+                    onValueChange={val => setFormBahan({ ...formBahan, referencePrice: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Harga Aktual Pasar (Rp) *</label>
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={formBahan.actualPrice}
-                    onChange={e => setFormBahan({ ...formBahan, actualPrice: Number(e.target.value) })}
+                    onValueChange={val => setFormBahan({ ...formBahan, actualPrice: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Stok Minimum *</label>
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={formBahan.minimumStock}
-                    onChange={e => setFormBahan({ ...formBahan, minimumStock: Number(e.target.value) })}
+                    onValueChange={val => setFormBahan({ ...formBahan, minimumStock: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-rose-600 font-bold"
                   />
                 </div>
@@ -1432,50 +1454,46 @@ export const MasterDataModule: React.FC = () => {
                 <div className="grid grid-cols-5 gap-2 text-xs">
                   <div>
                     <label className="text-[10px] text-slate-400 block">Kalori (kkal)</label>
-                    <input
-                      type="number"
+                    <NumericInput
+                      min={0}
                       value={formBahan.calories100g}
-                      onChange={e => setFormBahan({ ...formBahan, calories100g: Number(e.target.value) })}
+                      onValueChange={val => setFormBahan({ ...formBahan, calories100g: val })}
                       className="w-full px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 font-mono"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 block">Protein (g)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
+                      min={0}
                       value={formBahan.protein100g}
-                      onChange={e => setFormBahan({ ...formBahan, protein100g: Number(e.target.value) })}
+                      onValueChange={val => setFormBahan({ ...formBahan, protein100g: val })}
                       className="w-full px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 font-mono"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 block">Lemak (g)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
+                      min={0}
                       value={formBahan.fat100g}
-                      onChange={e => setFormBahan({ ...formBahan, fat100g: Number(e.target.value) })}
+                      onValueChange={val => setFormBahan({ ...formBahan, fat100g: val })}
                       className="w-full px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 font-mono"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 block">Karbo (g)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
+                      min={0}
                       value={formBahan.carb100g}
-                      onChange={e => setFormBahan({ ...formBahan, carb100g: Number(e.target.value) })}
+                      onValueChange={val => setFormBahan({ ...formBahan, carb100g: val })}
                       className="w-full px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 font-mono"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] text-slate-400 block">Serat (g)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
+                      min={0}
                       value={formBahan.fiber100g}
-                      onChange={e => setFormBahan({ ...formBahan, fiber100g: Number(e.target.value) })}
+                      onValueChange={val => setFormBahan({ ...formBahan, fiber100g: val })}
                       className="w-full px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 font-mono"
                     />
                   </div>
@@ -1732,14 +1750,12 @@ export const MasterDataModule: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Konversi ke {formUnit.baseUnit} *
                   </label>
-                  <input
-                    type="number"
-                    min="0.0001"
-                    step="any"
+                  <NumericInput
+                    min={0.0001}
                     required
                     value={formUnit.conversionToBase}
-                    onChange={e =>
-                      setFormUnit({ ...formUnit, conversionToBase: Number(e.target.value) })
+                    onValueChange={val =>
+                      setFormUnit({ ...formUnit, conversionToBase: val })
                     }
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold text-emerald-700 dark:text-emerald-400"
                   />
@@ -1757,7 +1773,7 @@ export const MasterDataModule: React.FC = () => {
                   <span>Satuan berdimensi / kemasan (bisa dipetakan berat per komoditas)</span>
                 </label>
                 <span className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-900 dark:text-sky-300 font-mono font-bold">
-                  1 {formUnit.code.trim() || '?'} = {formatNumber(formUnit.conversionToBase || 0)} {formUnit.baseUnit}
+                  1 {formUnit.code.trim() || '?'} = {formatNumber(toNonNegativeNumber(formUnit.conversionToBase, 0))} {formUnit.baseUnit}
                 </span>
               </div>
             </div>
@@ -1798,12 +1814,11 @@ export const MasterDataModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Ekuivalen Berat (gram per unit) *</label>
-                  <input
-                    type="number"
-                    min="1"
+                  <NumericInput
+                    min={1}
                     required
                     value={formConv.gramsPerUnit}
-                    onChange={e => setFormConv({ ...formConv, gramsPerUnit: Number(e.target.value) })}
+                    onValueChange={val => setFormConv({ ...formConv, gramsPerUnit: val })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold text-emerald-600"
                   />
                 </div>

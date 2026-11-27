@@ -217,7 +217,8 @@ function interpolateLMS(table: LMSTuple[], targetKey: number): { L: number; M: n
     const a = table[i];
     const b = table[i + 1];
     if (targetKey >= a.key && targetKey <= b.key) {
-      const ratio = (targetKey - a.key) / (b.key - a.key);
+      const span = b.key - a.key;
+      const ratio = span !== 0 ? (targetKey - a.key) / span : 0;
       return {
         L: a.L + (b.L - a.L) * ratio,
         M: a.M + (b.M - a.M) * ratio,
@@ -233,7 +234,9 @@ function interpolateLMS(table: LMSTuple[], targetKey: number): { L: number; M: n
  */
 function computeLMSZScore(measurement: number, lms: { L: number; M: number; S: number }): number {
   const { L, M, S } = lms;
-  if (measurement <= 0 || M <= 0 || S <= 0) return 0;
+  if (!Number.isFinite(measurement) || measurement <= 0 || !Number.isFinite(M) || M <= 0 || !Number.isFinite(S) || S <= 0) {
+    return 0;
+  }
 
   let z: number;
   if (Math.abs(L) < 1e-6) {
@@ -242,19 +245,34 @@ function computeLMSZScore(measurement: number, lms: { L: number; M: number; S: n
     z = (Math.pow(measurement / M, L) - 1) / (L * S);
   }
 
+  if (!Number.isFinite(z)) return 0;
+
   // Penyesuaian ekstrem WHO untuk z > 3 atau z < -3 sesuai panduan WHO 2006
   if (z > 3) {
-    const sd3pos = M * Math.pow(1 + L * S * 3, 1 / L);
-    const sd2pos = M * Math.pow(1 + L * S * 2, 1 / L);
-    const sd23pos = sd3pos - sd2pos;
-    if (sd23pos > 0) z = 3 + (measurement - sd3pos) / sd23pos;
+    const base3 = 1 + L * S * 3;
+    const base2 = 1 + L * S * 2;
+    if (base3 > 0 && base2 > 0) {
+      const sd3pos = M * Math.pow(base3, 1 / L);
+      const sd2pos = M * Math.pow(base2, 1 / L);
+      const sd23pos = sd3pos - sd2pos;
+      if (Number.isFinite(sd23pos) && sd23pos > 0) {
+        z = 3 + (measurement - sd3pos) / sd23pos;
+      }
+    }
   } else if (z < -3) {
-    const sd3neg = M * Math.pow(1 + L * S * -3, 1 / L);
-    const sd2neg = M * Math.pow(1 + L * S * -2, 1 / L);
-    const sd23neg = sd2neg - sd3neg;
-    if (sd23neg > 0) z = -3 + (measurement - sd3neg) / sd23neg;
+    const baseNeg3 = 1 + L * S * -3;
+    const baseNeg2 = 1 + L * S * -2;
+    if (baseNeg3 > 0 && baseNeg2 > 0) {
+      const sd3neg = M * Math.pow(baseNeg3, 1 / L);
+      const sd2neg = M * Math.pow(baseNeg2, 1 / L);
+      const sd23neg = sd2neg - sd3neg;
+      if (Number.isFinite(sd23neg) && sd23neg > 0) {
+        z = -3 + (measurement - sd3neg) / sd23neg;
+      }
+    }
   }
 
+  if (!Number.isFinite(z)) return 0;
   return Number(Math.max(-6, Math.min(6, z)).toFixed(2));
 }
 
@@ -264,11 +282,15 @@ export function calculateWHOZScore(params: {
   weightKg: number;
   heightCm: number;
 }): ZScoreResult {
-  const ageMonths = Math.max(0, Math.min(228, Number(params.ageMonths) || 0));
-  const weightKg = Math.max(1, Number(params.weightKg) || 1);
-  const heightCm = Math.max(30, Number(params.heightCm) || 30);
+  const rawAge = Number(params.ageMonths);
+  const rawWeight = Number(params.weightKg);
+  const rawHeight = Number(params.heightCm);
+  const ageMonths = Math.max(0, Math.min(228, Number.isFinite(rawAge) ? rawAge : 0));
+  const weightKg = Math.max(1, Number.isFinite(rawWeight) ? rawWeight : 1);
+  const heightCm = Math.max(30, Number.isFinite(rawHeight) ? rawHeight : 30);
   const heightM = heightCm / 100;
-  const bmi = Number((weightKg / (heightM * heightM)).toFixed(2));
+  const rawBmi = heightM > 0 ? weightKg / (heightM * heightM) : 0;
+  const bmi = Number((Number.isFinite(rawBmi) ? rawBmi : 0).toFixed(2));
 
   // 1. TB/U (HAZ)
   const hazLms = interpolateLMS(params.gender === 'L' ? HAZ_BOYS : HAZ_GIRLS, ageMonths);

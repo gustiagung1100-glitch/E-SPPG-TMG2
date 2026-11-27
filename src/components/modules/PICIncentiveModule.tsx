@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
 import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
+import { NumericInput } from '../common/NumericInput';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -10,6 +11,7 @@ import {
   formatRupiah,
   triggerPrint,
 } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   IncentivePayoutStatus,
   PICIncentivePayout,
@@ -277,8 +279,8 @@ export const PICIncentiveModule: React.FC = () => {
       if (draft.mode !== 'default') {
         nextOverrides[instId] = {
           rateMode: draft.mode,
-          unitRate: Math.max(0, Number(draft.unitRate) || 0),
-          minPortionThreshold: Math.max(0, Number(draft.minPortionThreshold) || 0),
+          unitRate: toNonNegativeNumber(draft.unitRate, 0),
+          minPortionThreshold: toNonNegativeNumber(draft.minPortionThreshold, 0),
         };
       }
     });
@@ -299,9 +301,9 @@ export const PICIncentiveModule: React.FC = () => {
     const institutionRates = convertDraftMapToOverrides(instDraftsForm);
     await updatePICIncentiveConfig({
       rateMode: rateModeForm,
-      ratePerPortion: Math.max(0, Number(ratePerPortionForm) || 0),
-      flatDailyRate: Math.max(0, Number(flatDailyRateForm) || 0),
-      minPortionThreshold: Math.max(0, Number(minThresholdForm) || 0),
+      ratePerPortion: toNonNegativeNumber(ratePerPortionForm, 0),
+      flatDailyRate: toNonNegativeNumber(flatDailyRateForm, 0),
+      minPortionThreshold: toNonNegativeNumber(minThresholdForm, 0),
       institutionRates,
     });
     setInlineTabDrafts({});
@@ -338,8 +340,8 @@ export const PICIncentiveModule: React.FC = () => {
     } else {
       nextRates[quickInstEditId] = {
         rateMode: quickInstMode,
-        unitRate: Math.max(0, Number(quickInstRate) || 0),
-        minPortionThreshold: Math.max(0, Number(quickInstMinThreshold) || 0),
+        unitRate: toNonNegativeNumber(quickInstRate, 0),
+        minPortionThreshold: toNonNegativeNumber(quickInstMinThreshold, 0),
       };
     }
     await updatePICIncentiveConfig({ institutionRates: nextRates });
@@ -1119,31 +1121,28 @@ export const PICIncentiveModule: React.FC = () => {
                           </select>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <input
-                            type="number"
+                          <NumericInput
                             min={0}
-                            step={effectiveMode === 'per_porsi' ? 50 : 1000}
                             disabled={!canEdit || isDefault}
                             aria-label={`Nominal tarif PIC ${inst.name}`}
                             value={effectiveUnitRate}
-                            onChange={e =>
+                            onValueChange={val =>
                               handleUpdateInlineTabDraft(inst.id, {
-                                unitRate: Math.max(0, Number(e.target.value) || 0),
+                                unitRate: val,
                               })
                             }
                             className="w-28 px-2.5 py-1.5 text-xs text-right font-mono font-bold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:bg-slate-100 dark:disabled:bg-slate-800/50 disabled:text-slate-500"
                           />
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <input
-                            type="number"
+                          <NumericInput
                             min={0}
                             disabled={!canEdit || isDefault}
                             aria-label={`Minimal siswa hadir ${inst.name}`}
                             value={effectiveMin}
-                            onChange={e =>
+                            onValueChange={val =>
                               handleUpdateInlineTabDraft(inst.id, {
-                                minPortionThreshold: Math.max(0, Number(e.target.value) || 0),
+                                minPortionThreshold: val,
                               })
                             }
                             className="w-16 px-2 py-1.5 text-xs text-center font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:bg-slate-100 dark:disabled:bg-slate-800/50 disabled:text-slate-500"
@@ -1224,12 +1223,10 @@ export const PICIncentiveModule: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                     Tarif Default per Porsi Hadir (Rp)
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
-                    step={50}
                     value={ratePerPortionForm}
-                    onChange={e => setRatePerPortionForm(Number(e.target.value))}
+                    onValueChange={val => setRatePerPortionForm(val)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                     required
                   />
@@ -1239,12 +1236,10 @@ export const PICIncentiveModule: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                     Tarif Default Flat Harian (Rp)
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
-                    step={1000}
                     value={flatDailyRateForm}
-                    onChange={e => setFlatDailyRateForm(Number(e.target.value))}
+                    onValueChange={val => setFlatDailyRateForm(val)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                     required
                   />
@@ -1255,11 +1250,10 @@ export const PICIncentiveModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                   Ambang Batas Minimal Siswa Hadir
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   value={minThresholdForm}
-                  onChange={e => setMinThresholdForm(Number(e.target.value))}
+                  onValueChange={val => setMinThresholdForm(val)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                 />
               </div>
@@ -1368,18 +1362,16 @@ export const PICIncentiveModule: React.FC = () => {
                           </select>
                         </td>
                         <td className="p-2.5 text-right">
-                          <input
-                            type="number"
+                          <NumericInput
                             min={0}
-                            step={draft.mode === 'flat_harian' ? 1000 : 50}
                             disabled={isDef}
                             value={displayRate}
-                            onChange={e =>
+                            onValueChange={val =>
                               setInstDraftsForm(prev => ({
                                 ...prev,
                                 [inst.id]: {
                                   ...draft,
-                                  unitRate: Math.max(0, Number(e.target.value) || 0),
+                                  unitRate: val,
                                 },
                               }))
                             }
@@ -1456,12 +1448,10 @@ export const PICIncentiveModule: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                     {quickInstMode === 'per_porsi' ? 'Tarif per Porsi (Rp)' : 'Tarif Flat Harian (Rp)'}
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
-                    step={quickInstMode === 'per_porsi' ? 50 : 1000}
                     value={quickInstRate}
-                    onChange={e => setQuickInstRate(Number(e.target.value))}
+                    onValueChange={val => setQuickInstRate(val)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                     required
                   />
@@ -1470,11 +1460,10 @@ export const PICIncentiveModule: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                     Minimal Siswa Hadir
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     value={quickInstMinThreshold}
-                    onChange={e => setQuickInstMinThreshold(Number(e.target.value))}
+                    onValueChange={val => setQuickInstMinThreshold(val)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                   />
                 </div>

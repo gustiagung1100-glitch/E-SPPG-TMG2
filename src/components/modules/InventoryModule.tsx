@@ -5,6 +5,7 @@ import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import { NumericInput } from '../common/NumericInput';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -13,6 +14,7 @@ import {
   triggerPrint,
   formatIndonesianDate,
 } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   InventoryItem,
   StockMutation,
@@ -388,7 +390,7 @@ export const InventoryModule: React.FC = () => {
       return;
     }
 
-    const qty = Number(mutationForm.quantity);
+    const qty = toNonNegativeNumber(mutationForm.quantity, 0);
     if (qty <= 0) {
       addToast('error', 'Kuantitas Tidak Valid', 'Jumlah mutasi harus lebih besar dari 0.');
       return;
@@ -409,7 +411,7 @@ export const InventoryModule: React.FC = () => {
     const qtyOut = isOutflow ? qty : 0;
     const orderedQty =
       mutationForm.type === 'Barang Masuk'
-        ? Number(mutationForm.orderedQuantity) || qty
+        ? toNonNegativeNumber(mutationForm.orderedQuantity, qty) || qty
         : undefined;
     const diffQty = orderedQty !== undefined ? qty - orderedQty : undefined;
 
@@ -465,7 +467,7 @@ export const InventoryModule: React.FC = () => {
 
     const created = await recordStockOpname({
       itemId: selectedItemForOpname.id,
-      physicalStock: Number(opnameForm.physicalStock),
+      physicalStock: toNonNegativeNumber(opnameForm.physicalStock, 0),
       reason: opnameForm.reason,
       inspectorName: opnameForm.inspectorName,
     });
@@ -1976,13 +1978,11 @@ export const InventoryModule: React.FC = () => {
             <label className="block text-xs font-bold text-blue-900 dark:text-sky-300 mb-1">
               Stok Fisik Hasil Penghitungan / Timbangan *
             </label>
-            <input
-              type="number"
-              min="0"
-              step="any"
+            <NumericInput
+              min={0}
               required
               value={opnameForm.physicalStock}
-              onChange={e => setOpnameForm({ ...opnameForm, physicalStock: Number(e.target.value) })}
+              onValueChange={val => setOpnameForm({ ...opnameForm, physicalStock: val })}
               className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
             />
           </div>
@@ -1992,14 +1992,14 @@ export const InventoryModule: React.FC = () => {
               <div>
                 <span className="text-[10px] text-blue-900 dark:text-sky-300 font-bold uppercase">Selisih (+/-):</span>
                 <div className="font-bold text-sm">
-                  {opnameForm.physicalStock - selectedItemForOpname.currentStock >= 0 ? '+' : ''}
-                  {opnameForm.physicalStock - selectedItemForOpname.currentStock} {selectedItemForOpname.unit}
+                  {toNonNegativeNumber(opnameForm.physicalStock, 0) - selectedItemForOpname.currentStock >= 0 ? '+' : ''}
+                  {toNonNegativeNumber(opnameForm.physicalStock, 0) - selectedItemForOpname.currentStock} {selectedItemForOpname.unit}
                 </div>
               </div>
               <div className="text-right">
                 <span className="text-[10px] text-blue-900 dark:text-sky-300 font-bold uppercase">Valuasi Selisih:</span>
                 <div className="font-black text-sm">
-                  {formatRupiah((opnameForm.physicalStock - selectedItemForOpname.currentStock) * selectedItemForOpname.pricePerUnit)}
+                  {formatRupiah((toNonNegativeNumber(opnameForm.physicalStock, 0) - selectedItemForOpname.currentStock) * selectedItemForOpname.pricePerUnit)}
                 </div>
               </div>
             </div>

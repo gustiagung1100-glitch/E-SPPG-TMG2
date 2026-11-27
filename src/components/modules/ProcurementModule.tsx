@@ -5,6 +5,8 @@ import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import { NumericInput } from '../common/NumericInput';
+import { toFiniteNumber, toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -319,8 +321,7 @@ const RABRincianCell: React.FC<{
       prev.map((line, i) => {
         if (i !== idx) return line;
         if (field === 'quantity') {
-          const parsed = value === '' ? 0 : Math.max(0, Number(value));
-          return { ...line, quantity: Number.isFinite(parsed) ? parsed : 0, isManual: true };
+          return { ...line, quantity: toNonNegativeNumber(value, 0), isManual: true };
         }
         if (field === 'ingredientName') {
           const isManualUnit = Boolean(manualUnitIds[lineKey]);
@@ -464,13 +465,11 @@ const RABRincianCell: React.FC<{
                   <span className="text-[9px] font-bold uppercase text-slate-400 w-11 shrink-0">
                     Qty
                   </span>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
-                    step="any"
                     value={line.quantity}
                     disabled={!canEdit}
-                    onChange={e => handleFieldChange(idx, 'quantity', e.target.value)}
+                    onValueChange={val => handleFieldChange(idx, 'quantity', String(val))}
                     className="w-20 px-2 py-1 text-[11px] font-mono font-bold rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
                   />
                   {unitOptions && unitOptions.length > 0 ? (
@@ -2299,8 +2298,16 @@ export const ProcurementModule: React.FC = () => {
     for (const line of poDraftLines) {
       const rab = rabList.find(r => r.id === line.rabId);
       if (!rab) continue;
-      const qty = Number(line.quantity);
-      const price = Number(line.unitPrice) || rab.unitPrice;
+      const qty = toNonNegativeNumber(line.quantity, 0);
+      const price = toNonNegativeNumber(line.unitPrice, rab.unitPrice);
+      if (qty <= 0) {
+        addToast(
+          'error',
+          'Kuantitas Item PO Tidak Valid',
+          `Jumlah pembelian untuk "${rab.itemName}" harus lebih besar dari 0.`
+        );
+        return;
+      }
       rawPOItems.push({
         itemId: rab.id,
         itemName: rab.itemName,
@@ -2745,8 +2752,8 @@ export const ProcurementModule: React.FC = () => {
     if (editingQCRecord) {
       const draft = qcItemDrafts[0];
       if (!draft) return;
-      const receivedQty = Number(draft.receivedQuantity) || 0;
-      const orderedQty = Number(draft.orderedQuantity) || 0;
+      const receivedQty = toNonNegativeNumber(draft.receivedQuantity, 0);
+      const orderedQty = toNonNegativeNumber(draft.orderedQuantity, 0);
       const shouldAddStock = isQCAcceptedStatus(draft.status) && receivedQty > 0;
 
       await updateQualityControlRecord(editingQCRecord.id, {
@@ -2754,7 +2761,7 @@ export const ProcurementModule: React.FC = () => {
         differenceQuantity: receivedQty - orderedQty,
         condition: draft.condition,
         qualityGrade: draft.qualityGrade,
-        receivingTemp: Number(draft.receivingTemp),
+        receivingTemp: toFiniteNumber(draft.receivingTemp, 0),
         expiryDate: draft.expiryDate,
         photoUrl: draft.photoUrls[0] || undefined,
         photoUrls: draft.photoUrls,
@@ -2779,8 +2786,8 @@ export const ProcurementModule: React.FC = () => {
     }
 
     for (const draft of validDrafts) {
-      const orderedQty = Number(draft.orderedQuantity) || 0;
-      const receivedQty = Number(draft.receivedQuantity) || 0;
+      const orderedQty = toNonNegativeNumber(draft.orderedQuantity, 0);
+      const receivedQty = toNonNegativeNumber(draft.receivedQuantity, 0);
       const diffQty = receivedQty - orderedQty;
 
       // Stok gudang HANYA bertambah berdasarkan hasil input Quality Control yang diterima!
@@ -2792,7 +2799,7 @@ export const ProcurementModule: React.FC = () => {
           differenceQuantity: diffQty,
           condition: draft.condition,
           qualityGrade: draft.qualityGrade,
-          receivingTemp: Number(draft.receivingTemp),
+          receivingTemp: toFiniteNumber(draft.receivingTemp, 0),
           expiryDate: draft.expiryDate,
           photoUrl: draft.photoUrls[0] || undefined,
           photoUrls: draft.photoUrls,
@@ -2813,7 +2820,7 @@ export const ProcurementModule: React.FC = () => {
           differenceQuantity: diffQty,
           condition: draft.condition,
           qualityGrade: draft.qualityGrade,
-          receivingTemp: Number(draft.receivingTemp),
+          receivingTemp: toFiniteNumber(draft.receivingTemp, 0),
           expiryDate: draft.expiryDate,
           photoUrl: draft.photoUrls[0] || undefined,
           photoUrls: draft.photoUrls,
@@ -3673,13 +3680,11 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 3: JUMLAH SASARAN (Editable) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="1"
                                       value={eff.sasaran}
                                       disabled={!canEditRAB}
-                                      onChange={e => updatePanganCellDraft(row, 'sasaran', e.target.value)}
+                                      onValueChange={val => updatePanganCellDraft(row, 'sasaran', String(val))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
                                           e.preventDefault();
@@ -3692,13 +3697,11 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 4: Jumlah (QTY / volume, Editable) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.volume}
                                       disabled={!canEditRAB}
-                                      onChange={e => updatePanganCellDraft(row, 'volume', e.target.value)}
+                                      onValueChange={val => updatePanganCellDraft(row, 'volume', String(val))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
                                           e.preventDefault();
@@ -3729,13 +3732,11 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 6: HARGA DASAR (Editable, right before total Jumlah) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.unitPrice}
                                       disabled={!canEditRAB}
-                                      onChange={e => updatePanganCellDraft(row, 'unitPrice', e.target.value)}
+                                      onValueChange={val => updatePanganCellDraft(row, 'unitPrice', String(val))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
                                           e.preventDefault();
@@ -3751,13 +3752,11 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 7: Jumlah (Total Harga, Editable & Auto-Calculated) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.totalBudget}
                                       disabled={!canEditRAB}
-                                      onChange={e => updatePanganCellDraft(row, 'totalBudget', e.target.value)}
+                                      onValueChange={val => updatePanganCellDraft(row, 'totalBudget', String(val))}
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
                                           e.preventDefault();
@@ -3949,13 +3948,11 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 3: JUMLAH SASARAN */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="1"
                                     value={draft.sasaran}
-                                    onChange={e =>
-                                      updateNewPanganRowField(draft.tempId, 'sasaran', e.target.value)
+                                    onValueChange={val =>
+                                      updateNewPanganRowField(draft.tempId, 'sasaran', String(val))
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -3969,13 +3966,11 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 4: Jumlah (QTY / volume) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.volume}
-                                    onChange={e =>
-                                      updateNewPanganRowField(draft.tempId, 'volume', e.target.value)
+                                    onValueChange={val =>
+                                      updateNewPanganRowField(draft.tempId, 'volume', String(val))
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -4008,13 +4003,11 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 6: HARGA DASAR */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.unitPrice}
-                                    onChange={e =>
-                                      updateNewPanganRowField(draft.tempId, 'unitPrice', e.target.value)
+                                    onValueChange={val =>
+                                      updateNewPanganRowField(draft.tempId, 'unitPrice', String(val))
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -4031,13 +4024,11 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 7: Jumlah (Total Harga) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.totalBudget}
-                                    onChange={e =>
-                                      updateNewPanganRowField(draft.tempId, 'totalBudget', e.target.value)
+                                    onValueChange={val =>
+                                      updateNewPanganRowField(draft.tempId, 'totalBudget', String(val))
                                     }
                                     onKeyDown={e => {
                                       if (e.key === 'Enter') {
@@ -4155,17 +4146,16 @@ export const ProcurementModule: React.FC = () => {
                             <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
                               {editingPaguTarget === 'pangan' ? (
                                 <div className="flex items-center justify-end gap-1">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
                                     value={paguDraftInput}
-                                    onChange={e => setPaguDraftInput(e.target.value)}
+                                    onValueChange={val => setPaguDraftInput(String(val))}
                                     className="w-28 px-2 py-1 text-xs font-mono font-bold rounded border border-blue-400 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                                   />
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      savePaguHarian('pangan', Math.max(0, Number(paguDraftInput) || 0))
+                                      savePaguHarian('pangan', toNonNegativeNumber(paguDraftInput, 0))
                                     }
                                     className="p-1 rounded bg-[#1E3A8A] text-white"
                                     title="Simpan Pagu Harian"
@@ -4450,14 +4440,12 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 3: JUMLAH SASARAN (Editable) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="1"
                                       value={eff.sasaran}
                                       disabled={!canEditRAB}
-                                      onChange={e =>
-                                        updateOperasionalCellDraft(row, 'sasaran', e.target.value)
+                                      onValueChange={val =>
+                                        updateOperasionalCellDraft(row, 'sasaran', String(val))
                                       }
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
@@ -4471,14 +4459,12 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 4: Jumlah (QTY / volume, Editable) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.volume}
                                       disabled={!canEditRAB}
-                                      onChange={e =>
-                                        updateOperasionalCellDraft(row, 'volume', e.target.value)
+                                      onValueChange={val =>
+                                        updateOperasionalCellDraft(row, 'volume', String(val))
                                       }
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
@@ -4512,14 +4498,12 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 6: HARGA DASAR (Editable) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.unitPrice}
                                       disabled={!canEditRAB}
-                                      onChange={e =>
-                                        updateOperasionalCellDraft(row, 'unitPrice', e.target.value)
+                                      onValueChange={val =>
+                                        updateOperasionalCellDraft(row, 'unitPrice', String(val))
                                       }
                                       onKeyDown={e => {
                                         if (e.key === 'Enter' && isDirty) {
@@ -4536,17 +4520,15 @@ export const ProcurementModule: React.FC = () => {
 
                                   {/* Col 7: Jumlah (Total Harga, Editable & Auto-Calculated) */}
                                   <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                    <input
-                                      type="number"
+                                    <NumericInput
                                       min={0}
-                                      step="any"
                                       value={eff.totalBudget}
                                       disabled={!canEditRAB}
-                                      onChange={e =>
+                                      onValueChange={val =>
                                         updateOperasionalCellDraft(
                                           row,
                                           'totalBudget',
-                                          e.target.value
+                                          String(val)
                                         )
                                       }
                                       onKeyDown={e => {
@@ -4744,16 +4726,14 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 3: JUMLAH SASARAN */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="1"
                                     value={draft.sasaran}
-                                    onChange={e =>
+                                    onValueChange={val =>
                                       updateNewOperasionalRowField(
                                         draft.tempId,
                                         'sasaran',
-                                        e.target.value
+                                        String(val)
                                       )
                                     }
                                     onKeyDown={e => {
@@ -4768,16 +4748,14 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 4: Jumlah (QTY / volume) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.volume}
-                                    onChange={e =>
+                                    onValueChange={val =>
                                       updateNewOperasionalRowField(
                                         draft.tempId,
                                         'volume',
-                                        e.target.value
+                                        String(val)
                                       )
                                     }
                                     onKeyDown={e => {
@@ -4811,16 +4789,14 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 6: HARGA DASAR */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.unitPrice}
-                                    onChange={e =>
+                                    onValueChange={val =>
                                       updateNewOperasionalRowField(
                                         draft.tempId,
                                         'unitPrice',
-                                        e.target.value
+                                        String(val)
                                       )
                                     }
                                     onKeyDown={e => {
@@ -4838,16 +4814,14 @@ export const ProcurementModule: React.FC = () => {
 
                                 {/* Col 7: Jumlah (Total Harga) */}
                                 <td className="border border-slate-300 dark:border-slate-700 px-2 py-1.5 align-top">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
-                                    step="any"
                                     value={draft.totalBudget}
-                                    onChange={e =>
+                                    onValueChange={val =>
                                       updateNewOperasionalRowField(
                                         draft.tempId,
                                         'totalBudget',
-                                        e.target.value
+                                        String(val)
                                       )
                                     }
                                     onKeyDown={e => {
@@ -4968,11 +4942,10 @@ export const ProcurementModule: React.FC = () => {
                             <td className="border border-slate-300 dark:border-slate-700 px-3 py-2 text-right font-mono tabular-nums whitespace-nowrap">
                               {editingPaguTarget === 'operasional' ? (
                                 <div className="flex items-center justify-end gap-1">
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     min={0}
                                     value={paguDraftInput}
-                                    onChange={e => setPaguDraftInput(e.target.value)}
+                                    onValueChange={val => setPaguDraftInput(String(val))}
                                     className="w-28 px-2 py-1 text-xs font-mono font-bold rounded border border-blue-400 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                                   />
                                   <button
@@ -4980,7 +4953,7 @@ export const ProcurementModule: React.FC = () => {
                                     onClick={() =>
                                       savePaguHarian(
                                         'operasional',
-                                        Math.max(0, Number(paguDraftInput) || 0)
+                                        toNonNegativeNumber(paguDraftInput, 0)
                                       )
                                     }
                                     className="p-1 rounded bg-[#1E3A8A] text-white"
@@ -6722,19 +6695,16 @@ export const ProcurementModule: React.FC = () => {
                         <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
                           Kuantiti
                         </label>
-                        <input
-                          type="number"
+                        <NumericInput
                           min={0}
-                          step="any"
                           value={line.quantity}
-                          onChange={e => {
-                            const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value));
+                          onValueChange={val => {
                             setRabForm(prev => ({
                               ...prev,
                               isRincianManual: true,
                               rincianItems: (prev.rincianItems || []).map((l, i) =>
                                 i === idx
-                                  ? { ...l, quantity: Number.isFinite(val) ? val : 0, isManual: true }
+                                  ? { ...l, quantity: val, isManual: true }
                                   : l
                               ),
                             }));
@@ -7012,14 +6982,12 @@ export const ProcurementModule: React.FC = () => {
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                           Jumlah ({rab?.unit || 'unit'}) *
                         </label>
-                        <input
-                          type="number"
-                          min="1"
-                          step="any"
+                        <NumericInput
+                          min={0.01}
                           required
                           value={line.quantity}
-                          onChange={e =>
-                            handleUpdatePODraftLine(line.key, { quantity: Number(e.target.value) })
+                          onValueChange={val =>
+                            handleUpdatePODraftLine(line.key, { quantity: val })
                           }
                           className={`w-full px-2.5 py-1.5 text-xs rounded-lg border font-mono font-bold ${
                             lineExceeds
@@ -7033,13 +7001,12 @@ export const ProcurementModule: React.FC = () => {
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                           Harga Satuan (Rp) *
                         </label>
-                        <input
-                          type="number"
-                          min="1"
+                        <NumericInput
+                          min={0}
                           required
                           value={line.unitPrice}
-                          onChange={e =>
-                            handleUpdatePODraftLine(line.key, { unitPrice: Number(e.target.value) })
+                          onValueChange={val =>
+                            handleUpdatePODraftLine(line.key, { unitPrice: val })
                           }
                           className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                         />
@@ -7050,7 +7017,7 @@ export const ProcurementModule: React.FC = () => {
                           Subtotal
                         </label>
                         <div className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono font-black text-slate-900 dark:text-white">
-                          {formatRupiah((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}
+                          {formatRupiah(toNonNegativeNumber(line.quantity, 0) * toNonNegativeNumber(line.unitPrice, 0))}
                         </div>
                       </div>
                     </div>
@@ -7403,8 +7370,8 @@ export const ProcurementModule: React.FC = () => {
                 ) : (
                   <div className="space-y-3 max-h-[48vh] overflow-y-auto pr-1">
                     {visibleQCDrafts.map((draft, idx) => {
-                      const ordered = Number(draft.orderedQuantity) || 0;
-                      const received = Number(draft.receivedQuantity) || 0;
+                      const ordered = toNonNegativeNumber(draft.orderedQuantity, 0);
+                      const received = toNonNegativeNumber(draft.receivedQuantity, 0);
                       const diff = received - ordered;
                       const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
                       const isOpsDraft = draft.categoryLabel === 'Operasional Harian';
@@ -7497,9 +7464,9 @@ export const ProcurementModule: React.FC = () => {
                           Dipesan PO ({draft.unit})
                         </label>
                         <input
-                          type="number"
+                          type="text"
                           readOnly
-                          value={draft.orderedQuantity}
+                          value={formatNumber(draft.orderedQuantity)}
                           className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-900 dark:text-white font-mono font-bold cursor-not-allowed"
                         />
                       </div>
@@ -7508,15 +7475,13 @@ export const ProcurementModule: React.FC = () => {
                         <label className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-300 mb-1">
                           Diterima ({draft.unit}) *
                         </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
+                        <NumericInput
+                          min={0}
                           required
                           value={draft.receivedQuantity}
-                          onChange={e =>
+                          onValueChange={val =>
                             handleUpdateQCItemDraft(draft.key, {
-                              receivedQuantity: Number(e.target.value),
+                              receivedQuantity: val,
                             })
                           }
                           className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-emerald-400 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-black"
@@ -7582,13 +7547,11 @@ export const ProcurementModule: React.FC = () => {
                         <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">
                           Suhu (°C)
                         </label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <NumericInput
                           value={draft.receivingTemp}
-                          onChange={e =>
+                          onValueChange={val =>
                             handleUpdateQCItemDraft(draft.key, {
-                              receivingTemp: Number(e.target.value),
+                              receivingTemp: val,
                             })
                           }
                           className="w-full px-2 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"

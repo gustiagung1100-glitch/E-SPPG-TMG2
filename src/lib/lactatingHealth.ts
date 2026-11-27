@@ -129,10 +129,15 @@ export function getLactatingBpStatus(systolic: number, diastolic: number): Lacta
 export function calculateLactatingHealthAssessment(
   input: LactatingHealthInput
 ): LactatingHealthAssessment {
+  const safeNum = (val: unknown, fb: number) => {
+    const n = Number(val);
+    return Number.isFinite(n) && n > 0 ? n : fb;
+  };
   const duration = input.deliveryDate
     ? calculateLactationDuration(input.deliveryDate, input.measurementDate)
     : (() => {
-        const m = Math.max(0, Math.min(24, Number(input.babyAgeMonthsOverride ?? 2)));
+        const rawM = Number(input.babyAgeMonthsOverride);
+        const m = Math.max(0, Math.min(24, Number.isFinite(rawM) ? rawM : 2));
         const days = Math.round(m * 30.4375);
         const phase: LactationPhase =
           m > 12
@@ -150,12 +155,12 @@ export function calculateLactatingHealthAssessment(
         };
       })();
 
-  const heightM = Math.max(1.2, (Number(input.heightCm) || 155) / 100);
-  const weightKg = Math.max(30, Number(input.weightKg) || 52);
+  const heightM = Math.max(1.2, safeNum(input.heightCm, 155) / 100);
+  const weightKg = Math.max(30, safeNum(input.weightKg, 52));
   const bmi = Number((weightKg / (heightM * heightM)).toFixed(1));
   const bmiCategory = getBmiCategory(bmi);
 
-  const lilaCm = Number((Number(input.lilaCm) || 24.5).toFixed(1));
+  const lilaCm = Number(safeNum(input.lilaCm, 24.5).toFixed(1));
   const isKek = lilaCm < 23.5;
   const lilaCategory =
     lilaCm < 21.0
@@ -164,14 +169,14 @@ export function calculateLactatingHealthAssessment(
       ? 'KEK (LILA < 23,5 cm)'
       : 'Normal (≥ 23,5 cm)';
 
-  const hb = Number((Number(input.hemoglobinGdL) || 12.2).toFixed(1));
+  const hb = Number(safeNum(input.hemoglobinGdL, 12.2).toFixed(1));
   const anemiaStatus = getLactatingAnemiaStatus(hb);
 
-  const systolic = Math.max(70, Math.round(Number(input.systolicBp) || 115));
-  const diastolic = Math.max(40, Math.round(Number(input.diastolicBp) || 75));
+  const systolic = Math.max(70, Math.round(safeNum(input.systolicBp, 115)));
+  const diastolic = Math.max(40, Math.round(safeNum(input.diastolicBp, 75)));
   const bpStatus = getLactatingBpStatus(systolic, diastolic);
 
-  const fluidIntakeMl = Math.max(500, Math.round(Number(input.fluidIntakeMl) || 2400));
+  const fluidIntakeMl = Math.max(500, Math.round(safeNum(input.fluidIntakeMl, 2400)));
   const isHydrationLow = fluidIntakeMl < duration.targetFluidMl - 400;
 
   // AKG Ibu Menyusui (Permenkes No. 28 Tahun 2019)

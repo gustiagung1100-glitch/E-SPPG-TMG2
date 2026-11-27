@@ -61,12 +61,14 @@ export interface MaternalAssessmentResult {
 }
 
 function roundTo(val: number, decimals = 1): number {
+  if (!Number.isFinite(val)) return 0;
   const factor = 10 ** decimals;
   return Math.round(val * factor) / factor;
 }
 
 export function getTrimesterFromWeeks(weeks: number): MaternalTrimester {
-  const clamped = Math.max(0, Math.min(42, weeks));
+  const safeWeeks = Number.isFinite(weeks) ? weeks : 0;
+  const clamped = Math.max(0, Math.min(42, safeWeeks));
   if (clamped <= 13) return 'Trimester I';
   if (clamped <= 27) return 'Trimester II';
   return 'Trimester III';
@@ -117,14 +119,18 @@ export function calculateGestationFromHPHT(
 export function calculateMaternalHealthAssessment(
   input: MaternalAssessmentInput
 ): MaternalAssessmentResult {
-  const ageYears = Math.max(12, Math.min(55, Number(input.ageYears) || 25));
-  const gestationalWeeks = Math.max(1, Math.min(42, Math.round(Number(input.gestationalWeeks) || 12)));
+  const numOr = (v: unknown, fb: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : fb;
+  };
+  const ageYears = Math.max(12, Math.min(55, numOr(input.ageYears, 25)));
+  const gestationalWeeks = Math.max(1, Math.min(42, Math.round(numOr(input.gestationalWeeks, 12))));
   const trimester = getTrimesterFromWeeks(gestationalWeeks);
 
-  const heightCm = Math.max(120, Math.min(200, Number(input.heightCm) || 155));
+  const heightCm = Math.max(120, Math.min(200, numOr(input.heightCm, 155)));
   const heightM = heightCm / 100;
-  const prePregnancyWeightKg = Math.max(30, Math.min(160, Number(input.prePregnancyWeightKg) || 50));
-  const currentWeightKg = Math.max(30, Math.min(180, Number(input.currentWeightKg) || prePregnancyWeightKg));
+  const prePregnancyWeightKg = Math.max(30, Math.min(160, numOr(input.prePregnancyWeightKg, 50)));
+  const currentWeightKg = Math.max(30, Math.min(180, numOr(input.currentWeightKg, prePregnancyWeightKg)));
 
   const prePregnancyBmi = roundTo(prePregnancyWeightKg / (heightM * heightM), 1);
   const weightGainKg = roundTo(currentWeightKg - prePregnancyWeightKg, 1);

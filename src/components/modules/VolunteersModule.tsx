@@ -708,98 +708,110 @@ export const VolunteersModule: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Compact Module Header */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl px-5 py-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#1E3A8A] dark:text-sky-400">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Manajemen SDM Dapur &amp; Pergantian Shift
-          </span>
-          <h1 className="text-lg md:text-xl font-extrabold tracking-tight text-slate-900 dark:text-white mt-0.5">
-            Presensi &amp; Ketidakhadiran Relawan
-          </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 max-w-3xl">
-            Pengelolaan kehadiran harian relawan 5 divisi dapur MBG, persetujuan ketidakhadiran relawan, penunjukan relawan pengganti shift, serta verifikasi kelayakan sanitasi higiene pangan.
-          </p>
-        </div>
+      {/* Responsive Module Header (Mobile / Tablet / Laptop-PC) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-4 sm:p-5 xl:px-6 xl:py-5 shadow-sm overflow-hidden">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 xl:gap-6">
+          {/* Title & Description Zone */}
+          <div className="min-w-0 flex-1">
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#1E3A8A] dark:text-sky-400">
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>Manajemen SDM Dapur &amp; Pergantian Shift</span>
+            </div>
+            <h1 className="text-lg sm:text-xl xl:text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white mt-1 text-balance leading-snug">
+              Presensi &amp; Ketidakhadiran Relawan
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
+              Pengelolaan kehadiran harian relawan 5 divisi dapur MBG, persetujuan ketidakhadiran relawan, penunjukan relawan pengganti shift, serta verifikasi kelayakan sanitasi higiene pangan.
+            </p>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <DynamicFormEditToggleBar
-            formId={builderVolFormId}
-            isEditing={isEditingVolSchema}
-            onToggleEdit={() => setIsEditingVolSchema(v => !v)}
-            extraSelector={
-              <select
-                value={builderVolFormId}
-                onChange={e => setBuilderVolFormId(e.target.value as DynamicFormId)}
-                className="px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100"
+          {/* Actions & Form Controls Zone */}
+          <div className="w-full xl:w-auto pt-3.5 border-t border-slate-100 dark:border-slate-800 xl:pt-0 xl:border-t-0 flex flex-col gap-2.5 xl:items-end xl:shrink-0">
+            {/* Primary & Secondary Action Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-row items-stretch sm:items-center gap-2.5 w-full xl:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
+                  const repVol =
+                    activeMasterVolunteers.find(v => v.id !== firstVol?.id) ||
+                    masterVolunteers.find(v => v.id !== firstVol?.id) ||
+                    firstVol;
+                  setAbsenceFormData({
+                    date: new Date().toISOString().slice(0, 10),
+                    volunteerId: firstVol?.id || '',
+                    volunteerName: firstVol?.name || '',
+                    division: firstVol?.division || 'Persiapan',
+                    reason: 'Sakit',
+                    reasonDetails: '',
+                    replacementVolunteerId: repVol?.id || '',
+                    replacementVolunteerName: repVol?.name || '',
+                    replacementDivision: repVol?.division || 'Persiapan',
+                    approvalStatus: 'Menunggu Persetujuan',
+                    notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
+                    customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
+                  });
+                  setIsModalAbsenceSchemaEdit(false);
+                  setIsAbsenceModalOpen(true);
+                }}
+                className="min-h-[44px] xl:min-h-[40px] w-full xl:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 dark:border-amber-800 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all active:scale-95 cursor-pointer"
               >
-                <option value="volunteer_absence_form">Form Ketidakhadiran Relawan</option>
-                <option value="volunteer_attendance_form">Form Presensi Harian Relawan</option>
-              </select>
-            }
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
-              const repVol =
-                activeMasterVolunteers.find(v => v.id !== firstVol?.id) ||
-                masterVolunteers.find(v => v.id !== firstVol?.id) ||
-                firstVol;
-              setAbsenceFormData({
-                date: new Date().toISOString().slice(0, 10),
-                volunteerId: firstVol?.id || '',
-                volunteerName: firstVol?.name || '',
-                division: firstVol?.division || 'Persiapan',
-                reason: 'Sakit',
-                reasonDetails: '',
-                replacementVolunteerId: repVol?.id || '',
-                replacementVolunteerName: repVol?.name || '',
-                replacementDivision: repVol?.division || 'Persiapan',
-                approvalStatus: 'Menunggu Persetujuan',
-                notes: 'Pengajuan izin tidak hadir dan penunjukan relawan pengganti shift.',
-                customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_absence_form),
-              });
-              setIsModalAbsenceSchemaEdit(false);
-              setIsAbsenceModalOpen(true);
-            }}
-            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 dark:border-amber-800 font-semibold text-sm transition-all active:scale-95"
-          >
-            <ArrowRightLeft className="w-4 h-4" />
-            Ajukan Ketidakhadiran Relawan
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
-              const div = (firstVol?.division as VolunteerAttendance['division']) || 'Persiapan';
-              setSelectedAtt(null);
-              setAttFormData({
-                date: new Date().toISOString().slice(0, 10),
-                volunteerId: firstVol?.id || '',
-                volunteerName: firstVol?.name || '',
-                division: div,
-                shift:
-                  div === 'Cuci Ompreng' || div === 'Kebersihan'
-                    ? 'Siang (08:00 - 13:00)'
-                    : 'Pagi (03:30 - 08:30)',
-                status: 'Hadir',
-                healthCheckPassed: true,
-                hygieneGearComplete: true,
-                reason: '',
-                replacementVolunteer: '',
-                notes: 'Kondisi fit dan APD lengkap',
-                customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_attendance_form),
-              });
-              setIsModalAttSchemaEdit(false);
-              setIsAttendanceModalOpen(true);
-            }}
-            className="min-h-[42px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-semibold text-sm shadow-sm transition-all active:scale-95"
-          >
-            <Plus className="w-4 h-4" />
-            Catat Presensi Harian
-          </button>
+                <ArrowRightLeft className="w-4 h-4 shrink-0" />
+                <span>Ajukan Ketidakhadiran Relawan</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const firstVol = activeMasterVolunteers[0] || masterVolunteers[0];
+                  const div = (firstVol?.division as VolunteerAttendance['division']) || 'Persiapan';
+                  setSelectedAtt(null);
+                  setAttFormData({
+                    date: new Date().toISOString().slice(0, 10),
+                    volunteerId: firstVol?.id || '',
+                    volunteerName: firstVol?.name || '',
+                    division: div,
+                    shift:
+                      div === 'Cuci Ompreng' || div === 'Kebersihan'
+                        ? 'Siang (08:00 - 13:00)'
+                        : 'Pagi (03:30 - 08:30)',
+                    status: 'Hadir',
+                    healthCheckPassed: true,
+                    hygieneGearComplete: true,
+                    reason: '',
+                    replacementVolunteer: '',
+                    notes: 'Kondisi fit dan APD lengkap',
+                    customFields: getInitialCustomFieldValues(dynamicFormSchemas.volunteer_attendance_form),
+                  });
+                  setIsModalAttSchemaEdit(false);
+                  setIsAttendanceModalOpen(true);
+                }}
+                className="min-h-[44px] xl:min-h-[40px] w-full xl:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-semibold text-xs sm:text-sm whitespace-nowrap shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>Catat Presensi Harian</span>
+              </button>
+            </div>
+
+            {/* Admin Form Schema Selector & Editor Bar */}
+            <DynamicFormEditToggleBar
+              formId={builderVolFormId}
+              isEditing={isEditingVolSchema}
+              onToggleEdit={() => setIsEditingVolSchema(v => !v)}
+              className="w-full xl:w-auto flex flex-col sm:flex-row sm:items-center sm:justify-between xl:justify-end gap-2"
+              extraSelector={
+                <select
+                  value={builderVolFormId}
+                  onChange={e => setBuilderVolFormId(e.target.value as DynamicFormId)}
+                  aria-label="Pilih form relawan untuk diedit"
+                  className="w-full sm:w-auto min-w-0 max-w-full min-h-[40px] sm:min-h-[38px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="volunteer_absence_form">Form Ketidakhadiran Relawan</option>
+                  <option value="volunteer_attendance_form">Form Presensi Harian Relawan</option>
+                </select>
+              }
+            />
+          </div>
         </div>
       </div>
 
@@ -811,7 +823,7 @@ export const VolunteersModule: React.FC = () => {
       )}
 
       {/* Summary Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 rounded-xl shadow-sm flex flex-col justify-between h-full transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">

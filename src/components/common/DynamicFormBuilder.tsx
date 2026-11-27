@@ -9,6 +9,7 @@ import {
 import { useApp } from '../../lib/store';
 import { processFacilityImageUpload } from './FacilityTempUploadSection';
 import { ClassicTimeInput } from './ClassicTimeInput';
+import { NumericInput } from './NumericInput';
 import {
   SlidersHorizontal,
   Plus,
@@ -61,6 +62,7 @@ interface DynamicFormEditToggleBarProps {
   onToggleEdit: () => void;
   compact?: boolean;
   extraSelector?: React.ReactNode;
+  className?: string;
 }
 
 export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> = ({
@@ -68,6 +70,7 @@ export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> =
   onToggleEdit,
   compact = false,
   extraSelector,
+  className = '',
 }) => {
   const { isAdminUser } = useApp();
   if (!isAdminUser) return null;
@@ -76,8 +79,8 @@ export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> =
     <button
       type="button"
       onClick={onToggleEdit}
-      className={`inline-flex items-center gap-1.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer whitespace-nowrap ${
-        compact ? 'px-3 py-1.5' : 'px-3 py-2'
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 ${
+        compact ? 'px-3 py-1.5' : 'px-3.5 py-2 min-h-[38px]'
       } ${
         isEditing
           ? 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-600'
@@ -91,7 +94,7 @@ export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> =
 
   if (compact) {
     return (
-      <div className="print:hidden flex items-center justify-end gap-2 flex-wrap">
+      <div className={`print:hidden flex items-center justify-end gap-2 flex-wrap ${className}`}>
         {extraSelector}
         {buttonNode}
       </div>
@@ -99,7 +102,7 @@ export const DynamicFormEditToggleBar: React.FC<DynamicFormEditToggleBarProps> =
   }
 
   return (
-    <div className="print:hidden inline-flex items-center gap-2 flex-wrap">
+    <div className={`print:hidden ${className ? className : 'inline-flex items-center gap-2 flex-wrap'}`}>
       {extraSelector}
       {buttonNode}
     </div>
@@ -804,17 +807,18 @@ export const DynamicFormRenderer: React.FC<DynamicFormRendererProps> = ({
                   })()}
 
                   {field.type === 'number' && (
-                    <input
-                      type="number"
-                      step="any"
+                    <NumericInput
+                      allowEmpty
                       required={field.required}
-                      value={value === '' ? '' : Number(value)}
-                      onChange={e =>
-                        onChange(
-                          field.key,
-                          e.target.value === '' ? '' : Number(e.target.value),
-                          field
-                        )
+                      value={
+                        value === '' || value === null || value === undefined
+                          ? ''
+                          : Number.isFinite(Number(value))
+                          ? Number(value)
+                          : ''
+                      }
+                      onOptionalValueChange={next =>
+                        onChange(field.key, next === undefined ? '' : next, field)
                       }
                       placeholder={field.placeholder || '0'}
                       className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/30"

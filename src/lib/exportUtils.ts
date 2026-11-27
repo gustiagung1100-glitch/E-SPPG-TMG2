@@ -5,16 +5,18 @@ import { toPng } from 'html-to-image';
 import { SPPGConfig } from '../types';
 
 export const formatRupiah = (val: number): string => {
+  const safeVal = typeof val === 'number' && Number.isFinite(val) ? val : 0;
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(val || 0);
+  }).format(safeVal);
 };
 
 export const formatNumber = (val: number): string => {
-  return new Intl.NumberFormat('id-ID').format(val || 0);
+  const safeVal = typeof val === 'number' && Number.isFinite(val) ? val : 0;
+  return new Intl.NumberFormat('id-ID').format(safeVal);
 };
 
 export const parseLocalDate = (dateStr?: string): Date | null => {

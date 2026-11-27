@@ -449,7 +449,9 @@ export const Header: React.FC<HeaderProps> = ({
             onKeyDown={handleSearchKeyDown}
             placeholder="Cari cepat modul, sekolah, bahan..."
             aria-label="Pencarian cepat di header"
-            className="w-full h-9 pl-9 pr-14 text-xs sm:text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:border-[#1E3A8A] dark:focus:border-sky-500 focus:ring-2 focus:ring-[#1E3A8A]/15 focus:outline-none transition-all duration-200"
+            className={`w-full h-9 pl-9 text-xs sm:text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-lg text-slate-800 dark:text-slate-100 placeholder:text-slate-500 focus:bg-white dark:focus:bg-slate-900 focus:border-[#1E3A8A] dark:focus:border-sky-500 focus:ring-2 focus:ring-[#1E3A8A]/15 focus:outline-none transition-all duration-200 ${
+              searchQuery ? 'pr-9' : 'pr-3 md:pr-16'
+            }`}
           />
           {searchQuery ? (
             <button

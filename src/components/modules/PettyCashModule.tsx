@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
 import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
+import { NumericInput } from '../common/NumericInput';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -9,6 +10,7 @@ import {
   formatRupiah,
   triggerPrint,
 } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import { PettyCashCategory, PettyCashTransaction } from '../../types';
 import {
   ArrowDownLeft,
@@ -212,7 +214,7 @@ export const PettyCashModule: React.FC = () => {
 
   const handleSaveTx = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanAmount = Math.max(0, Number(txForm.amount) || 0);
+    const cleanAmount = toNonNegativeNumber(txForm.amount, 0);
     if (cleanAmount <= 0) return;
 
     if (editingTx) {
@@ -234,7 +236,7 @@ export const PettyCashModule: React.FC = () => {
 
   const handleSaveOpening = async (e: React.FormEvent) => {
     e.preventDefault();
-    await setPettyCashOpeningBalance(openingInput);
+    await setPettyCashOpeningBalance(toNonNegativeNumber(openingInput, 0));
     setIsOpeningModalOpen(false);
   };
 
@@ -663,12 +665,10 @@ export const PettyCashModule: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
               Saldo Awal Kas Kecil (Rp)
             </label>
-            <input
-              type="number"
+            <NumericInput
               min={0}
-              step={10000}
               value={openingInput}
-              onChange={e => setOpeningInput(Number(e.target.value))}
+              onValueChange={val => setOpeningInput(val)}
               className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
               required
             />
@@ -772,12 +772,12 @@ export const PettyCashModule: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">
                 Nominal (Rp)
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={1}
-                step={500}
-                value={txForm.amount || ''}
-                onChange={e => setTxForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                allowEmpty
+                emptyFallback={0}
+                value={txForm.amount > 0 ? txForm.amount : ''}
+                onValueChange={val => setTxForm(prev => ({ ...prev, amount: val }))}
                 placeholder="Contoh: 250000"
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                 required

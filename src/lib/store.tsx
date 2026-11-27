@@ -160,6 +160,7 @@ import {
   resolvePOItemDistributionDate,
   convertDamagedQuantityToPOUnit,
 } from './supplyChainSync';
+import { toFiniteNumber, toNonNegativeNumber } from './numberUtils';
 import { db, auth, getSecondaryAuth, handleFirestoreError, OperationType, sanitizeFirestoreData } from './firebase';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where } from 'firebase/firestore';
 import {
@@ -2325,7 +2326,9 @@ function recomputeMenuItemsFromRecipes(
   quotaSmall: number,
   quotaLarge: number
 ): MenuItem[] {
-  const totalPortions = Math.max(1, quotaSmall + quotaLarge);
+  const safeSmall = toNonNegativeNumber(quotaSmall, 0);
+  const safeLarge = toNonNegativeNumber(quotaLarge, 0);
+  const totalPortions = Math.max(1, safeSmall + safeLarge);
   return menus.map(menu => {
     const ings = recipesMap[menu.id];
     if (!ings || ings.length === 0) return menu;
@@ -2339,15 +2342,17 @@ function recomputeMenuItemsFromRecipes(
     let totalCost = 0;
 
     for (const ing of ings) {
-      const formula = resolveRecipeIngredientFormula(ing, masterUnits, quotaSmall, quotaLarge);
-      totalCost += formula.totalCost;
+      const formula = resolveRecipeIngredientFormula(ing, masterUnits, safeSmall, safeLarge);
+      totalCost += toNonNegativeNumber(formula.totalCost, 0);
 
-      calSmall += (ing.netWeightSmall / 100) * (ing.calories100g || 0);
-      calLarge += (ing.netWeightLarge / 100) * (ing.calories100g || 0);
-      protSmall += (ing.netWeightSmall / 100) * (ing.protein100g || 0);
-      carbSmall += (ing.netWeightSmall / 100) * (ing.carb100g || 0);
-      fatSmall += (ing.netWeightSmall / 100) * (ing.fat100g || 0);
-      fibSmall += (ing.netWeightSmall / 100) * (ing.fiber100g || 0);
+      const nwSmall = toNonNegativeNumber(ing.netWeightSmall, 0);
+      const nwLarge = toNonNegativeNumber(ing.netWeightLarge, 0);
+      calSmall += (nwSmall / 100) * toNonNegativeNumber(ing.calories100g, 0);
+      calLarge += (nwLarge / 100) * toNonNegativeNumber(ing.calories100g, 0);
+      protSmall += (nwSmall / 100) * toNonNegativeNumber(ing.protein100g, 0);
+      carbSmall += (nwSmall / 100) * toNonNegativeNumber(ing.carb100g, 0);
+      fatSmall += (nwSmall / 100) * toNonNegativeNumber(ing.fat100g, 0);
+      fibSmall += (nwSmall / 100) * toNonNegativeNumber(ing.fiber100g, 0);
     }
 
     return {
@@ -2374,7 +2379,92 @@ function readStoredJson<T>(key: string, fallback: T): T {
   }
 }
 
+const TRIAL_UPLOADED_IMAGES_CLEANED_KEY = 'esppg_trial_uploaded_images_cleaned_v1';
+
+const TRIAL_IMAGE_STORAGE_KEYS: string[] = [
+  'esppg_prep_records',
+  'esppg_cooking_records',
+  'esppg_portioning_records',
+  'esppg_qc_records',
+  'esppg_distribution_deliveries',
+  'esppg_ompreng_returns',
+  'esppg_fuel_logs',
+  'esppg_washing_waste_records',
+  'esppg_stock_mutations_v1',
+  'esppg_letters',
+  'esppg_outgoing_docs',
+  'esppg_incoming_letters',
+  'esppg_division_jobdesks_v1',
+  'esppg_petty_cash_transactions_v1',
+];
+
+function stripUploadedTrialDataUrls(node: unknown): { value: unknown; changed: boolean } {
+  if (typeof node === 'string') {
+    if (node.startsWith('data:image/') || node.startsWith('data:application/')) {
+      return { value: '', changed: true };
+    }
+    return { value: node, changed: false };
+  }
+  if (Array.isArray(node)) {
+    let anyChanged = false;
+    const mapped = node
+      .map(item => {
+        const res = stripUploadedTrialDataUrls(item);
+        if (res.changed) anyChanged = true;
+        return res.value;
+      })
+      .filter(item => item !== '');
+    return { value: anyChanged ? mapped : node, changed: anyChanged };
+  }
+  if (node !== null && typeof node === 'object') {
+    let anyChanged = false;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const res = stripUploadedTrialDataUrls(v);
+      if (res.changed) anyChanged = true;
+      out[k] = res.value;
+    }
+    return { value: anyChanged ? out : node, changed: anyChanged };
+  }
+  return { value: node, changed: false };
+}
+
+/**
+ * One-time cleanup of experimental/trial base64 images stored inside operational records,
+ * strictly preserving logo (`esppg_config`), kop surat, and flyer assets.
+ */
+function cleanupLegacyUploadedTrialImagesOnce(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem(TRIAL_UPLOADED_IMAGES_CLEANED_KEY) === '1') return;
+
+    for (const key of TRIAL_IMAGE_STORAGE_KEYS) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      if (!raw.includes('data:image/') && !raw.includes('data:application/')) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        const { value, changed } = stripUploadedTrialDataUrls(parsed);
+        if (changed) {
+          localStorage.setItem(key, JSON.stringify(value));
+        }
+      } catch {
+        // Skip malformed JSON
+      }
+    }
+
+    localStorage.setItem(TRIAL_UPLOADED_IMAGES_CLEANED_KEY, '1');
+  } catch {
+    // Non-blocking storage cleanup
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  React.useMemo(() => {
+    cleanupLegacyUploadedTrialImagesOnce();
+    return true;
+  }, []);
+
   const [webAccessUsers, setWebAccessUsers] = useState<WebAccessUser[]>(() => readStoredWebAccessUsers());
 
   const [webAccessPolicy, setWebAccessPolicy] = useState<WebAccessPolicy>(() => readStoredWebAccessPolicy());
@@ -4354,20 +4444,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const writes: Promise<void>[] = [
         setDoc(
           doc(db, 'users', safeDocId),
-          {
+          sanitizeFirestoreData({
             id: safeDocId,
             uid: safeDocId,
             ...basePayload,
-          },
+          }),
           { merge: true }
         ),
         setDoc(
           doc(db, 'users', emailDocId),
-          {
+          sanitizeFirestoreData({
             id: emailDocId,
             uid: emailDocId,
             ...basePayload,
-          },
+          }),
           { merge: true }
         ),
       ];
@@ -4377,11 +4467,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         writes.push(
           setDoc(
             doc(db, 'users', cleanFbUid),
-            {
+            sanitizeFirestoreData({
               id: cleanFbUid,
               uid: cleanFbUid,
               ...basePayload,
-            },
+            }),
             { merge: true }
           )
         );
@@ -4409,35 +4499,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await Promise.all([
         setDoc(
           doc(db, 'app_settings', 'web_access_policy'),
-          {
+          sanitizeFirestoreData({
             id: 'web_access_policy',
             sppgId: 'GFBQSYXD',
             ...webAccessPolicyRef.current,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         ),
         setDoc(
           doc(db, 'app_settings', 'role_module_access'),
-          {
+          sanitizeFirestoreData({
             id: 'role_module_access',
             sppgId: 'GFBQSYXD',
             accessMap: roleModuleAccess,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         ),
         setDoc(
           doc(db, 'app_settings', 'dashboard_layout_config'),
-          {
+          sanitizeFirestoreData({
             id: 'dashboard_layout_config',
             sppgId: 'GFBQSYXD',
             config: dashboardLayoutConfig,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         ),
       ]);
@@ -4879,13 +4969,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'web_access_policy'),
-          {
+          sanitizeFirestoreData({
             id: 'web_access_policy',
             sppgId: 'GFBQSYXD',
             ...nextPolicy,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -4922,13 +5012,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'dynamic_form_schemas'),
-          {
+          sanitizeFirestoreData({
             id: 'dynamic_form_schemas',
             sppgId: 'GFBQSYXD',
             schemas: nextMap,
             updatedAt: updatedSchema.updatedAt,
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -4960,13 +5050,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'dynamic_form_schemas'),
-          {
+          sanitizeFirestoreData({
             id: 'dynamic_form_schemas',
             sppgId: 'GFBQSYXD',
             schemas: nextMap,
             updatedAt: defaultSchema.updatedAt,
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -4993,10 +5083,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return roleMap[action] ?? false;
   };
 
-  // Audit Logger
+  // Audit Logger (includes sppgId + collision-free ID to comply with Firestore rules)
   const logAudit = async (action: AuditLog['action'], module: AuditLog['module'], details: string) => {
     const newLog: AuditLog = {
-      id: 'aud-' + Date.now(),
+      id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
       userId: currentUser.uid,
       userName: currentUser.name,
@@ -5009,7 +5099,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     try {
       if (auth.currentUser) {
-        await setDoc(doc(db, 'audit_logs', newLog.id), newLog);
+        const nowIso = new Date().toISOString();
+        await setDoc(
+          doc(db, 'audit_logs', newLog.id),
+          sanitizeFirestoreData({
+            ...newLog,
+            sppgId: 'GFBQSYXD',
+            status: 'Recorded',
+            isDeleted: false,
+            createdAt: nowIso,
+            createdBy: currentUser.uid || 'system',
+            updatedAt: nowIso,
+            updatedBy: currentUser.uid || 'system',
+          })
+        );
       }
     } catch {
       // Non-blocking
@@ -5042,7 +5145,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'role_module_access'),
-          {
+          sanitizeFirestoreData({
             id: 'role_module_access',
             sppgId: 'GFBQSYXD',
             settingKey: 'role_module_access',
@@ -5051,7 +5154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             accessMap: sanitized,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -5084,7 +5187,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'role_module_access'),
-          {
+          sanitizeFirestoreData({
             id: 'role_module_access',
             sppgId: 'GFBQSYXD',
             settingKey: 'role_module_access',
@@ -5093,7 +5196,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             accessMap: defaults,
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -5123,7 +5226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'dashboard_layout_config'),
-          {
+          sanitizeFirestoreData({
             id: 'dashboard_layout_config',
             sppgId: 'GFBQSYXD',
             settingKey: 'dashboard_layout_config',
@@ -5132,7 +5235,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             config: sanitized,
             updatedAt: nowIso,
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -5170,7 +5273,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'app_settings', 'dashboard_layout_config'),
-          {
+          sanitizeFirestoreData({
             id: 'dashboard_layout_config',
             sppgId: 'GFBQSYXD',
             settingKey: 'dashboard_layout_config',
@@ -5179,7 +5282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             config: defaults,
             updatedAt: nowIso,
             updatedBy: currentUser.name,
-          },
+          }),
           { merge: true }
         );
       } catch {
@@ -5770,14 +5873,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const recordBeneficiaryAttendance = (
     log: Omit<BeneficiaryAttendanceLog, 'id' | 'presentSmall' | 'presentLarge' | 'actualPortions' | 'totalRegistered' | 'totalAbsent'>
   ): { success: boolean; error?: string } => {
+    const registeredSmall = toNonNegativeNumber(log.registeredSmall, 0);
+    const registeredLarge = toNonNegativeNumber(log.registeredLarge, 0);
+    const absentSmall = toNonNegativeNumber(log.absentSmall, 0);
+    const absentLarge = toNonNegativeNumber(log.absentLarge, 0);
+
     // Validasi 1: jumlah tidak hadir tidak boleh melebihi jumlah terdaftar
-    if (log.absentSmall > log.registeredSmall) {
-      const err = `Jumlah tidak hadir porsi kecil (${log.absentSmall}) melebihi jumlah siswa terdaftar (${log.registeredSmall})!`;
+    if (absentSmall > registeredSmall) {
+      const err = `Jumlah tidak hadir porsi kecil (${absentSmall}) melebihi jumlah siswa terdaftar (${registeredSmall})!`;
       addToast('error', 'Validasi Gagal', err);
       return { success: false, error: err };
     }
-    if (log.absentLarge > log.registeredLarge) {
-      const err = `Jumlah tidak hadir porsi besar (${log.absentLarge}) melebihi jumlah siswa terdaftar (${log.registeredLarge})!`;
+    if (absentLarge > registeredLarge) {
+      const err = `Jumlah tidak hadir porsi besar (${absentLarge}) melebihi jumlah siswa terdaftar (${registeredLarge})!`;
       addToast('error', 'Validasi Gagal', err);
       return { success: false, error: err };
     }
@@ -5786,14 +5894,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Jumlah hadir kecil = Jumlah terdaftar kecil - Jumlah tidak hadir kecil
     // Jumlah hadir besar = Jumlah terdaftar besar - Jumlah tidak hadir besar
     // Jumlah porsi aktual = Total jumlah hadir seluruh kategori
-    const presentSmall = log.registeredSmall - log.absentSmall;
-    const presentLarge = log.registeredLarge - log.absentLarge;
+    const presentSmall = Math.max(0, registeredSmall - absentSmall);
+    const presentLarge = Math.max(0, registeredLarge - absentLarge);
     const actualPortions = presentSmall + presentLarge;
-    const totalRegistered = log.registeredSmall + log.registeredLarge;
-    const totalAbsent = log.absentSmall + log.absentLarge;
+    const totalRegistered = registeredSmall + registeredLarge;
+    const totalAbsent = absentSmall + absentLarge;
 
     const newLog: BeneficiaryAttendanceLog = {
       ...log,
+      registeredSmall,
+      registeredLarge,
+      absentSmall,
+      absentLarge,
       id: 'att-' + Date.now(),
       totalRegistered,
       totalAbsent,
@@ -5858,12 +5970,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cloudDocId = `att-${log.date}-${log.institutionId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
       setDoc(
         doc(db, 'beneficiary_daily_records', cloudDocId),
-        {
+        sanitizeFirestoreData({
           ...newLog,
           sppgId: 'GFBQSYXD',
           isDeleted: false,
           updatedAt: new Date().toISOString(),
-        },
+        }),
         { merge: true }
       ).catch(() => {
         // Non-blocking fallback to LocalStorage
@@ -5963,12 +6075,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           await setDoc(
             doc(db, 'beneficiary_daily_records', cloudDocId),
-            {
+            sanitizeFirestoreData({
               ...target,
               sppgId: 'GFBQSYXD',
               isDeleted: false,
               updatedAt: new Date().toISOString(),
-            },
+            }),
             { merge: true }
           );
         } catch {
@@ -6066,10 +6178,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (auth.currentUser) {
       try {
-        await setDoc(doc(db, 'beneficiary_nutrition_records', newRecord.id), {
-          ...newRecord,
-          sppgId: 'GFBQSYXD',
-        });
+        await setDoc(
+          doc(db, 'beneficiary_nutrition_records', newRecord.id),
+          sanitizeFirestoreData({
+            ...newRecord,
+            sppgId: 'GFBQSYXD',
+          })
+        );
       } catch (err) {
         console.warn('Firestore write fallback for beneficiary_nutrition_records:', err);
       }
@@ -6173,7 +6288,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'beneficiary_nutrition_records', id),
-          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          sanitizeFirestoreData({ ...updatedRecord, sppgId: 'GFBQSYXD' }),
           { merge: true }
         );
       } catch (err) {
@@ -6347,10 +6462,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (auth.currentUser) {
       try {
-        await setDoc(doc(db, 'maternal_health_records', newRecord.id), {
-          ...newRecord,
-          sppgId: 'GFBQSYXD',
-        });
+        await setDoc(
+          doc(db, 'maternal_health_records', newRecord.id),
+          sanitizeFirestoreData({
+            ...newRecord,
+            sppgId: 'GFBQSYXD',
+          })
+        );
       } catch (err) {
         console.warn('Firestore write fallback for maternal_health_records:', err);
       }
@@ -6516,7 +6634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'maternal_health_records', id),
-          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          sanitizeFirestoreData({ ...updatedRecord, sppgId: 'GFBQSYXD' }),
           { merge: true }
         );
       } catch (err) {
@@ -6671,10 +6789,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (auth.currentUser) {
       try {
-        await setDoc(doc(db, 'lactating_health_records', newRecord.id), {
-          ...newRecord,
-          sppgId: 'GFBQSYXD',
-        });
+        await setDoc(
+          doc(db, 'lactating_health_records', newRecord.id),
+          sanitizeFirestoreData({
+            ...newRecord,
+            sppgId: 'GFBQSYXD',
+          })
+        );
       } catch (err) {
         console.warn('Firestore write fallback for lactating_health_records:', err);
       }
@@ -6828,7 +6949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         await setDoc(
           doc(db, 'lactating_health_records', id),
-          { ...updatedRecord, sppgId: 'GFBQSYXD' },
+          sanitizeFirestoreData({ ...updatedRecord, sppgId: 'GFBQSYXD' }),
           { merge: true }
         );
       } catch (err) {
@@ -7353,7 +7474,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetItem = inventoryRef.current.find(i => i.id === input.itemId);
     if (!targetItem) return null;
 
-    const diff = input.physicalStock - targetItem.currentStock;
+    const safePhysicalStock = toNonNegativeNumber(input.physicalStock, 0);
+    const safeCurrentStock = toNonNegativeNumber(targetItem.currentStock, 0);
+    const safeUnitPrice = toNonNegativeNumber(targetItem.pricePerUnit, 0);
+    const diff = safePhysicalStock - safeCurrentStock;
     const todayStr = new Date().toISOString().slice(0, 10);
     const nowTime = new Date().toTimeString().slice(0, 8);
     const opNum = `SO-${todayStr.replace(/-/g, '').slice(2)}-0${stockOpnames.length + 1}`;
@@ -7365,11 +7489,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       itemId: targetItem.id,
       itemName: targetItem.name,
       unit: targetItem.unit,
-      systemStock: targetItem.currentStock,
-      physicalStock: input.physicalStock,
+      systemStock: safeCurrentStock,
+      physicalStock: safePhysicalStock,
       difference: diff,
-      unitPrice: targetItem.pricePerUnit,
-      differenceValuation: diff * targetItem.pricePerUnit,
+      unitPrice: safeUnitPrice,
+      differenceValuation: diff * safeUnitPrice,
       reason: input.reason,
       inspectorName: input.inspectorName,
       status: 'Disetujui',
@@ -7661,9 +7785,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Modul PLOK: RAB Handlers & Single-Entry Sync Generators
   const addRABItem = async (item: Omit<RABItem, 'id' | 'totalBudget'>) => {
-    const totalBudget = item.volume * item.unitPrice;
+    const cleanVol = toNonNegativeNumber(item.volume, 0);
+    const cleanPrice = toNonNegativeNumber(item.unitPrice, 0);
+    const totalBudget = cleanVol * cleanPrice;
     const newRAB: RABItem = {
       ...item,
+      volume: cleanVol,
+      unitPrice: cleanPrice,
       id: 'rab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
       totalBudget,
       poCreatedQuantity: 0,
@@ -7686,9 +7814,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const nextRABs = rabItemsRef.current.map(r => {
       if (r.id === id) {
+        const sanitizedPatch: Partial<RABItem> = {
+          ...item,
+          ...(item.volume !== undefined ? { volume: toNonNegativeNumber(item.volume, 0) } : {}),
+          ...(item.unitPrice !== undefined ? { unitPrice: toNonNegativeNumber(item.unitPrice, 0) } : {}),
+          ...(item.totalBudget !== undefined ? { totalBudget: toNonNegativeNumber(item.totalBudget, 0) } : {}),
+        };
         const updated: RABItem = {
           ...r,
-          ...item,
+          ...sanitizedPatch,
           ...(item.planDate && !item.periodMonth
             ? { periodMonth: formatIndonesianPeriodMonth(item.planDate) }
             : {}),
@@ -7699,8 +7833,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ? true
               : r.isManualOverride,
         };
-        if (item.volume !== undefined || item.unitPrice !== undefined) {
-          updated.totalBudget = (updated.volume || 0) * (updated.unitPrice || 0);
+        if (item.totalBudget === undefined && (item.volume !== undefined || item.unitPrice !== undefined)) {
+          updated.totalBudget = toNonNegativeNumber(updated.volume, 0) * toNonNegativeNumber(updated.unitPrice, 0);
         }
         return updated;
       }
@@ -8054,12 +8188,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const pad2 = (n: number) => String(n).padStart(2, '0');
     const inspectedAt = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
     const uniqueSuffix = Math.random().toString(36).slice(2, 6);
+    const orderedQuantity = toNonNegativeNumber(qc.orderedQuantity, 0);
+    const receivedQuantity = toNonNegativeNumber(qc.receivedQuantity, 0);
+    const receivingTemp = toFiniteNumber(qc.receivingTemp, 0);
     const differenceQuantity =
-      qc.differenceQuantity !== undefined
+      qc.differenceQuantity !== undefined && Number.isFinite(qc.differenceQuantity)
         ? qc.differenceQuantity
-        : qc.receivedQuantity - qc.orderedQuantity;
+        : receivedQuantity - orderedQuantity;
     const newQC: QualityControlRecord = {
       ...qc,
+      orderedQuantity,
+      receivedQuantity,
+      receivingTemp,
       differenceQuantity,
       id: `qc-${Date.now()}-${uniqueSuffix}`,
       inspectedAt,
@@ -8095,7 +8235,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setInventory(invSync.inventory);
     setStockMutations(invSync.stockMutations);
 
-    await logAudit('CREATE', 'procurement', `Pemeriksaan QC PO ${qc.poNumber}: ${qc.itemName} status ${qc.status} (${qc.receivedQuantity} ${qc.unit})`);
+    await logAudit('CREATE', 'procurement', `Pemeriksaan QC PO ${qc.poNumber}: ${qc.itemName} status ${qc.status} (${receivedQuantity} ${qc.unit})`);
     addToast('success', 'QC Dicatat & Tersinkron ke Gudang', `Pemeriksaan QC PO ${qc.poNumber} tersimpan & otomatis memperbarui Stok Gudang.`);
   };
 
@@ -8106,10 +8246,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextQCs = qualityControlRecordsRef.current.map(r => {
       if (r.id !== id) return r;
       const merged: QualityControlRecord = { ...r, ...qc };
-      const ordered = Number(merged.orderedQuantity || 0);
-      const received = Number(merged.receivedQuantity || 0);
+      const ordered = toNonNegativeNumber(merged.orderedQuantity, 0);
+      const received = toNonNegativeNumber(merged.receivedQuantity, 0);
+      merged.orderedQuantity = ordered;
+      merged.receivedQuantity = received;
+      merged.receivingTemp = toFiniteNumber(merged.receivingTemp, 0);
       merged.differenceQuantity =
-        qc.differenceQuantity !== undefined ? qc.differenceQuantity : received - ordered;
+        qc.differenceQuantity !== undefined && Number.isFinite(qc.differenceQuantity)
+          ? qc.differenceQuantity
+          : received - ordered;
       if (qc.status !== undefined) {
         if (isQCAcceptedStatus(qc.status)) {
           if (qc.acceptedStatusAt) {
@@ -8243,19 +8388,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     tx: Omit<PettyCashTransaction, 'id' | 'createdAt'>
   ): Promise<PettyCashTransaction> => {
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const cleanAmount = toNonNegativeNumber(tx.amount, 0);
     const created: PettyCashTransaction = {
       ...tx,
+      amount: cleanAmount,
       id: 'pc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5),
       createdAt: now,
     };
     setPettyCashTransactions(prev => [created, ...prev]);
-    await logAudit('CREATE', 'petty_cash', `Petty Cash ${tx.type}: Rp ${tx.amount.toLocaleString('id-ID')} - ${tx.description}`);
-    addToast('success', `${tx.type} Petty Cash Dicatat`, `${tx.voucherNumber} sebesar Rp ${tx.amount.toLocaleString('id-ID')} tersimpan.`);
+    await logAudit('CREATE', 'petty_cash', `Petty Cash ${tx.type}: Rp ${cleanAmount.toLocaleString('id-ID')} - ${tx.description}`);
+    addToast('success', `${tx.type} Petty Cash Dicatat`, `${tx.voucherNumber} sebesar Rp ${cleanAmount.toLocaleString('id-ID')} tersimpan.`);
     return created;
   };
 
   const updatePettyCashTransaction = async (id: string, tx: Partial<PettyCashTransaction>) => {
-    setPettyCashTransactions(prev => prev.map(item => (item.id === id ? { ...item, ...tx } : item)));
+    const sanitizedPatch: Partial<PettyCashTransaction> = {
+      ...tx,
+      ...(tx.amount !== undefined ? { amount: toNonNegativeNumber(tx.amount, 0) } : {}),
+    };
+    setPettyCashTransactions(prev => prev.map(item => (item.id === id ? { ...item, ...sanitizedPatch } : item)));
     await logAudit('UPDATE', 'petty_cash', `Memperbarui mutasi Petty Cash ID: ${id}`);
     addToast('info', 'Mutasi Diperbarui', 'Data transaksi Petty Cash berhasil diperbarui.');
   };

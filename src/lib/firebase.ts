@@ -30,9 +30,19 @@ function createFirestoreInstance(firebaseApp: FirebaseApp): Firestore {
 export const db: Firestore = createFirestoreInstance(app);
 
 /**
- * Recursively removes undefined fields from plain objects/arrays before writing to Firestore.
+ * Recursively removes undefined fields, normalizes non-finite numbers (NaN/Infinity -> 0),
+ * and strips oversized data URI blobs before writing to Firestore.
  */
 export function sanitizeFirestoreData<T>(value: T): T {
+  if (typeof value === 'number') {
+    return (Number.isFinite(value) ? value : 0) as unknown as T;
+  }
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/') && value.length > 500_000) {
+      return '' as unknown as T;
+    }
+    return value;
+  }
   if (Array.isArray(value)) {
     return value
       .filter(item => item !== undefined)

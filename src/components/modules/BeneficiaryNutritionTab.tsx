@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { NumericInput } from '../common/NumericInput';
 import {
   calculateWHOZScore,
   calculateAgeInMonths,
@@ -180,6 +181,18 @@ export const BeneficiaryNutritionTab: React.FC<BeneficiaryNutritionTabProps> = (
         'Duplikasi NIK Diblokir',
         `NIK ${nikValidation.cleanNik} sudah terdaftar atas nama ${duplicateOwner.fullName}.`
       );
+      return;
+    }
+    if (!Number.isFinite(ageMonths) || ageMonths < 0 || ageMonths > 228) {
+      addToast('error', 'Usia Tidak Valid', 'Usia anak harus berada di rentang 0 hingga 228 bulan.');
+      return;
+    }
+    if (!Number.isFinite(weightKg) || weightKg < 1.5 || weightKg > 150) {
+      addToast('error', 'Berat Badan Tidak Valid', 'Berat badan harus berada di rentang 1,5 hingga 150 kg.');
+      return;
+    }
+    if (!Number.isFinite(heightCm) || heightCm < 35 || heightCm > 220) {
+      addToast('error', 'Tinggi Badan Tidak Valid', 'Tinggi / panjang badan harus berada di rentang 35 hingga 220 cm.');
       return;
     }
 
@@ -791,14 +804,13 @@ export const BeneficiaryNutritionTab: React.FC<BeneficiaryNutritionTabProps> = (
                   >
                     Usia (Bulan, 0–228)
                   </label>
-                  <input
+                  <NumericInput
                     id="child-age-input"
-                    type="number"
                     min={0}
                     max={228}
                     required
                     value={ageMonths}
-                    onChange={e => setAgeMonths(Math.max(0, Math.min(228, Number(e.target.value) || 0)))}
+                    onValueChange={val => setAgeMonths(Math.max(0, Math.min(228, val)))}
                     className="w-full min-h-[44px] px-3.5 py-2 text-sm font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
@@ -831,15 +843,13 @@ export const BeneficiaryNutritionTab: React.FC<BeneficiaryNutritionTabProps> = (
                     <Scale className="w-3.5 h-3.5 text-[#0F766E] dark:text-teal-400" />
                     <span>Berat Badan (kg)</span>
                   </label>
-                  <input
+                  <NumericInput
                     id="child-weight-input"
-                    type="number"
-                    step="0.1"
                     min={1.5}
                     max={150}
                     required
                     value={weightKg}
-                    onChange={e => setWeightKg(Number(e.target.value) || 1)}
+                    onValueChange={setWeightKg}
                     className="w-full min-h-[44px] px-3.5 py-2.5 text-base font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>
@@ -852,15 +862,13 @@ export const BeneficiaryNutritionTab: React.FC<BeneficiaryNutritionTabProps> = (
                     <Ruler className="w-3.5 h-3.5 text-[#0F766E] dark:text-teal-400" />
                     <span>Tinggi / Panjang Badan (cm)</span>
                   </label>
-                  <input
+                  <NumericInput
                     id="child-height-input"
-                    type="number"
-                    step="0.1"
                     min={35}
                     max={220}
                     required
                     value={heightCm}
-                    onChange={e => setHeightCm(Number(e.target.value) || 35)}
+                    onValueChange={setHeightCm}
                     className="w-full min-h-[44px] px-3.5 py-2.5 text-base font-mono font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                   />
                 </div>

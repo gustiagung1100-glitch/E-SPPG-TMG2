@@ -3,6 +3,7 @@ import { FacilityTemperatures } from '../../types';
 import { defaultFacilityTemperatures } from '../../lib/productionData';
 import { Thermometer, Upload, Eye, Camera, CheckCircle2, X, Plus, Clock } from 'lucide-react';
 import { ClassicTimeInput } from './ClassicTimeInput';
+import { NumericInput } from './NumericInput';
 
 export type FacilityTempKey =
   | 'portioningRoomTemp'
@@ -672,19 +673,10 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
         <div className={`grid ${gridColsClass} gap-1.5`}>
           <div>
             <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">Suhu (°C)</label>
-            <input
-              type="number"
-              step="0.1"
+            <NumericInput
               value={Number.isFinite(tempVal) ? tempVal : ''}
-              onChange={e => {
-                const parsed = Number(e.target.value);
-                onChange(
-                  applyFacilityTempPatch(
-                    value,
-                    unit.tempKey,
-                    Number.isFinite(parsed) ? parsed : 0
-                  )
-                );
+              onValueChange={next => {
+                onChange(applyFacilityTempPatch(value, unit.tempKey, next));
               }}
               title="Suhu (°C)"
               className="w-full px-1.5 py-1 border rounded-md dark:bg-slate-800 dark:border-slate-700 font-mono text-xs"
@@ -694,19 +686,16 @@ export const FacilityTempModalGrid: React.FC<FacilityTempModalGridProps> = ({
           {showHumidityInput && (
             <div>
               <label className="block text-[9px] font-semibold text-slate-500 mb-0.5">Kelembapan (%)</label>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                max="100"
+              <NumericInput
+                min={0}
+                max={100}
                 value={getFacilityHumidityValue(value, unit.tempKey)}
-                onChange={e => {
-                  const parsed = Number(e.target.value);
+                onValueChange={next => {
                   onChange(
                     applyFacilityHumidityPatch(
                       value,
                       unit.tempKey,
-                      Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0
+                      Math.max(0, Math.min(100, next))
                     )
                   );
                 }}

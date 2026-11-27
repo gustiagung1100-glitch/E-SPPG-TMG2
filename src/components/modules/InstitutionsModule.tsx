@@ -3,6 +3,8 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { NumericInput } from '../common/NumericInput';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import { BeneficiaryNutritionTab } from './BeneficiaryNutritionTab';
 import { MaternalHealthTab } from './MaternalHealthTab';
 import { LactatingHealthTab } from './LactatingHealthTab';
@@ -313,11 +315,13 @@ export const InstitutionsModule: React.FC = () => {
       return;
     }
 
-    const calculatedTotal = Number(formData.smallPortions || 0) + Number(formData.largePortions || 0);
+    const smallPortions = toNonNegativeNumber(formData.smallPortions, 0);
+    const largePortions = toNonNegativeNumber(formData.largePortions, 0);
+    const calculatedTotal = smallPortions + largePortions;
     const payload = {
       ...formData,
-      smallPortions: Number(formData.smallPortions || 0),
-      largePortions: Number(formData.largePortions || 0),
+      smallPortions,
+      largePortions,
       totalPortions: calculatedTotal,
       customFields: formData.customFields || {},
     };
@@ -355,8 +359,8 @@ export const InstitutionsModule: React.FC = () => {
 
     await updateInstitutionQuotaWithHistory(
       quotaTargetInst.id,
-      Number(quotaForm.smallPortions),
-      Number(quotaForm.largePortions),
+      toNonNegativeNumber(quotaForm.smallPortions, 0),
+      toNonNegativeNumber(quotaForm.largePortions, 0),
       quotaForm.reason.trim()
     );
 
@@ -492,7 +496,8 @@ export const InstitutionsModule: React.FC = () => {
           'Hadir Kecil (Aktual)': log.presentSmall,
           'Hadir Besar (Aktual)': log.presentLarge,
           'Jumlah Porsi Aktual': log.actualPortions,
-          'Tingkat Kehadiran (%)': ((log.actualPortions / log.totalRegistered) * 100).toFixed(1) + '%',
+          'Tingkat Kehadiran (%)':
+            (log.totalRegistered > 0 ? ((log.actualPortions / log.totalRegistered) * 100).toFixed(1) : '0.0') + '%',
           'Status BAST': log.bastConfirmed ? 'Terverifikasi' : 'Pending',
           'Pencatat / PIC': log.recordedBy,
           'Catatan': log.notes || '-',
@@ -511,7 +516,7 @@ export const InstitutionsModule: React.FC = () => {
       formatNumber(log.totalRegistered),
       formatNumber(log.totalAbsent),
       formatNumber(log.actualPortions),
-      `${((log.actualPortions / log.totalRegistered) * 100).toFixed(1)}%`,
+      `${log.totalRegistered > 0 ? ((log.actualPortions / log.totalRegistered) * 100).toFixed(1) : '0.0'}%`,
       log.bastConfirmed ? 'Sudah BAST' : 'Pending',
       log.recordedBy,
     ]);
@@ -613,7 +618,7 @@ export const InstitutionsModule: React.FC = () => {
       `${l.registeredSmall} / ${l.registeredLarge} / ${l.totalRegistered}`,
       `${l.totalAbsent} siswa`,
       `${l.presentSmall} / ${l.presentLarge} / ${l.actualPortions}`,
-      `${((l.actualPortions / l.totalRegistered) * 100).toFixed(1)}%`,
+      `${l.totalRegistered > 0 ? ((l.actualPortions / l.totalRegistered) * 100).toFixed(1) : '0.0'}%`,
       l.bastConfirmed ? 'Sudah BAST' : 'Pending Verifikasi',
     ]);
     const { headers, rows } = appendDynamicExportColumns(
@@ -1057,13 +1062,12 @@ export const InstitutionsModule: React.FC = () => {
                                   <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
                                     {absentSmallField?.label || 'Jumlah Tidak Hadir (Kecil)'} *
                                   </label>
-                                  <input
-                                    type="number"
-                                    min="0"
+                                  <NumericInput
+                                    min={0}
                                     max={registeredSmallCurrent}
                                     required={absentSmallField?.required ?? true}
                                     value={attendanceForm.absentSmall}
-                                    onChange={e => setAttendanceForm({ ...attendanceForm, absentSmall: Number(e.target.value) })}
+                                    onValueChange={val => setAttendanceForm({ ...attendanceForm, absentSmall: val })}
                                     className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
                                       isAbsentSmallInvalid
                                         ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
@@ -1105,13 +1109,12 @@ export const InstitutionsModule: React.FC = () => {
                                   <label className="block text-[11px] font-semibold text-rose-600 dark:text-rose-400 mb-1">
                                     {absentLargeField?.label || 'Jumlah Tidak Hadir (Besar)'} *
                                   </label>
-                                  <input
-                                    type="number"
-                                    min="0"
+                                  <NumericInput
+                                    min={0}
                                     max={registeredLargeCurrent}
                                     required={absentLargeField?.required ?? true}
                                     value={attendanceForm.absentLarge}
-                                    onChange={e => setAttendanceForm({ ...attendanceForm, absentLarge: Number(e.target.value) })}
+                                    onValueChange={val => setAttendanceForm({ ...attendanceForm, absentLarge: val })}
                                     className={`w-full px-3 py-2 text-xs rounded-lg border font-mono font-bold ${
                                       isAbsentLargeInvalid
                                         ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950'
@@ -1985,12 +1988,11 @@ export const InstitutionsModule: React.FC = () => {
                 <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
                   Kuota Baru Porsi Kecil *
                 </label>
-                <input
-                  type="number"
-                  min="0"
+                <NumericInput
+                  min={0}
                   required
                   value={quotaForm.smallPortions}
-                  onChange={e => setQuotaForm({ ...quotaForm, smallPortions: Number(e.target.value) })}
+                  onValueChange={val => setQuotaForm({ ...quotaForm, smallPortions: val })}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                 />
               </div>
@@ -1999,12 +2001,11 @@ export const InstitutionsModule: React.FC = () => {
                 <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
                   Kuota Baru Porsi Besar *
                 </label>
-                <input
-                  type="number"
-                  min="0"
+                <NumericInput
+                  min={0}
                   required
                   value={quotaForm.largePortions}
-                  onChange={e => setQuotaForm({ ...quotaForm, largePortions: Number(e.target.value) })}
+                  onValueChange={val => setQuotaForm({ ...quotaForm, largePortions: val })}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                 />
               </div>
@@ -2012,7 +2013,7 @@ export const InstitutionsModule: React.FC = () => {
 
             {/* Delta Preview */}
             {(() => {
-              const newTotal = Number(quotaForm.smallPortions) + Number(quotaForm.largePortions);
+              const newTotal = toNonNegativeNumber(quotaForm.smallPortions, 0) + toNonNegativeNumber(quotaForm.largePortions, 0);
               const delta = newTotal - quotaTargetInst.totalPortions;
               const isPos = delta >= 0;
               return (

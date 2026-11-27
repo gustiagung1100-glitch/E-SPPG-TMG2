@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
+import { NumericInput } from '../common/NumericInput';
 import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import {
   BASTDocumentSheet,
@@ -10,6 +11,7 @@ import {
   exportBastDocumentPDF,
 } from '../common/BASTDocumentSheet';
 import { exportTableToPDF, exportToExcel, formatNumber, triggerPrint, formatIndonesianDate } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   getDefaultDivisionOfficerName,
   getDivisionOfficerSelectOptions,
@@ -435,8 +437,8 @@ export const DistributionModule: React.FC = () => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === returnForm.institutionId) || institutions[0];
     if (!inst) return;
-    const smallQty = Number(returnForm.smallPortions) || 0;
-    const largeQty = Number(returnForm.largePortions) || 0;
+    const smallQty = toNonNegativeNumber(returnForm.smallPortions, 0);
+    const largeQty = toNonNegativeNumber(returnForm.largePortions, 0);
     const resolvedPic =
       returnForm.receivedByOfficer.trim() || resolveInstitutionPicName(inst.id) || 'PIC Lembaga';
     if (editingReturnId) {
@@ -2117,30 +2119,28 @@ export const DistributionModule: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold mb-1">Ompreng Porsi Kecil</label>
-              <input
-                type="number"
+              <NumericInput
                 min={0}
                 required
                 value={returnForm.smallPortions}
-                onChange={e => setReturnForm(f => ({ ...f, smallPortions: Number(e.target.value) }))}
+                onValueChange={val => setReturnForm(f => ({ ...f, smallPortions: val }))}
                 className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
               />
             </div>
             <div>
               <label className="block font-bold mb-1">Ompreng Porsi Besar</label>
-              <input
-                type="number"
+              <NumericInput
                 min={0}
                 required
                 value={returnForm.largePortions}
-                onChange={e => setReturnForm(f => ({ ...f, largePortions: Number(e.target.value) }))}
+                onValueChange={val => setReturnForm(f => ({ ...f, largePortions: val }))}
                 className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
               />
             </div>
             <div>
               <label className="block font-bold mb-1">Total Ompreng Kembali</label>
               <div className="w-full px-3 py-2 border rounded-lg bg-slate-100 dark:bg-slate-800/70 dark:border-slate-700 font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                {Number(returnForm.smallPortions || 0) + Number(returnForm.largePortions || 0)} Ompreng
+                {toNonNegativeNumber(returnForm.smallPortions, 0) + toNonNegativeNumber(returnForm.largePortions, 0)} Ompreng
               </div>
             </div>
           </div>

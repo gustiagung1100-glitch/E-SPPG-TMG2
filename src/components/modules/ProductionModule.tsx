@@ -7,6 +7,8 @@ import {
 import { PrintHeader } from '../common/PrintHeader';
 import { Modal } from '../common/Modal';
 import { ClassicTimeInput } from '../common/ClassicTimeInput';
+import { NumericInput } from '../common/NumericInput';
+import { toFiniteNumber, toNonNegativeNumber } from '../../lib/numberUtils';
 import { DataTable, Column } from '../common/DataTable';
 import {
   BASTDocumentSheet,
@@ -264,12 +266,12 @@ export const ProductionModule: React.FC = () => {
   const handleSavePrep = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanedExtras: DamagedMaterialItem[] = (prepForm.additionalDamagedItems || [])
-      .filter(it => (it.name || '').trim() !== '' || Number(it.quantity || 0) > 0)
+      .filter(it => (it.name || '').trim() !== '' || toNonNegativeNumber(it.quantity, 0) > 0)
       .map(it => ({
         name: (it.name || '').trim() || '-',
-        quantity: Math.max(0, Number(it.quantity) || 0),
+        quantity: toNonNegativeNumber(it.quantity, 0),
         unit: it.unit || 'kg',
-        temp: Number(it.temp) || 0,
+        temp: toFiniteNumber(it.temp, 0),
         ...(it.photoUrl ? { photoUrl: it.photoUrl } : {}),
       }));
 
@@ -279,23 +281,23 @@ export const ProductionModule: React.FC = () => {
       officerName: prepForm.officerName,
       damagedVegetable: {
         name: prepForm.vegName,
-        quantity: Number(prepForm.vegQty),
+        quantity: toNonNegativeNumber(prepForm.vegQty, 0),
         unit: prepForm.vegUnit,
-        temp: Number(prepForm.vegTemp),
+        temp: toFiniteNumber(prepForm.vegTemp, 0),
         ...(prepForm.vegPhoto ? { photoUrl: prepForm.vegPhoto } : {}),
       },
       damagedAnimal: {
         name: prepForm.animalName,
-        quantity: Number(prepForm.animalQty),
+        quantity: toNonNegativeNumber(prepForm.animalQty, 0),
         unit: prepForm.animalUnit,
-        temp: Number(prepForm.animalTemp),
+        temp: toFiniteNumber(prepForm.animalTemp, 0),
         ...(prepForm.animalPhoto ? { photoUrl: prepForm.animalPhoto } : {}),
       },
       damagedFruit: {
         name: prepForm.fruitName,
-        quantity: Number(prepForm.fruitQty),
+        quantity: toNonNegativeNumber(prepForm.fruitQty, 0),
         unit: prepForm.fruitUnit,
-        temp: Number(prepForm.fruitTemp),
+        temp: toFiniteNumber(prepForm.fruitTemp, 0),
         ...(prepForm.fruitPhoto ? { photoUrl: prepForm.fruitPhoto } : {}),
       },
       ...(cleanedExtras.length > 0 ? { additionalDamagedItems: cleanedExtras } : {}),
@@ -846,8 +848,11 @@ export const ProductionModule: React.FC = () => {
 
   const handleSavePortioning = async (e: React.FormEvent) => {
     e.preventDefault();
-    const toOptNum = (val: string | number) =>
-      val === '' || val === null || val === undefined ? undefined : Number(val);
+    const toOptNum = (val: string | number) => {
+      if (val === '' || val === null || val === undefined) return undefined;
+      const num = Number(val);
+      return Number.isFinite(num) ? num : undefined;
+    };
     const matchedMenu =
       (portioningForm.menuId ? menuItems.find(m => m.id === portioningForm.menuId) : undefined) ||
       menuItems.find(m => m.date === portioningForm.date) ||
@@ -861,19 +866,19 @@ export const ProductionModule: React.FC = () => {
       menuId: matchedMenu?.id,
       foodTemps: {
         rice: {
-          temp: Number(portioningForm.riceTemp),
+          temp: toFiniteNumber(portioningForm.riceTemp, 0),
           photoUrl: portioningForm.ricePhoto || undefined,
           session2Temp: toOptNum(portioningForm.riceS2Temp),
           session2PhotoUrl: portioningForm.riceS2Photo || undefined,
           session3Temp: toOptNum(portioningForm.riceS3Temp),
           session3PhotoUrl: portioningForm.riceS3Photo || undefined,
           dangerZone: '60-5°C',
-          rawWeightGrams: Number(portioningForm.riceRawLarge),
-          conversionFactor: Number(portioningForm.riceFactorLarge),
-          cookedWeightGrams: Number(portioningForm.riceCookedLarge),
-          rawWeightSmallGrams: Number(portioningForm.riceRawSmall),
-          conversionFactorSmall: Number(portioningForm.riceFactorSmall),
-          cookedWeightSmallGrams: Number(portioningForm.riceCookedSmall),
+          rawWeightGrams: toNonNegativeNumber(portioningForm.riceRawLarge, 0),
+          conversionFactor: toNonNegativeNumber(portioningForm.riceFactorLarge, 0),
+          cookedWeightGrams: toNonNegativeNumber(portioningForm.riceCookedLarge, 0),
+          rawWeightSmallGrams: toNonNegativeNumber(portioningForm.riceRawSmall, 0),
+          conversionFactorSmall: toNonNegativeNumber(portioningForm.riceFactorSmall, 0),
+          cookedWeightSmallGrams: toNonNegativeNumber(portioningForm.riceCookedSmall, 0),
           smallPortionSession1Temp: toOptNum(portioningForm.riceSmallS1Temp),
           smallPortionSession1PhotoUrl: portioningForm.riceSmallS1Photo || portioningForm.smallPhoto || undefined,
           smallPortionSession2Temp: toOptNum(portioningForm.riceSmallS2Temp),
@@ -882,56 +887,56 @@ export const ProductionModule: React.FC = () => {
           smallPortionSession3PhotoUrl: portioningForm.riceSmallS3Photo || undefined,
         },
         animalProtein: {
-          temp: Number(portioningForm.animalTemp),
+          temp: toFiniteNumber(portioningForm.animalTemp, 0),
           photoUrl: portioningForm.animalPhoto || undefined,
           session2Temp: toOptNum(portioningForm.animalS2Temp),
           session2PhotoUrl: portioningForm.animalS2Photo || undefined,
           session3Temp: toOptNum(portioningForm.animalS3Temp),
           session3PhotoUrl: portioningForm.animalS3Photo || undefined,
           dangerZone: '60-5°C',
-          rawWeightGrams: Number(portioningForm.animalRaw),
-          conversionFactor: Number(portioningForm.animalFactor),
-          cookedWeightGrams: Number(portioningForm.animalCooked),
+          rawWeightGrams: toNonNegativeNumber(portioningForm.animalRaw, 0),
+          conversionFactor: toNonNegativeNumber(portioningForm.animalFactor, 0),
+          cookedWeightGrams: toNonNegativeNumber(portioningForm.animalCooked, 0),
         },
         plantProtein: {
-          temp: Number(portioningForm.plantTemp),
+          temp: toFiniteNumber(portioningForm.plantTemp, 0),
           photoUrl: portioningForm.plantPhoto || undefined,
           session2Temp: toOptNum(portioningForm.plantS2Temp),
           session2PhotoUrl: portioningForm.plantS2Photo || undefined,
           session3Temp: toOptNum(portioningForm.plantS3Temp),
           session3PhotoUrl: portioningForm.plantS3Photo || undefined,
           dangerZone: '60-5°C',
-          rawWeightGrams: Number(portioningForm.plantRaw),
-          conversionFactor: Number(portioningForm.plantFactor),
-          cookedWeightGrams: Number(portioningForm.plantCooked),
+          rawWeightGrams: toNonNegativeNumber(portioningForm.plantRaw, 0),
+          conversionFactor: toNonNegativeNumber(portioningForm.plantFactor, 0),
+          cookedWeightGrams: toNonNegativeNumber(portioningForm.plantCooked, 0),
         },
         vegetable: {
-          temp: Number(portioningForm.vegTemp),
+          temp: toFiniteNumber(portioningForm.vegTemp, 0),
           photoUrl: portioningForm.vegPhoto || undefined,
           session2Temp: toOptNum(portioningForm.vegS2Temp),
           session2PhotoUrl: portioningForm.vegS2Photo || undefined,
           session3Temp: toOptNum(portioningForm.vegS3Temp),
           session3PhotoUrl: portioningForm.vegS3Photo || undefined,
           dangerZone: '60-5°C',
-          rawWeightGrams: Number(portioningForm.vegRaw),
-          conversionFactor: Number(portioningForm.vegFactor),
-          cookedWeightGrams: Number(portioningForm.vegCooked),
+          rawWeightGrams: toNonNegativeNumber(portioningForm.vegRaw, 0),
+          conversionFactor: toNonNegativeNumber(portioningForm.vegFactor, 0),
+          cookedWeightGrams: toNonNegativeNumber(portioningForm.vegCooked, 0),
         },
         fruit: {
-          temp: Number(portioningForm.fruitTemp),
+          temp: toFiniteNumber(portioningForm.fruitTemp, 0),
           photoUrl: portioningForm.fruitPhoto || undefined,
           session2Temp: toOptNum(portioningForm.fruitS2Temp),
           session2PhotoUrl: portioningForm.fruitS2Photo || undefined,
           session3Temp: toOptNum(portioningForm.fruitS3Temp),
           session3PhotoUrl: portioningForm.fruitS3Photo || undefined,
           dangerZone: '60-5°C',
-          rawWeightGrams: Number(portioningForm.fruitRaw),
-          conversionFactor: Number(portioningForm.fruitFactor),
-          cookedWeightGrams: Number(portioningForm.fruitCooked),
+          rawWeightGrams: toNonNegativeNumber(portioningForm.fruitRaw, 0),
+          conversionFactor: toNonNegativeNumber(portioningForm.fruitFactor, 0),
+          cookedWeightGrams: toNonNegativeNumber(portioningForm.fruitCooked, 0),
         },
       },
-      smallPortionWeightGrams: Number(portioningForm.smallPortionGrams),
-      largePortionWeightGrams: Number(portioningForm.largePortionGrams),
+      smallPortionWeightGrams: toNonNegativeNumber(portioningForm.smallPortionGrams, 0),
+      largePortionWeightGrams: toNonNegativeNumber(portioningForm.largePortionGrams, 0),
       smallPortionPhoto: portioningForm.smallPhoto,
       largePortionPhoto: portioningForm.largePhoto,
       facilityTemps: portioningForm.facilityTemps,
@@ -1147,8 +1152,8 @@ export const ProductionModule: React.FC = () => {
     e.preventDefault();
     const inst = institutions.find(i => i.id === returnForm.institutionId) || institutions[0];
     if (!inst) return;
-    const smallQty = Number(returnForm.smallPortions) || 0;
-    const largeQty = Number(returnForm.largePortions) || 0;
+    const smallQty = toNonNegativeNumber(returnForm.smallPortions, 0);
+    const largeQty = toNonNegativeNumber(returnForm.largePortions, 0);
     const resolvedPic =
       returnForm.receivedByOfficer.trim() || resolveInstitutionPicName(inst.id) || 'PIC Lembaga';
     await addOmprengReturn({
@@ -1187,15 +1192,22 @@ export const ProductionModule: React.FC = () => {
 
   const handleSaveFuel = async (e: React.FormEvent) => {
     e.preventDefault();
+    const nominalCost = toNonNegativeNumber(fuelForm.nominalCost, 0);
+    const volumeLiters = toNonNegativeNumber(fuelForm.volumeLiters, 0);
+    const odometerKm = toNonNegativeNumber(fuelForm.odometerKm, 0);
+    if (volumeLiters <= 0) {
+      addToast('error', 'Volume BBM Tidak Valid', 'Volume pengisian BBM harus lebih besar dari 0 liter.');
+      return;
+    }
     await addFuelLog({
       date: new Date().toISOString().slice(0, 10),
       time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
       vehicleNumber: fuelForm.vehicleNumber,
       driverName: fuelForm.driverName,
       fuelType: fuelForm.fuelType,
-      nominalCost: Number(fuelForm.nominalCost),
-      volumeLiters: Number(fuelForm.volumeLiters),
-      odometerKm: Number(fuelForm.odometerKm),
+      nominalCost,
+      volumeLiters,
+      odometerKm,
       gasStationName: fuelForm.gasStationName,
       activityPhoto: fuelForm.activityPhoto,
       receiptPhoto: fuelForm.receiptPhoto,
@@ -1254,21 +1266,21 @@ export const ProductionModule: React.FC = () => {
       addToast('error', 'Validasi Form Food Waste', wasteErr);
       return;
     }
-    const total =
-      Number(wasteForm.wasteRice) +
-      Number(wasteForm.wasteAnimal) +
-      Number(wasteForm.wastePlant) +
-      Number(wasteForm.wasteVeg) +
-      Number(wasteForm.wasteFruit);
+    const wasteRice = toNonNegativeNumber(wasteForm.wasteRice, 0);
+    const wasteAnimal = toNonNegativeNumber(wasteForm.wasteAnimal, 0);
+    const wastePlant = toNonNegativeNumber(wasteForm.wastePlant, 0);
+    const wasteVeg = toNonNegativeNumber(wasteForm.wasteVeg, 0);
+    const wasteFruit = toNonNegativeNumber(wasteForm.wasteFruit, 0);
+    const total = wasteRice + wasteAnimal + wastePlant + wasteVeg + wasteFruit;
     await addWashingWasteRecord({
       date: wasteForm.date,
       time: wasteForm.time,
       officerName: wasteForm.officerName,
-      wasteRice: { weight: Number(wasteForm.wasteRice), unit: wasteForm.unit, photoUrl: wasteForm.ricePhoto },
-      wasteAnimalProtein: { weight: Number(wasteForm.wasteAnimal), unit: wasteForm.unit, photoUrl: wasteForm.animalPhoto },
-      wastePlantProtein: { weight: Number(wasteForm.wastePlant), unit: wasteForm.unit, photoUrl: wasteForm.plantPhoto },
-      wasteVegetable: { weight: Number(wasteForm.wasteVeg), unit: wasteForm.unit, photoUrl: wasteForm.vegPhoto },
-      wasteFruit: { weight: Number(wasteForm.wasteFruit), unit: wasteForm.unit, photoUrl: wasteForm.fruitPhoto },
+      wasteRice: { weight: wasteRice, unit: wasteForm.unit, photoUrl: wasteForm.ricePhoto },
+      wasteAnimalProtein: { weight: wasteAnimal, unit: wasteForm.unit, photoUrl: wasteForm.animalPhoto },
+      wastePlantProtein: { weight: wastePlant, unit: wasteForm.unit, photoUrl: wasteForm.plantPhoto },
+      wasteVegetable: { weight: wasteVeg, unit: wasteForm.unit, photoUrl: wasteForm.vegPhoto },
+      wasteFruit: { weight: wasteFruit, unit: wasteForm.unit, photoUrl: wasteForm.fruitPhoto },
       totalWasteWeight: Number(total.toFixed(2)),
       unit: wasteForm.unit,
       notes: wasteForm.notes,
@@ -2851,11 +2863,10 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={prepForm.vegQty}
-                    onChange={e => setPrepForm(f => ({ ...f, vegQty: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, vegQty: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -2876,11 +2887,9 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
                     value={prepForm.vegTemp}
-                    onChange={e => setPrepForm(f => ({ ...f, vegTemp: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, vegTemp: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -2909,11 +2918,10 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={prepForm.animalQty}
-                    onChange={e => setPrepForm(f => ({ ...f, animalQty: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, animalQty: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -2934,11 +2942,9 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
                     value={prepForm.animalTemp}
-                    onChange={e => setPrepForm(f => ({ ...f, animalTemp: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, animalTemp: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -2967,11 +2973,10 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={prepForm.fruitQty}
-                    onChange={e => setPrepForm(f => ({ ...f, fruitQty: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, fruitQty: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -2992,11 +2997,9 @@ export const ProductionModule: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
                     value={prepForm.fruitTemp}
-                    onChange={e => setPrepForm(f => ({ ...f, fruitTemp: Number(e.target.value) }))}
+                    onValueChange={val => setPrepForm(f => ({ ...f, fruitTemp: val }))}
                     className="w-full px-2.5 py-1.5 border rounded-lg dark:bg-slate-800 dark:border-slate-700 font-mono"
                   />
                 </div>
@@ -3039,16 +3042,14 @@ export const ProductionModule: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Jumlah Rusak</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
                       min={0}
                       value={extra.quantity}
-                      onChange={e =>
+                      onValueChange={val =>
                         setPrepForm(f => ({
                           ...f,
                           additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
-                            i === extraIdx ? { ...it, quantity: Number(e.target.value) } : it
+                            i === extraIdx ? { ...it, quantity: val } : it
                           ),
                         }))
                       }
@@ -3079,15 +3080,13 @@ export const ProductionModule: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-slate-600 dark:text-slate-300 font-semibold mb-0.5">Suhu (°C)</label>
-                    <input
-                      type="number"
-                      step="0.1"
+                    <NumericInput
                       value={extra.temp}
-                      onChange={e =>
+                      onValueChange={val =>
                         setPrepForm(f => ({
                           ...f,
                           additionalDamagedItems: (f.additionalDamagedItems || []).map((it, i) =>
-                            i === extraIdx ? { ...it, temp: Number(e.target.value) } : it
+                            i === extraIdx ? { ...it, temp: val } : it
                           ),
                         }))
                       }
@@ -3326,13 +3325,12 @@ export const ProductionModule: React.FC = () => {
                       <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300">
                         Sesi 1: Suhu (°C) &amp; Foto Item Menu
                       </label>
-                      <input
-                        type="number"
-                        step="0.1"
+                      <NumericInput
+                        allowEmpty
                         value={typeof entry.temp === 'number' && Number.isFinite(entry.temp) ? entry.temp : ''}
-                        onChange={e =>
+                        onOptionalValueChange={next =>
                           updateCookingItemEntry(entry.id, {
-                            temp: e.target.value === '' ? Number.NaN : Number(e.target.value),
+                            temp: next as number,
                           })
                         }
                         className="w-full px-2 py-1 border rounded font-mono text-xs dark:bg-slate-800 dark:border-slate-700"
@@ -3362,23 +3360,19 @@ export const ProductionModule: React.FC = () => {
                         <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                           Sesi 2 (°C)
                         </label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <NumericInput
+                          allowEmpty
                           placeholder="Opsional"
                           value={
                             typeof entry.session2Temp === 'number' && Number.isFinite(entry.session2Temp)
                               ? entry.session2Temp
                               : ''
                           }
-                          onChange={e => {
-                            const val = e.target.value;
-                            const parsed = Number(val);
+                          onOptionalValueChange={next =>
                             updateCookingItemEntry(entry.id, {
-                              session2Temp:
-                                val === '' || !Number.isFinite(parsed) ? undefined : parsed,
-                            });
-                          }}
+                              session2Temp: next,
+                            })
+                          }
                           className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
                         />
                         <input
@@ -3394,23 +3388,19 @@ export const ProductionModule: React.FC = () => {
                         <label className="block text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                           Sesi 3 (°C)
                         </label>
-                        <input
-                          type="number"
-                          step="0.1"
+                        <NumericInput
+                          allowEmpty
                           placeholder="Opsional"
                           value={
                             typeof entry.session3Temp === 'number' && Number.isFinite(entry.session3Temp)
                               ? entry.session3Temp
                               : ''
                           }
-                          onChange={e => {
-                            const val = e.target.value;
-                            const parsed = Number(val);
+                          onOptionalValueChange={next =>
                             updateCookingItemEntry(entry.id, {
-                              session3Temp:
-                                val === '' || !Number.isFinite(parsed) ? undefined : parsed,
-                            });
-                          }}
+                              session3Temp: next,
+                            })
+                          }
                           className="w-full px-2 py-1 border rounded font-mono text-[11px] dark:bg-slate-800 dark:border-slate-700 mt-0.5"
                         />
                         <input
@@ -3756,15 +3746,19 @@ export const ProductionModule: React.FC = () => {
                               <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 mb-0.5">
                                 Suhu Pemorsian (°C)
                               </label>
-                              <input
-                                type="number"
-                                step="0.1"
+                              <NumericInput
+                                allowEmpty
                                 placeholder="°C"
                                 value={portioningForm[pc.s1TempKey]}
-                                onChange={e =>
+                                onOptionalValueChange={next =>
                                   setPortioningForm(f => ({
                                     ...f,
-                                    [pc.s1TempKey]: pc.s1TempKey === 'riceSmallS1Temp' ? e.target.value : Number(e.target.value),
+                                    [pc.s1TempKey]:
+                                      pc.s1TempKey === 'riceSmallS1Temp'
+                                        ? next === undefined
+                                          ? ''
+                                          : next
+                                        : next ?? 0,
                                   }))
                                 }
                                 className="w-full px-2.5 py-1.5 border rounded-md font-mono text-xs dark:bg-slate-800 dark:border-slate-700"
@@ -4157,30 +4151,28 @@ export const ProductionModule: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold mb-1">Ompreng Porsi Kecil Kembali</label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   required
                   value={returnForm.smallPortions}
-                  onChange={e => setReturnForm(f => ({ ...f, smallPortions: Number(e.target.value) }))}
+                  onValueChange={val => setReturnForm(f => ({ ...f, smallPortions: val }))}
                   className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Ompreng Porsi Besar Kembali</label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   required
                   value={returnForm.largePortions}
-                  onChange={e => setReturnForm(f => ({ ...f, largePortions: Number(e.target.value) }))}
+                  onValueChange={val => setReturnForm(f => ({ ...f, largePortions: val }))}
                   className="w-full px-3 py-2 border rounded-lg font-mono dark:bg-slate-800 dark:border-slate-700"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Total Ompreng Kembali</label>
                 <div className="w-full px-3 py-2 border rounded-lg bg-slate-100 dark:bg-slate-800/70 dark:border-slate-700 font-mono font-bold text-blue-900 dark:text-sky-400">
-                  {Number(returnForm.smallPortions || 0) + Number(returnForm.largePortions || 0)} Ompreng
+                  {toNonNegativeNumber(returnForm.smallPortions, 0) + toNonNegativeNumber(returnForm.largePortions, 0)} Ompreng
                 </div>
               </div>
             </div>
@@ -4453,22 +4445,21 @@ export const ProductionModule: React.FC = () => {
               </div>
               <div>
                 <label className="block font-bold mb-1">Nominal Biaya BBM (Rp)</label>
-                <input
-                  type="number"
+                <NumericInput
+                  min={0}
                   required
                   value={fuelForm.nominalCost}
-                  onChange={e => setFuelForm(f => ({ ...f, nominalCost: Number(e.target.value) }))}
+                  onValueChange={val => setFuelForm(f => ({ ...f, nominalCost: val }))}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Volume (Liter)</label>
-                <input
-                  type="number"
-                  step="0.1"
+                <NumericInput
+                  min={0.1}
                   required
                   value={fuelForm.volumeLiters}
-                  onChange={e => setFuelForm(f => ({ ...f, volumeLiters: Number(e.target.value) }))}
+                  onValueChange={val => setFuelForm(f => ({ ...f, volumeLiters: val }))}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono"
                 />
               </div>
@@ -4477,10 +4468,10 @@ export const ProductionModule: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block font-bold mb-1">Odometer (KM)</label>
-                <input
-                  type="number"
+                <NumericInput
+                  min={0}
                   value={fuelForm.odometerKm}
-                  onChange={e => setFuelForm(f => ({ ...f, odometerKm: Number(e.target.value) }))}
+                  onValueChange={val => setFuelForm(f => ({ ...f, odometerKm: val }))}
                   className="w-full px-3 py-2 border rounded-lg dark:bg-slate-800 font-mono"
                 />
               </div>
@@ -4626,11 +4617,10 @@ export const ProductionModule: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
                 <div>
                   <label className="block font-semibold mb-0.5">1. Sisa Nasi</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={wasteForm.wasteRice}
-                    onChange={e => setWasteForm(f => ({ ...f, wasteRice: Number(e.target.value) }))}
+                    onValueChange={val => setWasteForm(f => ({ ...f, wasteRice: val }))}
                     className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
                   />
                   <input
@@ -4646,11 +4636,10 @@ export const ProductionModule: React.FC = () => {
 
                 <div>
                   <label className="block font-semibold mb-0.5">2. Sisa Hewani</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={wasteForm.wasteAnimal}
-                    onChange={e => setWasteForm(f => ({ ...f, wasteAnimal: Number(e.target.value) }))}
+                    onValueChange={val => setWasteForm(f => ({ ...f, wasteAnimal: val }))}
                     className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
                   />
                   <input
@@ -4666,11 +4655,10 @@ export const ProductionModule: React.FC = () => {
 
                 <div>
                   <label className="block font-semibold mb-0.5">3. Sisa Nabati</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={wasteForm.wastePlant}
-                    onChange={e => setWasteForm(f => ({ ...f, wastePlant: Number(e.target.value) }))}
+                    onValueChange={val => setWasteForm(f => ({ ...f, wastePlant: val }))}
                     className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
                   />
                   <input
@@ -4686,11 +4674,10 @@ export const ProductionModule: React.FC = () => {
 
                 <div>
                   <label className="block font-semibold mb-0.5">4. Sisa Sayur</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={wasteForm.wasteVeg}
-                    onChange={e => setWasteForm(f => ({ ...f, wasteVeg: Number(e.target.value) }))}
+                    onValueChange={val => setWasteForm(f => ({ ...f, wasteVeg: val }))}
                     className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
                   />
                   <input
@@ -4706,11 +4693,10 @@ export const ProductionModule: React.FC = () => {
 
                 <div>
                   <label className="block font-semibold mb-0.5">5. Sisa Buah</label>
-                  <input
-                    type="number"
-                    step="0.1"
+                  <NumericInput
+                    min={0}
                     value={wasteForm.wasteFruit}
-                    onChange={e => setWasteForm(f => ({ ...f, wasteFruit: Number(e.target.value) }))}
+                    onValueChange={val => setWasteForm(f => ({ ...f, wasteFruit: val }))}
                     className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
                   />
                   <input

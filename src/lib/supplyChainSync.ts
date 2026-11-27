@@ -17,6 +17,11 @@ import {
   StockBatch,
   StockMutation,
 } from '../types';
+import {
+  ceilWithEpsilon,
+  toFiniteNumber,
+  toNonNegativeNumber,
+} from './numberUtils';
 
 const SYNC_STOP_WORDS = new Set([
   'segar',
@@ -188,7 +193,10 @@ function computeKebutuhanAndPortionCost(params: {
   unitPrice: number;
   masterUnits: MasterUnit[];
 }): { autoKebutuhan: number; costPerPortion: number } {
-  const { bkGrams, portions, unitCode, unitPrice, masterUnits } = params;
+  const bkGrams = toNonNegativeNumber(params.bkGrams, 0);
+  const portions = toNonNegativeNumber(params.portions, 0);
+  const unitPrice = toNonNegativeNumber(params.unitPrice, 0);
+  const { unitCode, masterUnits } = params;
   const normalized = (unitCode || 'kg').trim().toLowerCase();
   const unitMeta = masterUnits.find(u => u.code.trim().toLowerCase() === normalized);
   const isUnitBased =
@@ -201,6 +209,7 @@ function computeKebutuhanAndPortionCost(params: {
 
   if (
     (unitMeta?.baseUnit === 'gram' || unitMeta?.baseUnit === 'ml') &&
+    Number.isFinite(unitMeta.conversionToBase) &&
     unitMeta.conversionToBase > 0
   ) {
     return {
@@ -261,10 +270,17 @@ export function resolveRecipeIngredientFormula(
   const ov = ing.manualOverrides || {};
   const hasNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 
-  const unitPrice = typeof overrideUnitPrice === 'number' ? overrideUnitPrice : ing.unitPrice || 0;
+  const unitPrice = toNonNegativeNumber(
+    typeof overrideUnitPrice === 'number' ? overrideUnitPrice : ing.unitPrice,
+    0
+  );
+  const safeQuotaSmall = toNonNegativeNumber(quotaSmall, 0);
+  const safeQuotaLarge = toNonNegativeNumber(quotaLarge, 0);
+  const safeDefBufSmall = toNonNegativeNumber(defaultBufferSmallPct, 2);
+  const safeDefBufLarge = toNonNegativeNumber(defaultBufferLargePct, 2);
 
-  const bbSmall = Math.max(0, Number(ing.netWeightSmall) || 0);
-  const bbLarge = Math.max(0, Number(ing.netWeightLarge) || 0);
+  const bbSmall = toNonNegativeNumber(ing.netWeightSmall, 0);
+  const bbLarge = toNonNegativeNumber(ing.netWeightLarge, 0);
 
   const rawBaseBdd =
     typeof ing.ediblePortionPercent === 'number' && Number.isFinite(ing.ediblePortionPercent)
@@ -289,8 +305,8 @@ export function resolveRecipeIngredientFormula(
     ? bbLarge / (bddLarge / 100)
     : 0;
 
-  const porsiSmall = hasNum(ov.porsiSmall) ? ov.porsiSmall : Math.max(0, quotaSmall);
-  const porsiLarge = hasNum(ov.porsiLarge) ? ov.porsiLarge : Math.max(0, quotaLarge);
+  const porsiSmall = hasNum(ov.porsiSmall) ? ov.porsiSmall : safeQuotaSmall;
+  const porsiLarge = hasNum(ov.porsiLarge) ? ov.porsiLarge : safeQuotaLarge;
 
   const basePurchaseUnit = (ing.purchaseUnit || 'kg').trim() || 'kg';
   const unitSmall =
@@ -323,11 +339,11 @@ export function resolveRecipeIngredientFormula(
   const bufferPctSmall =
     typeof ing.bufferPercentSmall === 'number' && Number.isFinite(ing.bufferPercentSmall)
       ? Math.max(0, ing.bufferPercentSmall)
-      : defaultBufferSmallPct;
+      : safeDefBufSmall;
   const bufferPctLarge =
     typeof ing.bufferPercentLarge === 'number' && Number.isFinite(ing.bufferPercentLarge)
       ? Math.max(0, ing.bufferPercentLarge)
-      : defaultBufferLargePct;
+      : safeDefBufLarge;
 
   const bufferSmall = hasNum(ov.bufferSmall)
     ? ov.bufferSmall
@@ -341,14 +357,10 @@ export function resolveRecipeIngredientFormula(
 
   const pembulatanSmall = hasNum(ov.pembulatanSmall)
     ? ov.pembulatanSmall
-    : totalSmall > 0
-    ? Math.ceil(totalSmall)
-    : 0;
+    : ceilWithEpsilon(totalSmall);
   const pembulatanLarge = hasNum(ov.pembulatanLarge)
     ? ov.pembulatanLarge
-    : totalLarge > 0
-    ? Math.ceil(totalLarge)
-    : 0;
+    : ceilWithEpsilon(totalLarge);
 
   const totalKuantiti = hasNum(ov.totalKuantiti)
     ? ov.totalKuantiti
@@ -1298,10 +1310,10 @@ export function reconcileRABWithPurchaseOrders(
       const matchingItems = nonRejectedItems.filter(item => item.rabId === rab.id);
       if (matchingItems.length > 0) {
         for (const item of matchingItems) {
-          totalQty += Number(item.quantity || 0);
-          totalAmount += Number(
-            item.subtotal || (item.quantity || 0) * (item.unitPrice || 0)
-          );
+          const q = toNonNegativeNumber(item.quantity, 0);
+          const p = toNonNegativeNumber(item.unitPrice, 0);
+          totalQty += q;
+          totalAmount += toNonNegativeNumber(item.subtotal, q * p);
         }
       } else if (po.rabId === rab.id) {
         const matchedByName = nonRejectedItems.filter(it =>
@@ -1309,8 +1321,10 @@ export function reconcileRABWithPurchaseOrders(
         );
         const itemsToSum = matchedByName.length > 0 ? matchedByName : nonRejectedItems;
         for (const it of itemsToSum) {
-          totalQty += Number(it.quantity || 0);
-          totalAmount += Number(it.subtotal || (it.quantity || 0) * (it.unitPrice || 0));
+          const q = toNonNegativeNumber(it.quantity, 0);
+          const p = toNonNegativeNumber(it.unitPrice, 0);
+          totalQty += q;
+          totalAmount += toNonNegativeNumber(it.subtotal, q * p);
         }
       }
     }

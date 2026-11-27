@@ -3,9 +3,11 @@ import { useApp } from '../../lib/store';
 import { DataTable, Column } from '../common/DataTable';
 import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
+import { NumericInput } from '../common/NumericInput';
 import { PrintHeader } from '../common/PrintHeader';
 import { ClassicTimeInput } from '../common/ClassicTimeInput';
 import { exportTableToPDF, exportToExcel, triggerPrint, formatIndonesianDate, formatRupiah, formatNumber } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   sortPOItemsBahanThenOperasional,
   isOperasionalPOItem,
@@ -607,10 +609,14 @@ export const SupplierPortalModule: React.FC = () => {
   const handleReducePOQtySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPO || !selectedPOItem) return;
+    const cleanQty = Math.min(
+      toNonNegativeNumber(reducePOForm.currentOrderedQty, 0),
+      toNonNegativeNumber(reducePOForm.newOrderedQty, 0)
+    );
     await supplierReducePOItemQuantity(
       selectedPO.id,
       { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
-      reducePOForm.newOrderedQty,
+      cleanQty,
       reducePOForm.notes.trim() || undefined
     );
     setIsReducePOQtyModalOpen(false);
@@ -620,14 +626,15 @@ export const SupplierPortalModule: React.FC = () => {
   const handleCoverShortageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPO || !selectedPOItem) return;
-    if (coverShortageForm.addedQty <= 0) {
+    const cleanAdded = toNonNegativeNumber(coverShortageForm.addedQty, 0);
+    if (cleanAdded <= 0) {
       addToast('error', 'Jumlah Tidak Valid', 'Masukkan jumlah tambahan pengiriman lebih dari 0.');
       return;
     }
     await supplierCoverPOItemShortage(
       selectedPO.id,
       { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
-      coverShortageForm.addedQty,
+      cleanAdded,
       {
         deliveredAt: coverShortageForm.deliveredAt,
         condition: coverShortageForm.condition,
@@ -647,9 +654,9 @@ export const SupplierPortalModule: React.FC = () => {
       { itemId: selectedPOItem.itemId, itemName: selectedPOItem.itemName },
       {
         deliveredAt: editDeliveredForm.deliveredAt,
-        orderedQuantity: editDeliveredForm.orderedQuantity,
-        deliveredQuantity: editDeliveredForm.deliveredQuantity,
-        damagedQuantity: editDeliveredForm.damagedQuantity,
+        orderedQuantity: toNonNegativeNumber(editDeliveredForm.orderedQuantity, 0),
+        deliveredQuantity: toNonNegativeNumber(editDeliveredForm.deliveredQuantity, 0),
+        damagedQuantity: toNonNegativeNumber(editDeliveredForm.damagedQuantity, 0),
         status: editDeliveredForm.status,
         notes: editDeliveredForm.notes,
       }
@@ -2811,16 +2818,14 @@ export const SupplierPortalModule: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 Jumlah PO Baru ({reducePOForm.unit})
               </label>
-              <input
-                type="number"
-                step="any"
+              <NumericInput
                 min={0}
                 max={reducePOForm.currentOrderedQty}
                 value={reducePOForm.newOrderedQty}
-                onChange={(e) =>
+                onValueChange={(val) =>
                   setReducePOForm({
                     ...reducePOForm,
-                    newOrderedQty: Math.max(0, Number(e.target.value) || 0),
+                    newOrderedQty: val,
                   })
                 }
                 required
@@ -2892,15 +2897,13 @@ export const SupplierPortalModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Jumlah Tambahan Dikirim ({coverShortageForm.unit})
                 </label>
-                <input
-                  type="number"
-                  step="any"
+                <NumericInput
                   min={0.01}
                   value={coverShortageForm.addedQty}
-                  onChange={(e) =>
+                  onValueChange={(val) =>
                     setCoverShortageForm({
                       ...coverShortageForm,
-                      addedQty: Math.max(0, Number(e.target.value) || 0),
+                      addedQty: val,
                     })
                   }
                   required
@@ -3035,15 +3038,13 @@ export const SupplierPortalModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Jumlah yang pesan ({editDeliveredForm.unit})
                 </label>
-                <input
-                  type="number"
-                  step="any"
+                <NumericInput
                   min={0}
                   value={editDeliveredForm.orderedQuantity}
-                  onChange={(e) =>
+                  onValueChange={(val) =>
                     setEditDeliveredForm({
                       ...editDeliveredForm,
-                      orderedQuantity: Math.max(0, Number(e.target.value) || 0),
+                      orderedQuantity: val,
                     })
                   }
                   required
@@ -3055,18 +3056,15 @@ export const SupplierPortalModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Jumlah yang diterima (QC PLOK) ({editDeliveredForm.unit})
                 </label>
-                <input
-                  type="number"
-                  step="any"
+                <NumericInput
                   min={0}
                   value={editDeliveredForm.deliveredQuantity}
-                  onChange={(e) => {
-                    const nextVal = Math.max(0, Number(e.target.value) || 0);
+                  onValueChange={(val) =>
                     setEditDeliveredForm(prev => ({
                       ...prev,
-                      deliveredQuantity: nextVal,
-                    }));
-                  }}
+                      deliveredQuantity: val,
+                    }))
+                  }
                   required
                   className="w-full py-2 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                 />
@@ -3076,15 +3074,13 @@ export const SupplierPortalModule: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Jumlah Hasil QC / Rusak Persiapan ({editDeliveredForm.unit})
                 </label>
-                <input
-                  type="number"
-                  step="any"
+                <NumericInput
                   min={0}
                   value={editDeliveredForm.damagedQuantity}
-                  onChange={(e) =>
+                  onValueChange={(val) =>
                     setEditDeliveredForm({
                       ...editDeliveredForm,
-                      damagedQuantity: Math.max(0, Number(e.target.value) || 0),
+                      damagedQuantity: val,
                     })
                   }
                   required

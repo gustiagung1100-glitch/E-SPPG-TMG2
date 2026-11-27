@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../../lib/store';
 import { EmptyState } from '../common/EmptyState';
 import { Modal } from '../common/Modal';
+import { NumericInput } from '../common/NumericInput';
 import {
   exportTableToPDF,
   exportToExcel,
@@ -10,6 +11,7 @@ import {
   formatRupiah,
   triggerPrint,
 } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   IncentivePayoutStatus,
   VolunteerAttendance,
@@ -479,7 +481,7 @@ export const VolunteerIncentiveModule: React.FC = () => {
       }
     });
     await updateVolunteerIncentiveConfig({
-      defaultDailyRate: Math.max(0, Number(defaultRateForm) || 0),
+      defaultDailyRate: toNonNegativeNumber(defaultRateForm, 0),
       divisionRates: divisionRatesForm,
       divisionPositionRates: cleanedDivPos,
     });
@@ -1064,12 +1066,10 @@ export const VolunteerIncentiveModule: React.FC = () => {
                 Digunakan jika divisi dan jabatan belum memiliki tarif khusus.
               </p>
             </div>
-            <input
-              type="number"
+            <NumericInput
               min={0}
-              step={5000}
               value={defaultRateForm}
-              onChange={e => setDefaultRateForm(Number(e.target.value))}
+              onValueChange={val => setDefaultRateForm(val)}
               className="w-full sm:w-44 px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-right font-bold"
               required
             />
@@ -1155,31 +1155,32 @@ export const VolunteerIncentiveModule: React.FC = () => {
                             Div. {div}
                           </td>
                           <td className="p-2.5 text-right">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
-                              step={5000}
                               aria-label={`Tarif dasar Div. ${div}`}
                               value={baseRate}
-                              onChange={e =>
+                              onValueChange={val =>
                                 setDivisionRatesForm(prev => ({
                                   ...prev,
-                                  [div]: Math.max(0, Number(e.target.value) || 0),
+                                  [div]: val,
                                 }))
                               }
                               className="w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-semibold"
                             />
                           </td>
                           <td className="p-2.5 text-right">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
-                              step={5000}
+                              allowEmpty
                               placeholder={String(baseRate)}
                               aria-label={`Tarif Koordinator Div. ${div}`}
                               value={coordRate ?? ''}
-                              onChange={e =>
-                                handleSetDivPosRate(div, 'Koordinator Divisi', e.target.value)
+                              onOptionalValueChange={val =>
+                                handleSetDivPosRate(
+                                  div,
+                                  'Koordinator Divisi',
+                                  val === undefined ? '' : String(val)
+                                )
                               }
                               className={`w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border font-mono font-bold ${
                                 coordRate !== undefined
@@ -1189,15 +1190,18 @@ export const VolunteerIncentiveModule: React.FC = () => {
                             />
                           </td>
                           <td className="p-2.5 text-right">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
-                              step={5000}
+                              allowEmpty
                               placeholder={String(baseRate)}
                               aria-label={`Tarif Wakil Koordinator Div. ${div}`}
                               value={viceRate ?? ''}
-                              onChange={e =>
-                                handleSetDivPosRate(div, 'Wakil Koordinator', e.target.value)
+                              onOptionalValueChange={val =>
+                                handleSetDivPosRate(
+                                  div,
+                                  'Wakil Koordinator',
+                                  val === undefined ? '' : String(val)
+                                )
                               }
                               className={`w-28 px-2.5 py-1.5 text-xs text-right rounded-lg border font-mono font-bold ${
                                 viceRate !== undefined
@@ -1236,15 +1240,13 @@ export const VolunteerIncentiveModule: React.FC = () => {
                     Berlaku untuk jabatan di Div. {activeConfigDivTab} yang tidak diisi tarif khusus di bawah.
                   </div>
                 </div>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
-                  step={5000}
                   value={divisionRatesForm[activeConfigDivTab] ?? defaultRateForm}
-                  onChange={e =>
+                  onValueChange={val =>
                     setDivisionRatesForm(prev => ({
                       ...prev,
-                      [activeConfigDivTab]: Math.max(0, Number(e.target.value) || 0),
+                      [activeConfigDivTab]: val,
                     }))
                   }
                   className="w-full sm:w-40 px-3 py-1.5 text-sm text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
@@ -1300,14 +1302,17 @@ export const VolunteerIncentiveModule: React.FC = () => {
                             </span>
                           </td>
                           <td className="p-2.5 text-right">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
-                              step={5000}
+                              allowEmpty
                               placeholder={`Ikuti (${formatNumber(baseDivRate)})`}
                               value={customVal ?? ''}
-                              onChange={e =>
-                                handleSetDivPosRate(activeConfigDivTab, pos, e.target.value)
+                              onOptionalValueChange={val =>
+                                handleSetDivPosRate(
+                                  activeConfigDivTab,
+                                  pos,
+                                  val === undefined ? '' : String(val)
+                                )
                               }
                               className="w-36 px-2.5 py-1.5 text-xs text-right rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
                             />

@@ -15,6 +15,7 @@ import {
   triggerPrint,
   TableImageCell,
 } from '../../lib/exportUtils';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import { OfficialReportKey, ReportMetaConfig, ModuleKey } from '../../types';
 import {
   BASTDocumentSheet,
@@ -1952,16 +1953,18 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         const recipeRows = menuIngredientsMap[todayMenu.id] || [];
         if (recipeRows.length > 0) {
           rows = recipeRows.map((ing, idx) => {
-            const weightForCalc =
-              selectedPortionCategory === 'kecil' ? ing.netWeightSmall : ing.netWeightLarge;
-            const calVal = ((weightForCalc / 100) * ing.calories100g).toFixed(0);
-            const protVal = ((weightForCalc / 100) * ing.protein100g).toFixed(1);
+            const weightForCalc = toNonNegativeNumber(
+              selectedPortionCategory === 'kecil' ? ing.netWeightSmall : ing.netWeightLarge,
+              0
+            );
+            const calVal = ((weightForCalc / 100) * toNonNegativeNumber(ing.calories100g, 0)).toFixed(0);
+            const protVal = ((weightForCalc / 100) * toNonNegativeNumber(ing.protein100g, 0)).toFixed(1);
             return [
               idx + 1,
               ing.category,
               ing.menuName ? `${ing.menuName} (${ing.name})` : ing.name,
-              `${ing.netWeightSmall} ${ing.unit}`,
-              `${ing.netWeightLarge} ${ing.unit}`,
+              `${toNonNegativeNumber(ing.netWeightSmall, 0)} ${ing.unit}`,
+              `${toNonNegativeNumber(ing.netWeightLarge, 0)} ${ing.unit}`,
               `${calVal} kkal / ${protVal} g (${selectedPortionCategory === 'kecil' ? 'P.Kecil' : 'P.Besar'})`,
               ing.referenceSource || 'TKPI 2020',
             ];
@@ -2826,10 +2829,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             targetInstFilter?.name ||
             institutions[idx % Math.max(1, institutions.length)]?.name ||
             'Seluruh Sekolah Sasaran';
-          const laukTotal = Number(((w.wasteAnimalProtein?.weight || 0) + (w.wastePlantProtein?.weight || 0)).toFixed(1));
-          const sayurBuahTotal = Number(((w.wasteVegetable?.weight || 0) + (w.wasteFruit?.weight || 0)).toFixed(1));
+          const laukTotal = Number((toNonNegativeNumber(w.wasteAnimalProtein?.weight, 0) + toNonNegativeNumber(w.wastePlantProtein?.weight, 0)).toFixed(1));
+          const sayurBuahTotal = Number((toNonNegativeNumber(w.wasteVegetable?.weight, 0) + toNonNegativeNumber(w.wasteFruit?.weight, 0)).toFixed(1));
+          const riceWeight = toNonNegativeNumber(w.wasteRice?.weight, 0);
+          const totalWaste = toNonNegativeNumber(w.totalWasteWeight, 0);
           const photos = extractedPhotosPerRow[idx] || [];
-          const avgWasteGram = ((w.totalWasteWeight * 1000) / Math.max(1, dayPortions)).toFixed(1);
+          const avgWasteGram = ((totalWaste * 1000) / Math.max(1, dayPortions)).toFixed(1);
 
           if (photos.length > 0) {
             imageCells.push({
@@ -2843,10 +2848,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             idx + 1,
             `${w.date} • ${instName}`,
             w.officerName || 'Tim Sanitasi',
-            `${w.wasteRice.weight} kg`,
+            `${riceWeight} kg`,
             `${laukTotal} kg`,
             `${sayurBuahTotal} kg`,
-            `${w.totalWasteWeight} kg`,
+            `${totalWaste} kg`,
             `${avgWasteGram} gram`,
             'Komposting & Maggot Ternak',
             photos.length > 0 ? `${photos.length} Foto (${photos.map(p => p.label).join(', ')})` : 'Belum ada foto',
@@ -2942,12 +2947,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
           );
         });
 
-        const totWaste = washings.reduce((acc, w) => acc + w.totalWasteWeight, 0);
+        const totWaste = washings.reduce((acc, w) => acc + toNonNegativeNumber(w.totalWasteWeight, 0), 0);
         const totalServedAcrossLogs =
           washings.reduce((sum, w) => {
             const dPort = distributionDeliveries
               .filter(d => d.date === w.date)
-              .reduce((s, d) => s + d.totalPortions, 0);
+              .reduce((s, d) => s + toNonNegativeNumber(d.totalPortions, 0), 0);
             return sum + (dPort || totalDailyPortionsBaseline);
           }, 0) || totalDailyPortionsBaseline;
         const avgWastePerPortionGrams = (totWaste * 1000) / Math.max(1, totalServedAcrossLogs);

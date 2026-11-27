@@ -5,6 +5,8 @@ import { DataTable, Column } from '../common/DataTable';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { PrintHeader } from '../common/PrintHeader';
+import { NumericInput } from '../common/NumericInput';
+import { toNonNegativeNumber } from '../../lib/numberUtils';
 import {
   NutritionReportSheet,
   resolveNutritionReportData,
@@ -1840,7 +1842,7 @@ export const NutritionMenuModule: React.FC = () => {
         if (field === 'itemName') {
           return { ...row, itemName: String(value), isManuallyEdited: true };
         }
-        const safeNum = Math.max(0, Number(value) || 0);
+        const safeNum = toNonNegativeNumber(value, 0);
         return { ...row, [field]: safeNum, isManuallyEdited: true };
       })
     );
@@ -1851,8 +1853,8 @@ export const NutritionMenuModule: React.FC = () => {
     const cleaned = grammageDrafts.map(g => ({
       ...g,
       itemName: g.itemName.trim() || 'Item Menu',
-      smallGrams: Math.max(0, Number(g.smallGrams) || 0),
-      largeGrams: Math.max(0, Number(g.largeGrams) || 0),
+      smallGrams: toNonNegativeNumber(g.smallGrams, 0),
+      largeGrams: toNonNegativeNumber(g.largeGrams, 0),
     }));
     await updateMenuItem(currentMenu.id, { itemGrammages: cleaned });
     addToast(
@@ -2711,25 +2713,21 @@ export const NutritionMenuModule: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 shrink-0 bg-white/80 dark:bg-slate-900/80 p-2.5 rounded-xl border border-sky-200 dark:border-sky-800">
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-rose-800 dark:text-rose-300">
                 <span>Buffer P. Kecil (%):</span>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   max={50}
-                  step={0.5}
                   value={defaultBufferSmallPct}
-                  onChange={e => setDefaultBufferSmallPct(Math.max(0, Number(e.target.value) || 0))}
+                  onValueChange={val => setDefaultBufferSmallPct(Math.max(0, Math.min(50, val)))}
                   className="w-14 px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-center"
                 />
               </label>
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
                 <span>Buffer P. Besar (%):</span>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   max={50}
-                  step={0.5}
                   value={defaultBufferLargePct}
-                  onChange={e => setDefaultBufferLargePct(Math.max(0, Number(e.target.value) || 0))}
+                  onValueChange={val => setDefaultBufferLargePct(Math.max(0, Math.min(50, val)))}
                   className="w-14 px-2 py-1 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-center"
                 />
               </label>
@@ -2961,18 +2959,16 @@ export const NutritionMenuModule: React.FC = () => {
                             />
                           </div>
                           <div className="flex items-center justify-end gap-0.5 print:hidden mt-0.5">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
                               max={50}
-                              step={0.5}
                               aria-label={`Buffer Porsi Kecil ${item.name} (%)`}
                               value={item.bufferPctSmall}
-                              onChange={e =>
+                              onValueChange={val =>
                                 handleUpdateIngredientBuffer(
                                   item.id,
                                   'bufferPercentSmall',
-                                  Number(e.target.value)
+                                  val
                                 )
                               }
                               className="w-10 px-1 py-0 text-[9px] text-right rounded border border-rose-200 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200"
@@ -3093,18 +3089,16 @@ export const NutritionMenuModule: React.FC = () => {
                             />
                           </div>
                           <div className="flex items-center justify-end gap-0.5 print:hidden mt-0.5">
-                            <input
-                              type="number"
+                            <NumericInput
                               min={0}
                               max={50}
-                              step={0.5}
                               aria-label={`Buffer Porsi Besar ${item.name} (%)`}
                               value={item.bufferPctLarge}
-                              onChange={e =>
+                              onValueChange={val =>
                                 handleUpdateIngredientBuffer(
                                   item.id,
                                   'bufferPercentLarge',
-                                  Number(e.target.value)
+                                  val
                                 )
                               }
                               className="w-10 px-1 py-0 text-[9px] text-right rounded border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200"
@@ -3558,14 +3552,12 @@ export const NutritionMenuModule: React.FC = () => {
                             </td>
                             <td className="py-3 px-3 text-center bg-sky-50/40 dark:bg-sky-950/20">
                               <div className="inline-flex items-center gap-1.5">
-                                <input
-                                  type="number"
+                                <NumericInput
                                   min={0}
-                                  step={1}
                                   aria-label={`Gramasi Porsi Kecil ${item.itemName}`}
                                   value={item.smallGrams}
-                                  onChange={e =>
-                                    handleInlineGrammageChange(item.id, 'smallGrams', e.target.value)
+                                  onValueChange={val =>
+                                    handleInlineGrammageChange(item.id, 'smallGrams', val)
                                   }
                                   className="w-20 px-2.5 py-1.5 text-center font-mono font-black text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-sky-800 dark:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
                                 />
@@ -3576,14 +3568,12 @@ export const NutritionMenuModule: React.FC = () => {
                             </td>
                             <td className="py-3 px-3 text-center bg-indigo-50/40 dark:bg-indigo-950/20">
                               <div className="inline-flex items-center gap-1.5">
-                                <input
-                                  type="number"
+                                <NumericInput
                                   min={0}
-                                  step={1}
                                   aria-label={`Gramasi Porsi Besar ${item.itemName}`}
                                   value={item.largeGrams}
-                                  onChange={e =>
-                                    handleInlineGrammageChange(item.id, 'largeGrams', e.target.value)
+                                  onValueChange={val =>
+                                    handleInlineGrammageChange(item.id, 'largeGrams', val)
                                   }
                                   className="w-20 px-2.5 py-1.5 text-center font-mono font-black text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-indigo-800 dark:text-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
@@ -4313,13 +4303,11 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold uppercase text-indigo-700 dark:text-indigo-300 mb-1">
                   Porsi Besar (Rp / Porsi)
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
-                  step={500}
                   disabled={!hasPermission('menu', 'edit')}
                   value={largeCapDraft}
-                  onChange={e => setLargeCapDraft(Math.max(0, Number(e.target.value) || 0))}
+                  onValueChange={val => setLargeCapDraft(Math.max(0, val))}
                   className="w-36 px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/40 text-slate-900 dark:text-white disabled:opacity-60"
                 />
               </div>
@@ -4328,13 +4316,11 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold uppercase text-sky-700 dark:text-sky-300 mb-1">
                   Porsi Kecil (Rp / Porsi)
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
-                  step={500}
                   disabled={!hasPermission('menu', 'edit')}
                   value={smallCapDraft}
-                  onChange={e => setSmallCapDraft(Math.max(0, Number(e.target.value) || 0))}
+                  onValueChange={val => setSmallCapDraft(Math.max(0, val))}
                   className="w-36 px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/40 text-slate-900 dark:text-white disabled:opacity-60"
                 />
               </div>
@@ -5412,16 +5398,14 @@ export const NutritionMenuModule: React.FC = () => {
                 Berat Gramasi Porsi Kecil (gram) *
               </label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
-                  step={1}
                   required
                   value={grammageEditForm.smallGrams}
-                  onChange={e =>
+                  onValueChange={val =>
                     setGrammageEditForm(prev => ({
                       ...prev,
-                      smallGrams: Math.max(0, Number(e.target.value) || 0),
+                      smallGrams: Math.max(0, val),
                     }))
                   }
                   className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black"
@@ -5435,16 +5419,14 @@ export const NutritionMenuModule: React.FC = () => {
                 Berat Gramasi Porsi Besar (gram) *
               </label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
-                  step={1}
                   required
                   value={grammageEditForm.largeGrams}
-                  onChange={e =>
+                  onValueChange={val =>
                     setGrammageEditForm(prev => ({
                       ...prev,
-                      largeGrams: Math.max(0, Number(e.target.value) || 0),
+                      largeGrams: Math.max(0, val),
                     }))
                   }
                   className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono font-black"
@@ -5534,16 +5516,14 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
                 Gramasi Porsi Kecil (gram) *
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={0}
-                step={1}
                 required
                 value={newGrammageForm.smallGrams}
-                onChange={e =>
+                onValueChange={val =>
                   setNewGrammageForm(prev => ({
                     ...prev,
-                    smallGrams: Math.max(0, Number(e.target.value) || 0),
+                    smallGrams: Math.max(0, val),
                   }))
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
@@ -5553,16 +5533,14 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
                 Gramasi Porsi Besar (gram) *
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={0}
-                step={1}
                 required
                 value={newGrammageForm.largeGrams}
-                onChange={e =>
+                onValueChange={val =>
                   setNewGrammageForm(prev => ({
                     ...prev,
-                    largeGrams: Math.max(0, Number(e.target.value) || 0),
+                    largeGrams: Math.max(0, val),
                   }))
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
@@ -5660,18 +5638,15 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
                 BB Porsi Kecil (g) *
               </label>
-              <input
-                type="number"
-                min="0"
-                step="any"
+              <NumericInput
+                min={0}
+                allowEmpty
+                emptyFallback={0}
                 required
                 value={customGramSmall}
-                onChange={e => {
-                  setCustomGramSmall(e.target.value);
+                onOptionalValueChange={val => {
+                  setCustomGramSmall(val === undefined ? '0' : String(val));
                   setModalTouchedFields(prev => ({ ...prev, gramSmall: true }));
-                }}
-                onBlur={() => {
-                  if (customGramSmall.trim() === '') setCustomGramSmall('0');
                 }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
@@ -5680,18 +5655,15 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
                 BB Porsi Besar (g) *
               </label>
-              <input
-                type="number"
-                min="0"
-                step="any"
+              <NumericInput
+                min={0}
+                allowEmpty
+                emptyFallback={0}
                 required
                 value={customGramLarge}
-                onChange={e => {
-                  setCustomGramLarge(e.target.value);
+                onOptionalValueChange={val => {
+                  setCustomGramLarge(val === undefined ? '0' : String(val));
                   setModalTouchedFields(prev => ({ ...prev, gramLarge: true }));
-                }}
-                onBlur={() => {
-                  if (customGramLarge.trim() === '') setCustomGramLarge('0');
                 }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
@@ -5700,16 +5672,15 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-rose-700 dark:text-rose-300 mb-1">
                 Buffer P. Kecil (%)
               </label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="any"
+              <NumericInput
+                min={0}
+                max={100}
+                allowEmpty
+                emptyFallback={0}
                 value={customBufferSmallPct}
-                onChange={e => setCustomBufferSmallPct(e.target.value)}
-                onBlur={() => {
-                  if (customBufferSmallPct.trim() === '') setCustomBufferSmallPct('0');
-                }}
+                onOptionalValueChange={val =>
+                  setCustomBufferSmallPct(val === undefined ? '0' : String(val))
+                }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5717,16 +5688,15 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-300 mb-1">
                 Buffer P. Besar (%)
               </label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="any"
+              <NumericInput
+                min={0}
+                max={100}
+                allowEmpty
+                emptyFallback={0}
                 value={customBufferLargePct}
-                onChange={e => setCustomBufferLargePct(e.target.value)}
-                onBlur={() => {
-                  if (customBufferLargePct.trim() === '') setCustomBufferLargePct('0');
-                }}
+                onOptionalValueChange={val =>
+                  setCustomBufferLargePct(val === undefined ? '0' : String(val))
+                }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
             </div>
@@ -5737,19 +5707,16 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Persentase BDD (% Dapat Dimakan) *
               </label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="any"
+              <NumericInput
+                min={0}
+                max={100}
+                allowEmpty
+                emptyFallback={0}
                 required
                 value={customBdd}
-                onChange={e => {
-                  setCustomBdd(e.target.value);
+                onOptionalValueChange={val => {
+                  setCustomBdd(val === undefined ? '0' : String(val));
                   setModalTouchedFields(prev => ({ ...prev, bdd: true }));
-                }}
-                onBlur={() => {
-                  if (customBdd.trim() === '') setCustomBdd('0');
                 }}
                 className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
               />
@@ -5861,30 +5828,30 @@ export const NutritionMenuModule: React.FC = () => {
               <div>
                 <label className="text-[10px] text-slate-500">Kalori Min - Max (kkal)</label>
                 <div className="flex items-center gap-1">
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={nutritionTarget.smallPortionTarget.caloriesMin}
-                    onChange={e =>
+                    onValueChange={val =>
                       setNutritionTarget({
                         ...nutritionTarget,
                         smallPortionTarget: {
                           ...nutritionTarget.smallPortionTarget,
-                          caloriesMin: Number(e.target.value),
+                          caloriesMin: Math.max(0, val),
                         },
                       })
                     }
                     className="w-full px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                   <span>-</span>
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={nutritionTarget.smallPortionTarget.caloriesMax}
-                    onChange={e =>
+                    onValueChange={val =>
                       setNutritionTarget({
                         ...nutritionTarget,
                         smallPortionTarget: {
                           ...nutritionTarget.smallPortionTarget,
-                          caloriesMax: Number(e.target.value),
+                          caloriesMax: Math.max(0, val),
                         },
                       })
                     }
@@ -5896,30 +5863,30 @@ export const NutritionMenuModule: React.FC = () => {
               <div>
                 <label className="text-[10px] text-slate-500">Protein Min - Max (g)</label>
                 <div className="flex items-center gap-1">
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={nutritionTarget.smallPortionTarget.proteinMin}
-                    onChange={e =>
+                    onValueChange={val =>
                       setNutritionTarget({
                         ...nutritionTarget,
                         smallPortionTarget: {
                           ...nutritionTarget.smallPortionTarget,
-                          proteinMin: Number(e.target.value),
+                          proteinMin: Math.max(0, val),
                         },
                       })
                     }
                     className="w-full px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
                   />
                   <span>-</span>
-                  <input
-                    type="number"
+                  <NumericInput
+                    min={0}
                     value={nutritionTarget.smallPortionTarget.proteinMax}
-                    onChange={e =>
+                    onValueChange={val =>
                       setNutritionTarget({
                         ...nutritionTarget,
                         smallPortionTarget: {
                           ...nutritionTarget.smallPortionTarget,
-                          proteinMax: Number(e.target.value),
+                          proteinMax: Math.max(0, val),
                         },
                       })
                     }
@@ -5933,7 +5900,25 @@ export const NutritionMenuModule: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsTargetModalOpen(false)}
+              onClick={() => {
+                setNutritionTarget(prev => {
+                  const sCalMin = toNonNegativeNumber(prev.smallPortionTarget.caloriesMin, 0);
+                  const sCalMax = Math.max(sCalMin, toNonNegativeNumber(prev.smallPortionTarget.caloriesMax, sCalMin));
+                  const sProtMin = toNonNegativeNumber(prev.smallPortionTarget.proteinMin, 0);
+                  const sProtMax = Math.max(sProtMin, toNonNegativeNumber(prev.smallPortionTarget.proteinMax, sProtMin));
+                  return {
+                    ...prev,
+                    smallPortionTarget: {
+                      ...prev.smallPortionTarget,
+                      caloriesMin: sCalMin,
+                      caloriesMax: sCalMax,
+                      proteinMin: sProtMin,
+                      proteinMax: sProtMax,
+                    },
+                  };
+                });
+                setIsTargetModalOpen(false);
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-900 text-white"
             >
               Simpan Konfigurasi
@@ -6464,16 +6449,14 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-sky-700 dark:text-sky-300 mb-1">
                 Berat Porsi Kecil (g) *
               </label>
-              <input
-                type="number"
-                min="0"
-                step="any"
+              <NumericInput
+                min={0}
                 required
                 value={newNutritionRowForm.netWeightSmall}
-                onChange={e =>
+                onValueChange={val =>
                   setNewNutritionRowForm(prev => ({
                     ...prev,
-                    netWeightSmall: Math.max(0, Number(e.target.value) || 0),
+                    netWeightSmall: Math.max(0, val),
                   }))
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50/40 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
@@ -6484,16 +6467,14 @@ export const NutritionMenuModule: React.FC = () => {
               <label className="block text-xs font-bold text-indigo-700 dark:text-indigo-300 mb-1">
                 Berat Porsi Besar (g) *
               </label>
-              <input
-                type="number"
-                min="0"
-                step="any"
+              <NumericInput
+                min={0}
                 required
                 value={newNutritionRowForm.netWeightLarge}
-                onChange={e =>
+                onValueChange={val =>
                   setNewNutritionRowForm(prev => ({
                     ...prev,
-                    netWeightLarge: Math.max(0, Number(e.target.value) || 0),
+                    netWeightLarge: Math.max(0, val),
                   }))
                 }
                 className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 dark:border-indigo-800 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold"
@@ -6515,15 +6496,13 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                   Energi (kkal)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumericInput
+                  min={0}
                   value={newNutritionRowForm.calories100g}
-                  onChange={e =>
+                  onValueChange={val =>
                     setNewNutritionRowForm(prev => ({
                       ...prev,
-                      calories100g: Math.max(0, Number(e.target.value) || 0),
+                      calories100g: Math.max(0, val),
                     }))
                   }
                   className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
@@ -6533,15 +6512,13 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                   Protein (g)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumericInput
+                  min={0}
                   value={newNutritionRowForm.protein100g}
-                  onChange={e =>
+                  onValueChange={val =>
                     setNewNutritionRowForm(prev => ({
                       ...prev,
-                      protein100g: Math.max(0, Number(e.target.value) || 0),
+                      protein100g: Math.max(0, val),
                     }))
                   }
                   className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
@@ -6551,15 +6528,13 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                   Lemak (g)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumericInput
+                  min={0}
                   value={newNutritionRowForm.fat100g}
-                  onChange={e =>
+                  onValueChange={val =>
                     setNewNutritionRowForm(prev => ({
                       ...prev,
-                      fat100g: Math.max(0, Number(e.target.value) || 0),
+                      fat100g: Math.max(0, val),
                     }))
                   }
                   className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
@@ -6569,15 +6544,13 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                   KH (g)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumericInput
+                  min={0}
                   value={newNutritionRowForm.carb100g}
-                  onChange={e =>
+                  onValueChange={val =>
                     setNewNutritionRowForm(prev => ({
                       ...prev,
-                      carb100g: Math.max(0, Number(e.target.value) || 0),
+                      carb100g: Math.max(0, val),
                     }))
                   }
                   className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
@@ -6587,15 +6560,13 @@ export const NutritionMenuModule: React.FC = () => {
                 <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 mb-0.5">
                   Serat (g/100g)
                 </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
+                <NumericInput
+                  min={0}
                   value={newNutritionRowForm.fiber100g}
-                  onChange={e =>
+                  onValueChange={val =>
                     setNewNutritionRowForm(prev => ({
                       ...prev,
-                      fiber100g: Math.max(0, Number(e.target.value) || 0),
+                      fiber100g: Math.max(0, val),
                     }))
                   }
                   className="w-full px-2 py-1.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 font-mono"
@@ -6608,14 +6579,14 @@ export const NutritionMenuModule: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
             <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800">
               <div className="font-bold text-sky-900 dark:text-sky-200 mb-1">
-                Pratinjau Otomatis Porsi Kecil ({formatNutrCell(newNutritionRowForm.netWeightSmall, 1)}g)
+                Pratinjau Otomatis Porsi Kecil ({formatNutrCell(toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0), 1)}g)
               </div>
               <div className="font-mono text-sky-800 dark:text-sky-300">
-                E: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.calories100g, 2)} kkal |{' '}
-                P: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
-                L: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
-                KH: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
-                S: {formatNutrCell((newNutritionRowForm.netWeightSmall / 100) * newNutritionRowForm.fiber100g, 2)}g
+                E: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.calories100g, 0), 2)} kkal |{' '}
+                P: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.protein100g, 0), 2)}g |{' '}
+                L: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.fat100g, 0), 2)}g |{' '}
+                KH: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.carb100g, 0), 2)}g |{' '}
+                S: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightSmall, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.fiber100g, 0), 2)}g
               </div>
             </div>
             <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800">
@@ -6623,11 +6594,11 @@ export const NutritionMenuModule: React.FC = () => {
                 Pratinjau Otomatis Porsi Besar ({formatNutrCell(newNutritionRowForm.netWeightLarge, 1)}g)
               </div>
               <div className="font-mono text-indigo-800 dark:text-indigo-300">
-                E: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.calories100g, 2)} kkal |{' '}
-                P: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.protein100g, 2)}g |{' '}
-                L: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fat100g, 2)}g |{' '}
-                KH: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.carb100g, 2)}g |{' '}
-                S: {formatNutrCell((newNutritionRowForm.netWeightLarge / 100) * newNutritionRowForm.fiber100g, 2)}g
+                E: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightLarge, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.calories100g, 0), 2)} kkal |{' '}
+                P: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightLarge, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.protein100g, 0), 2)}g |{' '}
+                L: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightLarge, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.fat100g, 0), 2)}g |{' '}
+                KH: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightLarge, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.carb100g, 0), 2)}g |{' '}
+                S: {formatNutrCell((toNonNegativeNumber(newNutritionRowForm.netWeightLarge, 0) / 100) * toNonNegativeNumber(newNutritionRowForm.fiber100g, 0), 2)}g
               </div>
             </div>
           </div>
