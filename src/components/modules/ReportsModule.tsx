@@ -29,6 +29,7 @@ import {
   OrganolepticChecklistSheet,
   OrganolepticFoodRow,
   resolveOrganolepticAutoFields,
+  resolvePlogChecklistAutoFields,
   exportOrganolepticChecklistPDF,
 } from '../common/OrganolepticChecklistSheet';
 import {
@@ -71,6 +72,14 @@ import {
   exportNutritionReportPDF,
   formatNutrCell,
 } from '../common/NutritionReportSheet';
+import {
+  FoodWasteReportSheet,
+  resolveFoodWasteReportData,
+  exportFoodWasteReportPDF,
+  formatWasteKgCell,
+  formatServedKgCell,
+  formatStandardGramsCell,
+} from '../common/FoodWasteReportSheet';
 import {
   appendDynamicExportColumns,
   appendDynamicExcelFields,
@@ -220,13 +229,23 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'organoleptik_plog',
-    title: 'Pemeriksaan Makanan & Organoleptik PLOG (Nutrisionis & Head Chef)',
+    title: 'Pemeriksaan Makanan',
     category: 'Gizi & Menu',
     codePrefix: 'ORGA-PLOG',
-    description: 'Kombinasi uji organoleptik internal PLOG (Visual, Aroma, Rasa, Tekstur, Suhu) dan formulir pemeriksaan Menu Basah & Menu Kering retensi 2x24 jam.',
-    sourceModule: 'Pengolahan, Pemorsian & PLOG (menuId, cookingId, portioningId)',
+    description: 'Formulir pemeriksaan Menu Basah & Menu Kering, uji organoleptik internal PLOG (Visual, Aroma, Rasa, Tekstur, Suhu), retensi sampel 2x24 jam, dan dokumentasi foto Porsi Besar otomatis dari Divisi Pemorsian.',
+    sourceModule: 'Pengolahan, Pemorsian (Foto Porsi Besar) & PLOG (menuId, cookingId, portioningId)',
     defaultOrientation: 'portrait',
     approverRole: 'Pengawas Gizi & Kepala SPPG',
+  },
+  {
+    key: 'checklist_organoleptik_plog',
+    title: 'Checklist Uji Organoleptik PLOG (Khusus PLOG)',
+    category: 'Gizi & Menu',
+    codePrefix: 'ORGA-PLOG-CHK',
+    description: 'Format surat Checklist Uji Organoleptik khusus PLOG dengan daftar Nama Makanan otomatis dari input PLOG pada Gramasi Item Menu.',
+    sourceModule: 'PLOG (Gramasi Item Menu, menuId) & Dapur SPPG',
+    defaultOrientation: 'portrait',
+    approverRole: 'Pengawas Gizi (PLOG) & Kepala SPPG',
   },
 
   // 3. Dapur & Keamanan Pangan
@@ -352,13 +371,13 @@ export const REPORT_CONFIGS: ReportMetaConfig[] = [
   },
   {
     key: 'food_waste',
-    title: 'Laporan Food Waste & Sisa Makanan Cuci Ompreng',
+    title: 'Laporan Food Waste',
     category: 'Dapur & Keamanan Pangan',
     codePrefix: 'WASTE-LOG',
-    description: 'Pengukuran sisa makanan pasca-konsumsi dari boks ompreng untuk evaluasi daya terima menu siswa.',
-    sourceModule: 'Cuci Ompreng & Higiene (washingId, returnId)',
+    description: 'Analisis sisa makanan per item menu dari Divisi Cuci Ompreng terhadap standar porsi dan total sajian untuk evaluasi efisiensi menu.',
+    sourceModule: 'Divisi Cuci Ompreng, Master Menu & Gramasi PLOG',
     defaultOrientation: 'landscape',
-    approverRole: 'Koordinator Sanitasi & Cuci Ompreng',
+    approverRole: 'Pengawas Gizi & Kepala SPPG',
   },
 
   // 4. Operasional & Rantai Pasok
@@ -624,6 +643,17 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
   const [orgaCustomRows, setOrgaCustomRows] = useState<OrganolepticFoodRow[] | null>(null);
   const [showOrgaEditor, setShowOrgaEditor] = useState<boolean>(false);
 
+  // Checklist Uji Organoleptik PLOG (Khusus PLOG — sinkron Gramasi Item Menu PLOG) controls
+  const [plogChkMenuId, setPlogChkMenuId] = useState<string>('AUTO');
+  const [plogChkBlankMode, setPlogChkBlankMode] = useState<boolean>(false);
+  const [showPlogChkEditor, setShowPlogChkEditor] = useState<boolean>(false);
+  const [plogChkPemeriksaOverride, setPlogChkPemeriksaOverride] = useState<string>('');
+  const [plogChkTempatOverride, setPlogChkTempatOverride] = useState<string>('');
+  const [plogChkTimeOverride, setPlogChkTimeOverride] = useState<string>('');
+  const [plogChkKesimpulanOverride, setPlogChkKesimpulanOverride] = useState<string>('');
+  const [plogChkMengetahuiOverride, setPlogChkMengetahuiOverride] = useState<string>('');
+  const [plogChkCustomRows, setPlogChkCustomRows] = useState<OrganolepticFoodRow[] | null>(null);
+
   // BAST Harian format controls (mirip Log Armada & BAST Digital)
   const [bastShowAllInstitutions, setBastShowAllInstitutions] = useState<boolean>(false);
   const [bastSingleInstId, setBastSingleInstId] = useState<string>('');
@@ -653,6 +683,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
 
   // Suhu & Kelembapan Ruangan notes per tanggal (Ruang Pengolahan, Ruang Pemorsian, Gudang Basah, Gudang Kering)
   const [roomTempNotesByDate, setRoomTempNotesByDate] = useState<Record<string, string>>({});
+
+  // Penandatangan opsional untuk Laporan Food Waste
+  const [showFoodWasteEditor, setShowFoodWasteEditor] = useState<boolean>(false);
+  const [foodWasteOfficerOverride, setFoodWasteOfficerOverride] = useState<string>('');
+  const [foodWasteKepalaOverride, setFoodWasteKepalaOverride] = useState<string>('');
+  const [foodWasteNipOverride, setFoodWasteNipOverride] = useState<string>('');
 
   // Active Report Metadata
   const currentConfig = useMemo(() => {
@@ -769,6 +805,52 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     orgaKesimpulanOverride,
     orgaMengetahuiOverride,
     orgaCustomRows,
+  ]);
+
+  // Auto-resolved Checklist Uji Organoleptik PLOG (Khusus PLOG) dari Gramasi Item Menu PLOG
+  const plogChecklistData = useMemo(() => {
+    const selectedMenuForPlog =
+      (plogChkMenuId !== 'AUTO' ? menuItems.find(m => m.id === plogChkMenuId) : undefined) ||
+      menuItems.find(m => m.date === selectedDate) ||
+      todayMenu;
+    const recipeIngredients =
+      menuIngredientsMap[selectedMenuForPlog.id] || selectedMenuForPlog.ingredients || [];
+
+    return resolvePlogChecklistAutoFields({
+      menu: selectedMenuForPlog,
+      recipeIngredients,
+      cookingRecords,
+      portioningRecords,
+      masterVolunteers,
+      sppgConfig,
+      date: plogChkMenuId !== 'AUTO' ? selectedMenuForPlog.date || selectedDate : selectedDate,
+      blankMode: plogChkBlankMode,
+      overrides: {
+        namaPemeriksa: plogChkPemeriksaOverride || undefined,
+        tempatPemeriksaan: plogChkTempatOverride || undefined,
+        waktuPemeriksaan: plogChkTimeOverride || undefined,
+        kesimpulan: plogChkKesimpulanOverride || undefined,
+        mengetahuiName: plogChkMengetahuiOverride || undefined,
+        rows: plogChkCustomRows || undefined,
+      },
+    });
+  }, [
+    plogChkMenuId,
+    menuItems,
+    selectedDate,
+    todayMenu,
+    menuIngredientsMap,
+    cookingRecords,
+    portioningRecords,
+    masterVolunteers,
+    sppgConfig,
+    plogChkBlankMode,
+    plogChkPemeriksaOverride,
+    plogChkTempatOverride,
+    plogChkTimeOverride,
+    plogChkKesimpulanOverride,
+    plogChkMengetahuiOverride,
+    plogChkCustomRows,
   ]);
 
   // Auto-resolved Surat Tugas Perjalanan Kendaraan Operasional (Master Relawan + Log Armada + Surat Keluar)
@@ -1001,6 +1083,53 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     institutions,
     selectedPortionCategory,
     searchKeyword,
+  ]);
+
+  // Auto-resolved Laporan Food Waste berbasis Item Menu (Cuci Ompreng + Master Menu + Gramasi PLOG + Penerima Manfaat)
+  const foodWasteReportData = useMemo(() => {
+    return resolveFoodWasteReportData({
+      washingWasteRecords,
+      menuItems,
+      menuIngredientsMap,
+      institutions,
+      beneficiaryAttendance,
+      distributionDeliveries,
+      distributionLogs,
+      sppgConfig,
+      periodType,
+      selectedDate,
+      selectedMonth,
+      startDate,
+      endDate,
+      selectedInstitutionId,
+      selectedPortionCategory,
+      searchKeyword,
+      overrides: {
+        nutritionOfficerName: foodWasteOfficerOverride || undefined,
+        headOfSppgName: foodWasteKepalaOverride || undefined,
+        headOfSppgNip: foodWasteNipOverride || undefined,
+      },
+    });
+  }, [
+    washingWasteRecords,
+    menuItems,
+    menuIngredientsMap,
+    institutions,
+    beneficiaryAttendance,
+    distributionDeliveries,
+    distributionLogs,
+    sppgConfig,
+    periodType,
+    selectedDate,
+    selectedMonth,
+    startDate,
+    endDate,
+    selectedInstitutionId,
+    selectedPortionCategory,
+    searchKeyword,
+    foodWasteOfficerOverride,
+    foodWasteKepalaOverride,
+    foodWasteNipOverride,
   ]);
 
   // Auto-resolved BAST Harian Sheets — 100% sinkron dengan Modul Tugas Divisi Distribusi, Presensi Harian & Master Lembaga
@@ -1947,6 +2076,74 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
+      // 5B. Checklist Uji Organoleptik PLOG (Khusus PLOG — Nama Makanan dari Gramasi Item Menu PLOG)
+      case 'checklist_organoleptik_plog': {
+        headers = ['No', 'Nama Makanan', 'Rasa', 'Warna', 'Aroma', 'Tekstur', 'Sebelum Pengantaran / Saat Tiba / Sebelum Dikonsumsi', 'Ket'];
+        const activeRows = plogChecklistData.rows.filter(r => r.foodName.trim() !== '');
+        rows = activeRows.map(r => [
+          r.no,
+          r.foodName,
+          r.rasa || '-',
+          r.warna || '-',
+          r.aroma || '-',
+          r.tekstur || '-',
+          r.statusPengantaran || '-',
+          r.ket || '-',
+        ]);
+
+        excelData = activeRows.map(r => ({
+          'No': r.no,
+          'Nama Pemeriksa': plogChecklistData.namaPemeriksa,
+          'Tempat Pemeriksaan': plogChecklistData.tempatPemeriksaan,
+          'Tanggal Pemeriksaan': plogChecklistData.tanggalPemeriksaan,
+          'Waktu Pemeriksaan': plogChecklistData.waktuPemeriksaan,
+          'Nama Makanan (Gramasi Item Menu PLOG)': r.foodName,
+          'Rasa (1-5)': r.rasa || '-',
+          'Warna (1-5)': r.warna || '-',
+          'Aroma (1-5)': r.aroma || '-',
+          'Tekstur (1-5)': r.tekstur || '-',
+          'Kondisi': r.statusPengantaran || '-',
+          'Ket': r.ket || '-',
+          'Kesimpulan Menu MBG': plogChecklistData.kesimpulan,
+        }));
+
+        signatures = [
+          { role: 'Mengetahui (Head Chef / Pengolahan)', name: plogChecklistData.mengetahuiName, idNum: '-' },
+          { role: 'Pemeriksa (Khusus PLOG)', name: plogChecklistData.namaPemeriksa, idNum: '-' },
+          { role: `Kepala ${sppgConfig.sppgName}`, name: plogChecklistData.kepalaSppgName, idNum: `SPPG-${sppgConfig.sppgId}` },
+        ];
+
+        metrics = [
+          {
+            label: 'Nama Pemeriksa (PLOG)',
+            value: plogChecklistData.namaPemeriksa,
+            sublabel: 'Otomatis dari Ahli Gizi / PLOG',
+            color: 'text-blue-700',
+          },
+          {
+            label: 'Sumber Nama Makanan',
+            value: `${activeRows.length} Item Menu`,
+            sublabel: 'Sinkron Gramasi Item Menu PLOG',
+            color: 'text-emerald-700',
+          },
+          {
+            label: 'Tanggal & Waktu',
+            value: plogChecklistData.waktuPemeriksaan,
+            sublabel: plogChecklistData.tanggalPemeriksaan,
+            color: 'text-purple-700',
+          },
+          {
+            label: 'Kesimpulan Menu MBG',
+            value: plogChecklistData.kesimpulan,
+            sublabel: plogChecklistData.tempatPemeriksaan,
+            color: 'text-amber-700',
+          },
+        ];
+        notes =
+          'Form Checklist Uji Organoleptik PLOG (Khusus PLOG) dengan format surat standar dan daftar Nama Makanan terhubung otomatis dari input PLOG pada Gramasi Item Menu.';
+        break;
+      }
+
       // 6. Flyer Menu (Terhubung real-time dengan Menu, Resep PLOG & Kategori Porsi)
       case 'flyer_menu': {
         headers = ['No', 'Komponen Hidangan', 'Nama Olahan / Bahan', 'Gramasi Porsi Kecil', 'Gramasi Porsi Besar', 'Energi / Protein', 'Referensi TKPI'];
@@ -2361,7 +2558,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 10. Pemeriksaan Makanan & Organoleptik PLOG (Kombinasi PLOG + Surat Pemeriksaan Makanan)
+      // 10. Pemeriksaan Makanan (Menu Basah, Menu Kering, Uji Organoleptik & Foto Porsi Besar Pemorsian)
       case 'organoleptik_plog': {
         headers = [
           'Kelompok',
@@ -2428,15 +2625,17 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
             color: 'text-purple-700',
           },
           {
-            label: 'Foto Sampel Ompreng',
+            label: 'Foto Porsi Besar (Pemorsian)',
             value: plogOrganolepticData.wetPhotoUrl ? 'Terlampir' : 'Belum Ada Foto',
-            sublabel: `Kode Menu: ${plogOrganolepticData.menuCode}`,
+            sublabel: plogOrganolepticData.wetPhotoUrl
+              ? `Sinkron Divisi Pemorsian • ${plogOrganolepticData.menuCode}`
+              : `Kode Menu: ${plogOrganolepticData.menuCode}`,
             color: 'text-amber-700',
           },
         ];
         notes =
           plogOrganolepticData.notes ||
-          'Formulir Pemeriksaan Makanan & Uji Organoleptik PLOG mencakup Menu Basah, Menu Kering, dokumentasi gambar, serta periode retensi sampel 2 x 24 jam.';
+          'Formulir Pemeriksaan Makanan mencakup Menu Basah, Menu Kering, uji organoleptik PLOG, dokumentasi foto Porsi Besar Divisi Pemorsian, serta periode retensi sampel 2 x 24 jam.';
         break;
       }
 
@@ -2768,220 +2967,124 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
         break;
       }
 
-      // 13. Food Waste (Sinkron Periode + Cuci Ompreng + Total Porsi Tersaji)
+      // 13. Food Waste (Format Item Menu: Cuci Ompreng + Master Menu + Gramasi PLOG + Penerima Manfaat)
       case 'food_waste': {
         headers = [
-          'No',
-          'Tanggal & Lembaga Asal',
-          'Petugas Cuci',
-          'Sisa Nasi (kg)',
-          'Sisa Lauk (kg)',
-          'Sisa Sayur & Buah (kg)',
-          'Total Waste (kg)',
-          'Rata-rata per Anak',
-          'Pengolahan Lanjut',
-          'Foto Bukti (Cuci Ompreng)',
+          'Tanggal',
+          'Menu',
+          'Jumlah Sisa',
+          'Satuan',
+          'Penerima Manfaat',
+          'Standar Porsi',
+          'Total yang disajikan (kg)',
+          'Persentase (%)',
+          'Kesimpulan',
+          'Dokumentasi',
         ];
-        const periodWashings = washingWasteRecords.filter(w =>
-          matchesReportPeriod(w.date, periodType, selectedDate, selectedMonth, startDate, endDate)
-        );
-        let washings =
-          periodType === 'harian' && periodWashings.length === 0
-            ? washingWasteRecords
-            : periodWashings;
 
-        if (searchKeyword.trim()) {
-          const kw = searchKeyword.toLowerCase();
-          washings = washings.filter(
-            (w, idx) =>
-              w.officerName.toLowerCase().includes(kw) ||
-              w.date.toLowerCase().includes(kw) ||
-              w.notes.toLowerCase().includes(kw) ||
-              (institutions[idx % Math.max(1, institutions.length)]?.name || '').toLowerCase().includes(kw)
-          );
-        }
-
-        const totalDailyPortionsBaseline = Math.max(
-          1,
-          distributionDeliveries
-            .filter(d => d.date === selectedDate)
-            .reduce((s, d) => s + d.totalPortions, 0) ||
-            institutions.filter(i => i.isActive).reduce((s, i) => s + i.totalPortions, 0) ||
-            1000
+        const flatMenuRows = foodWasteReportData.groups.flatMap(g =>
+          g.rows.map(r => ({ group: g, row: r }))
         );
 
-        const extractedPhotosPerRow = washings.map(w =>
-          [
-            { label: 'Nasi', url: w.wasteRice?.photoUrl },
-            { label: 'Hewani', url: w.wasteAnimalProtein?.photoUrl },
-            { label: 'Nabati', url: w.wastePlantProtein?.photoUrl },
-            { label: 'Sayur', url: w.wasteVegetable?.photoUrl },
-            { label: 'Buah', url: w.wasteFruit?.photoUrl },
-          ].filter((item): item is { label: string; url: string } => Boolean(item.url && item.url.trim() !== ''))
-        );
-
-        const baseRows = washings.map((w, idx) => {
-          const dayPortions =
-            distributionDeliveries
-              .filter(d => d.date === w.date)
-              .reduce((s, d) => s + d.totalPortions, 0) || totalDailyPortionsBaseline;
-          const instName =
-            targetInstFilter?.name ||
-            institutions[idx % Math.max(1, institutions.length)]?.name ||
-            'Seluruh Sekolah Sasaran';
-          const laukTotal = Number((toNonNegativeNumber(w.wasteAnimalProtein?.weight, 0) + toNonNegativeNumber(w.wastePlantProtein?.weight, 0)).toFixed(1));
-          const sayurBuahTotal = Number((toNonNegativeNumber(w.wasteVegetable?.weight, 0) + toNonNegativeNumber(w.wasteFruit?.weight, 0)).toFixed(1));
-          const riceWeight = toNonNegativeNumber(w.wasteRice?.weight, 0);
-          const totalWaste = toNonNegativeNumber(w.totalWasteWeight, 0);
-          const photos = extractedPhotosPerRow[idx] || [];
-          const avgWasteGram = ((totalWaste * 1000) / Math.max(1, dayPortions)).toFixed(1);
-
-          if (photos.length > 0) {
+        rows = flatMenuRows.map(({ group, row }, idx) => {
+          if (row.photoUrl) {
             imageCells.push({
               rowIndex: idx,
               colIndex: 9,
-              images: photos,
+              images: [{ label: row.menuName, url: row.photoUrl }],
             });
           }
-
           return [
-            idx + 1,
-            `${w.date} • ${instName}`,
-            w.officerName || 'Tim Sanitasi',
-            `${riceWeight} kg`,
-            `${laukTotal} kg`,
-            `${sayurBuahTotal} kg`,
-            `${totalWaste} kg`,
-            `${avgWasteGram} gram`,
-            'Komposting & Maggot Ternak',
-            photos.length > 0 ? `${photos.length} Foto (${photos.map(p => p.label).join(', ')})` : 'Belum ada foto',
+            group.bannerDateLabel,
+            row.menuName,
+            formatWasteKgCell(row.wasteKg) || '0',
+            row.unit,
+            row.beneficiaryCount,
+            formatStandardGramsCell(row.standardPortionGrams),
+            formatServedKgCell(row.totalServedKg),
+            row.wastePercentage.toFixed(1),
+            row.conclusion,
+            row.photoUrl ? 'Terlampir' : '-',
           ];
         });
 
-        const wasteSchema = dynamicFormSchemas.production_waste_form;
-        const wasteCustomFields = getCustomTableFields(wasteSchema);
-        const dynamicWasteCols = appendDynamicExportColumns(wasteSchema, headers, baseRows, washings);
-        headers = dynamicWasteCols.headers;
-        rows = dynamicWasteCols.rows;
+        displayRows = flatMenuRows.map(({ group, row }) => [
+          group.bannerDateLabel,
+          row.menuName,
+          formatWasteKgCell(row.wasteKg),
+          row.unit,
+          row.beneficiaryCount,
+          formatStandardGramsCell(row.standardPortionGrams),
+          formatServedKgCell(row.totalServedKg),
+          row.wastePercentage.toFixed(1),
+          row.conclusion,
+          row.photoUrl ? (
+            <button
+              key={`fw-menu-photo-${row.id}`}
+              type="button"
+              onClick={() =>
+                setPreviewPhoto({
+                  label: `Dokumentasi Food Waste — ${row.menuName}`,
+                  url: row.photoUrl!,
+                  caption: `${group.bannerDateLabel} • Sisa ${formatWasteKgCell(row.wasteKg) || '0.00'} ${row.unit}`,
+                })
+              }
+              className="inline-flex items-center p-0.5 rounded border border-slate-200 hover:border-blue-600 transition"
+            >
+              <img src={row.photoUrl} alt={row.menuName} className="w-10 h-10 object-cover rounded-xs" />
+            </button>
+          ) : (
+            <span className="text-[11px] italic text-slate-400">-</span>
+          ),
+        ]);
 
-        displayRows = washings.map((w, idx) => {
-          const row = rows[idx];
-          const photos = extractedPhotosPerRow[idx] || [];
-          const photoNode =
-            photos.length > 0 ? (
-              <div key={`fw-photos-${w.id}`} className="flex flex-wrap items-center gap-1.5 min-w-[220px] py-0.5">
-                {photos.map((p, pIdx) => (
-                  <button
-                    key={pIdx}
-                    type="button"
-                    onClick={() =>
-                      setPreviewPhoto({
-                        label: `Foto Sisa ${p.label} — ${w.date}`,
-                        url: p.url,
-                        caption: `Petugas: ${w.officerName} • Total Food Waste: ${w.totalWasteWeight} kg`,
-                      })
-                    }
-                    title={`Klik untuk perbesar foto sisa ${p.label}`}
-                    className="group flex flex-col items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5 hover:border-blue-600 hover:bg-blue-50/40 transition print:border-slate-300 print:bg-white"
-                  >
-                    <img
-                      src={p.url}
-                      alt={`Foto sisa ${p.label}`}
-                      className="w-10 h-10 object-cover rounded-sm"
-                    />
-                    <span className="text-[9px] font-semibold text-slate-600 leading-none pb-0.5">
-                      {p.label}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span className="text-[11px] italic text-slate-400">Belum ada foto upload</span>
-            );
+        excelData = flatMenuRows.map(({ group, row }) => ({
+          'Tanggal': group.bannerDateLabel,
+          'Menu': row.menuName,
+          'Jumlah Sisa': row.wasteKg,
+          'Satuan': row.unit,
+          'Penerima Manfaat': row.beneficiaryCount,
+          'Standar Porsi (g)': row.standardPortionGrams,
+          'Total yang disajikan (kg)': Number(row.totalServedKg.toFixed(3)),
+          'Persentase (%)': Number(row.wastePercentage.toFixed(1)),
+          'Kesimpulan': row.conclusion,
+          'Dokumentasi': row.photoUrl ? 'Terlampir' : '-',
+        }));
 
-          const customDisplayCells = wasteCustomFields.map(cf => {
-            const raw = w.customFields?.[cf.key];
-            if (cf.type === 'photo' && typeof raw === 'string' && raw.trim() !== '') {
-              return (
-                <button
-                  key={`fw-cf-${w.id}-${cf.key}`}
-                  type="button"
-                  onClick={() =>
-                    setPreviewPhoto({
-                      label: `${cf.label} — ${w.date}`,
-                      url: raw,
-                      caption: `Petugas: ${w.officerName}`,
-                    })
-                  }
-                  className="inline-flex items-center p-0.5 rounded border border-slate-200 hover:border-blue-600 transition"
-                >
-                  <img src={raw} alt={cf.label} className="w-9 h-9 object-cover rounded-xs" />
-                </button>
-              );
-            }
-            return formatDynamicFieldValue(cf, raw);
-          });
-
-          return [...row.slice(0, 9), photoNode, ...customDisplayCells];
-        });
-
-        excelData = washings.map((w, idx) => {
-          const photos = extractedPhotosPerRow[idx] || [];
-          const laukTotal = Number(((w.wasteAnimalProtein?.weight || 0) + (w.wastePlantProtein?.weight || 0)).toFixed(1));
-          const sayurBuahTotal = Number(((w.wasteVegetable?.weight || 0) + (w.wasteFruit?.weight || 0)).toFixed(1));
-          return appendDynamicExcelFields(
-            wasteSchema,
-            {
-              'No': idx + 1,
-              'Tanggal': w.date,
-              'Lembaga': targetInstFilter?.name || 'Seluruh Sekolah Sasaran',
-              'Petugas': w.officerName,
-              'Total Waste (kg)': w.totalWasteWeight,
-              'Sisa Nasi (kg)': w.wasteRice.weight,
-              'Sisa Lauk Hewani & Nabati (kg)': laukTotal,
-              'Sisa Sayur & Buah (kg)': sayurBuahTotal,
-              'Jumlah Foto Upload': photos.length,
-              'Kategori Foto Terlampir': photos.length > 0 ? photos.map(p => p.label).join(', ') : 'Belum ada foto',
-            },
-            w
-          );
-        });
-
-        const totWaste = washings.reduce((acc, w) => acc + toNonNegativeNumber(w.totalWasteWeight, 0), 0);
-        const totalServedAcrossLogs =
-          washings.reduce((sum, w) => {
-            const dPort = distributionDeliveries
-              .filter(d => d.date === w.date)
-              .reduce((s, d) => s + toNonNegativeNumber(d.totalPortions, 0), 0);
-            return sum + (dPort || totalDailyPortionsBaseline);
-          }, 0) || totalDailyPortionsBaseline;
-        const avgWastePerPortionGrams = (totWaste * 1000) / Math.max(1, totalServedAcrossLogs);
-        const consumptionRatePct = Math.max(0, Math.min(100, 100 - (avgWastePerPortionGrams / 350) * 100));
-        const totalUploadedPhotos = extractedPhotosPerRow.reduce((acc, list) => acc + list.length, 0);
+        const totWaste = foodWasteReportData.groups.reduce((acc, g) => acc + g.totalWasteKg, 0);
+        const totServed = foodWasteReportData.groups.reduce((acc, g) => acc + g.totalServedKg, 0);
+        const avgPct = totServed > 0 ? (totWaste / totServed) * 100 : 0;
+        const evalCount = flatMenuRows.filter(item => item.row.wastePercentage > 20).length;
+        const photoCount = flatMenuRows.filter(item => Boolean(item.row.photoUrl)).length;
 
         metrics = [
-          { label: 'Total Food Waste Tercatat', value: `${totWaste.toFixed(1)} kg`, color: 'text-amber-700' },
           {
-            label: 'Rata-rata Sisa per Porsi',
-            value: `${avgWastePerPortionGrams.toFixed(1)} gram`,
-            sublabel: avgWastePerPortionGrams < 25 ? 'Sangat Rendah (<25g)' : 'Perlu Evaluasi Menu',
-            color: 'text-emerald-700',
+            label: 'Total Food Waste Tercatat',
+            value: `${totWaste.toFixed(2)} kg`,
+            sublabel: `${foodWasteReportData.groups.length} hari • ${flatMenuRows.length} item menu`,
+            color: 'text-amber-700',
           },
           {
-            label: 'Daya Habis Konsumsi',
-            value: `${consumptionRatePct.toFixed(1)}%`,
-            sublabel: `Dari ${formatNumber(totalServedAcrossLogs)} porsi tersaji`,
+            label: 'Persentase Sisa Keseluruhan',
+            value: `${avgPct.toFixed(1)}%`,
+            sublabel: avgPct <= 15 ? 'Efisiensi Sangat Baik (<10–15%)' : avgPct <= 20 ? 'Batas Maksimal Toleransi (≤20%)' : 'Perlu Evaluasi (>20%)',
+            color: avgPct <= 20 ? 'text-emerald-700' : 'text-rose-700',
+          },
+          {
+            label: 'Total Sajian Menu',
+            value: `${formatServedKgCell(totServed)} kg`,
+            sublabel: `${evalCount} item menu perlu evaluasi (>20%)`,
             color: 'text-blue-700',
           },
           {
-            label: 'Foto Divisi Cuci Ompreng',
-            value: `${totalUploadedPhotos} Foto`,
-            sublabel: 'Terlampir otomatis di laporan',
+            label: 'Dokumentasi Foto Menu',
+            value: `${photoCount} Foto`,
+            sublabel: 'Sinkron Divisi Cuci Ompreng',
             color: 'text-purple-700',
           },
         ];
         notes =
-          'Sisa makanan dihitung otomatis dari penimbangan Divisi Cuci Ompreng dibagi total porsi distribusi harian. Kolom foto menampilkan dokumentasi resmi hasil unggahan Divisi Cuci Ompreng.';
+          'Kesimpulan: > 20% perlu perbaikan menu, porsi, atau edukasi | <= 20% batas maksimal toleransi | < 10-15% target efisiensi yang baik.';
         break;
       }
 
@@ -3776,11 +3879,13 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     sppgConfig,
     dynamicFormSchemas,
     organolepticData,
+    plogChecklistData,
     plogOrganolepticData,
     cookingFoodTempData,
     portioningFoodTempData,
     activeRoomTempDataset,
     foodCostReportData,
+    foodWasteReportData,
   ]);
 
   // Filter Categories
@@ -3807,6 +3912,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       await exportOrganolepticChecklistPDF(organolepticData);
       return;
     }
+    if (activeReportKey === 'checklist_organoleptik_plog') {
+      await exportOrganolepticChecklistPDF(plogChecklistData);
+      return;
+    }
     if (activeReportKey === 'organoleptik_plog') {
       await exportPlogOrganolepticPDF(plogOrganolepticData);
       return;
@@ -3829,6 +3938,10 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
     }
     if (activeReportKey === 'informasi_gizi') {
       await exportNutritionReportPDF(nutritionReportData);
+      return;
+    }
+    if (activeReportKey === 'food_waste') {
+      await exportFoodWasteReportPDF(foodWasteReportData);
       return;
     }
     if (activeReportKey === 'surat_tugas') {
@@ -3877,12 +3990,14 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
       {activeReportKey !== 'bast_distribusi' &&
         activeReportKey !== 'surat_tugas' &&
         activeReportKey !== 'organoleptik_penerima' &&
+        activeReportKey !== 'checklist_organoleptik_plog' &&
         activeReportKey !== 'organoleptik_plog' &&
         activeReportKey !== 'suhu_makanan_pengolahan' &&
         activeReportKey !== 'suhu_makanan_pemorsian' &&
         !FACILITY_REPORT_UNIT_MAP[activeReportKey] &&
         activeReportKey !== 'food_cost' &&
-        activeReportKey !== 'informasi_gizi' && (
+        activeReportKey !== 'informasi_gizi' &&
+        activeReportKey !== 'food_waste' && (
         <div className="hidden print:block mb-6">
           <PrintHeader
             title={reportPayload.title}
@@ -4748,17 +4863,267 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <OrganolepticChecklistSheet data={organolepticData} />
               </div>
             </div>
-          ) : activeReportKey === 'organoleptik_plog' ? (
+          ) : activeReportKey === 'checklist_organoleptik_plog' ? (
             <div className="space-y-4">
-              {/* Control Bar Kombinasi Pemeriksaan Makanan & Organoleptik PLOG (Tersembunyi saat Cetak) */}
+              {/* Control Bar Khusus Checklist Uji Organoleptik PLOG (Tersembunyi saat Cetak) */}
               <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                      Format Kombinasi: Organoleptik PLOG + Pemeriksaan Makanan (Menu Basah &amp; Menu Kering)
+                      Checklist Uji Organoleptik PLOG (Khusus PLOG) — Sinkron Gramasi Item Menu
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Format surat sama dengan Checklist Uji Organoleptik Penerima Manfaat, dengan Nama Makanan diambil otomatis dari item menu yang diinput PLOG pada Gramasi Item Menu.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlogChkBlankMode(v => !v);
+                        setPlogChkCustomRows(null);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                        plogChkBlankMode
+                          ? 'bg-amber-600 text-white border-amber-700'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {plogChkBlankMode ? 'Mode Blanko Kosong (Aktif)' : 'Gunakan Mode Blanko Kosong'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlogChkEditor(v => !v)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-900 text-white hover:bg-blue-800 transition"
+                    >
+                      {showPlogChkEditor ? 'Tutup Editor Skor' : 'Edit Skor & Item'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Menu Harian (Gramasi PLOG)
+                    </label>
+                    <select
+                      value={plogChkMenuId}
+                      onChange={e => {
+                        setPlogChkMenuId(e.target.value);
+                        setPlogChkCustomRows(null);
+                      }}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium"
+                    >
+                      <option value="AUTO">Otomatis Sesuai Tanggal ({todayMenu.menuCode})</option>
+                      {menuItems.map(m => (
+                        <option key={m.id} value={m.id}>
+                          [{m.menuCode}] {m.dayName} ({m.date})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Nama Pemeriksa (PLOG)
+                    </label>
+                    <input
+                      type="text"
+                      value={plogChkPemeriksaOverride || plogChecklistData.namaPemeriksa}
+                      onChange={e => setPlogChkPemeriksaOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Tempat Pemeriksaan
+                    </label>
+                    <input
+                      type="text"
+                      value={plogChkTempatOverride || plogChecklistData.tempatPemeriksaan}
+                      onChange={e => setPlogChkTempatOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Waktu Pemeriksaan
+                    </label>
+                    <ClassicTimeInput
+                      value={plogChkTimeOverride || plogChecklistData.waktuPemeriksaan}
+                      onChange={setPlogChkTimeOverride}
+                      format="HH:mm WIB"
+                      allowClear
+                      placeholder="06:30 WIB"
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Kesimpulan Menu MBG
+                    </label>
+                    <select
+                      value={plogChkKesimpulanOverride || plogChecklistData.kesimpulan}
+                      onChange={e => setPlogChkKesimpulanOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium"
+                    >
+                      <option value="Aman dikonsumsi">Aman dikonsumsi</option>
+                      <option value="Aman/Tidak aman dikonsumsi">Aman/Tidak aman dikonsumsi (Pilihan Cetak)</option>
+                      <option value="Tidak aman dikonsumsi">Tidak aman dikonsumsi</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-600 mb-1">
+                      Mengetahui (Head Chef / Koordinator Dapur)
+                    </label>
+                    <input
+                      type="text"
+                      value={plogChkMengetahuiOverride || plogChecklistData.mengetahuiName}
+                      onChange={e => setPlogChkMengetahuiOverride(e.target.value)}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                {showPlogChkEditor && (
+                  <div className="pt-3 border-t border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700">
+                        Input / Ubah Skor Hasil Pemeriksaan PLOG (Skor 1-5)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPlogChkCustomRows(null)}
+                        className="text-[11px] font-semibold text-blue-700 hover:underline"
+                      >
+                        Reset ke Gramasi Item Menu PLOG
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border border-slate-200 bg-white">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-700 font-semibold">
+                            <th className="p-2 border border-slate-200 w-10">No</th>
+                            <th className="p-2 border border-slate-200 text-left">Nama Makanan</th>
+                            <th className="p-2 border border-slate-200 w-16">Rasa</th>
+                            <th className="p-2 border border-slate-200 w-16">Warna</th>
+                            <th className="p-2 border border-slate-200 w-16">Aroma</th>
+                            <th className="p-2 border border-slate-200 w-16">Tekstur</th>
+                            <th className="p-2 border border-slate-200 w-36">Tahap Uji</th>
+                            <th className="p-2 border border-slate-200">Ket</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plogChecklistData.rows.map((r, rIdx) => (
+                            <tr key={rIdx}>
+                              <td className="p-1.5 border border-slate-200 text-center">
+                                {r.no || rIdx + 1}
+                              </td>
+                              <td className="p-1.5 border border-slate-200">
+                                <input
+                                  type="text"
+                                  value={r.foodName}
+                                  onChange={e => {
+                                    const next = plogChecklistData.rows.map((item, idx) =>
+                                      idx === rIdx
+                                        ? {
+                                            ...item,
+                                            no: item.no || idx + 1,
+                                            foodName: e.target.value,
+                                          }
+                                        : item
+                                    );
+                                    setPlogChkCustomRows(next);
+                                  }}
+                                  className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  placeholder="Nama makanan..."
+                                />
+                              </td>
+                              {(['rasa', 'warna', 'aroma', 'tekstur'] as const).map(scoreKey => (
+                                <td key={scoreKey} className="p-1.5 border border-slate-200">
+                                  <select
+                                    value={r[scoreKey]}
+                                    onChange={e => {
+                                      const next = plogChecklistData.rows.map((item, idx) =>
+                                        idx === rIdx ? { ...item, [scoreKey]: e.target.value } : item
+                                      );
+                                      setPlogChkCustomRows(next);
+                                    }}
+                                    className="w-full px-1 py-1 border border-slate-200 rounded text-xs text-center"
+                                  >
+                                    <option value="">-</option>
+                                    <option value="5">5</option>
+                                    <option value="4">4</option>
+                                    <option value="3">3</option>
+                                    <option value="2">2</option>
+                                    <option value="1">1</option>
+                                  </select>
+                                </td>
+                              ))}
+                              <td className="p-1.5 border border-slate-200">
+                                <select
+                                  value={r.statusPengantaran}
+                                  onChange={e => {
+                                    const next = plogChecklistData.rows.map((item, idx) =>
+                                      idx === rIdx ? { ...item, statusPengantaran: e.target.value } : item
+                                    );
+                                    setPlogChkCustomRows(next);
+                                  }}
+                                  className="w-full px-1.5 py-1 border border-slate-200 rounded text-xs"
+                                >
+                                  <option value="">(Kosong)</option>
+                                  <option value="Sebelum Pengantaran">Sebelum Pengantaran</option>
+                                  <option value="Aman">Aman</option>
+                                  <option value="Saat Tiba di Lokasi">Saat Tiba di Lokasi</option>
+                                  <option value="Sebelum dikonsumsi">Sebelum dikonsumsi</option>
+                                  <option value="Tidak aman">Tidak aman</option>
+                                </select>
+                              </td>
+                              <td className="p-1.5 border border-slate-200">
+                                <input
+                                  type="text"
+                                  value={r.ket}
+                                  onChange={e => {
+                                    const next = plogChecklistData.rows.map((item, idx) =>
+                                      idx === rIdx ? { ...item, ket: e.target.value } : item
+                                    );
+                                    setPlogChkCustomRows(next);
+                                  }}
+                                  className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                                  placeholder="Catatan..."
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi CHECKLIST UJI ORGANOLEPTIK PLOG (KHUSUS PLOG) */}
+              <div className="max-w-4xl mx-auto">
+                <OrganolepticChecklistSheet data={plogChecklistData} />
+              </div>
+            </div>
+          ) : activeReportKey === 'organoleptik_plog' ? (
+            <div className="space-y-4">
+              {/* Control Bar Surat Pemeriksaan Makanan (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Format Surat: Pemeriksaan Makanan (Menu Basah &amp; Menu Kering)
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Komponen menu, suhu masak, penilai Pengawas Gizi &amp; Head Chef, foto ompreng pemorsian, dan tanggal retensi 2x24 jam terisi otomatis dan dapat disesuaikan sebelum cetak/PDF.
+                      Komponen menu, suhu masak, penilai Pengawas Gizi &amp; Head Chef, foto Porsi Besar otomatis dari Divisi Pemorsian, dan tanggal retensi 2x24 jam terisi otomatis dan dapat disesuaikan sebelum cetak/PDF.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -4861,9 +5226,15 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
                   <div className="flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-lg">
                     <div>
-                      <span className="font-bold text-slate-700 block">Foto Sampel Menu Basah (Ompreng)</span>
+                      <span className="font-bold text-slate-700 block">
+                        Foto Sampel Menu Basah (Porsi Besar Divisi Pemorsian)
+                      </span>
                       <span className="text-[11px] text-slate-500">
-                        {plogOrganolepticData.wetPhotoUrl ? 'Foto aktif terpasang di kolom Gambar' : 'Belum ada foto'}
+                        {plogWetPhotoOverride !== undefined
+                          ? 'Foto custom terpasang di kolom Gambar'
+                          : plogOrganolepticData.wetPhotoUrl
+                          ? 'Otomatis diambil dari upload foto Porsi Besar Divisi Pemorsian'
+                          : 'Belum ada foto Porsi Besar di Divisi Pemorsian'}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -5173,7 +5544,7 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                 )}
               </div>
 
-              {/* Lembar Surat Resmi Kombinasi PEMERIKSAAN MAKANAN & ORGANOLEPTIK PLOG */}
+              {/* Lembar Surat Resmi PEMERIKSAAN MAKANAN */}
               <div className="max-w-4xl mx-auto">
                 <PlogOrganolepticSheet
                   data={plogOrganolepticData}
@@ -5417,6 +5788,88 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               {/* Lembar Surat Resmi LAPORAN PERHITUNGAN NILAI GIZI (BGN) */}
               <div className="w-full">
                 <NutritionReportSheet data={nutritionReportData} />
+              </div>
+            </div>
+          ) : activeReportKey === 'food_waste' ? (
+            <div className="space-y-4">
+              {/* Control Bar Integrasi Analisis Sisa Makanan / Food Waste per Item Menu (Tersembunyi saat Cetak) */}
+              <div className="print:hidden bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                      Sinkronisasi Otomatis: Divisi Cuci Ompreng + Item Menu &amp; Gramasi PLOG + Penerima Manfaat
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Format analisis sisa makanan per item menu dengan perhitungan otomatis Total yang disajikan (kg), Persentase (%), Kesimpulan kelayakan, dan dokumentasi foto penimbangan Cuci Ompreng.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowFoodWasteEditor(v => !v)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 transition"
+                    >
+                      {showFoodWasteEditor ? 'Tutup Edit Penandatangan' : 'Edit Penandatangan / NIP'}
+                    </button>
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate('production')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                      >
+                        <span>Input di Divisi Cuci Ompreng</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {showFoodWasteEditor && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-200 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">
+                        Pengawas Gizi (Membuat)
+                      </label>
+                      <input
+                        type="text"
+                        value={foodWasteOfficerOverride || foodWasteReportData.nutritionOfficerName}
+                        onChange={e => setFoodWasteOfficerOverride(e.target.value)}
+                        className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">
+                        Kepala SPPG (Diperiksa oleh)
+                      </label>
+                      <input
+                        type="text"
+                        value={foodWasteKepalaOverride || foodWasteReportData.headOfSppgName}
+                        onChange={e => setFoodWasteKepalaOverride(e.target.value)}
+                        className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-600 mb-1">
+                        NIP Kepala SPPG (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        value={foodWasteNipOverride}
+                        onChange={e => setFoodWasteNipOverride(e.target.value)}
+                        placeholder="Contoh: 20020918 202621 2 004"
+                        className="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-lg text-slate-800"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lembar Surat Resmi ANALISIS SISA MAKANAN (FOOD WASTE) */}
+              <div className="w-full">
+                <FoodWasteReportSheet
+                  data={foodWasteReportData}
+                  onPreviewPhoto={setPreviewPhoto}
+                />
               </div>
             </div>
           ) : (
@@ -5774,6 +6227,11 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
                   data={organolepticData}
                   className="max-w-4xl w-full border-slate-300 shadow-md"
                 />
+              ) : activeReportKey === 'checklist_organoleptik_plog' ? (
+                <OrganolepticChecklistSheet
+                  data={plogChecklistData}
+                  className="max-w-4xl w-full border-slate-300 shadow-md"
+                />
               ) : activeReportKey === 'organoleptik_plog' ? (
                 <PlogOrganolepticSheet
                   data={plogOrganolepticData}
@@ -5807,6 +6265,12 @@ export const ReportsModule: React.FC<ReportsModuleProps> = ({ onNavigate }) => {
               ) : activeReportKey === 'informasi_gizi' ? (
                 <NutritionReportSheet
                   data={nutritionReportData}
+                  className="max-w-6xl w-full border-slate-300 shadow-md"
+                />
+              ) : activeReportKey === 'food_waste' ? (
+                <FoodWasteReportSheet
+                  data={foodWasteReportData}
+                  onPreviewPhoto={setPreviewPhoto}
                   className="max-w-6xl w-full border-slate-300 shadow-md"
                 />
               ) : (

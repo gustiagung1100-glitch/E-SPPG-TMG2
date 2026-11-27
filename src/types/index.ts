@@ -1287,6 +1287,7 @@ export type OfficialReportKey =
   | 'perjalanan_dinas'
   | 'organoleptik_penerima'
   | 'organoleptik_plog'
+  | 'checklist_organoleptik_plog'
   | 'sampel_menu'
   | 'flyer_menu'
   | 'penerima_harian'

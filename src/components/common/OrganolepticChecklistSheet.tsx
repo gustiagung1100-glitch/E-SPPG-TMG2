@@ -3,12 +3,17 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BGNLogo } from './OfficialLogos';
 import { formatIndonesianDate, parseLocalDate } from '../../lib/exportUtils';
+import { resolveMenuGrammages } from '../../lib/plogData';
 import {
   BeneficiaryAttendanceLog,
+  CookingInspectionRecord,
   DistributionDeliveryRecord,
   DistributionLog,
   Institution,
+  MasterVolunteer,
   MenuItem,
+  PortioningInspectionRecord,
+  RecipeIngredient,
   SPPGConfig,
 } from '../../types';
 
@@ -37,6 +42,9 @@ export interface OrganolepticChecklistData {
   kesimpulan: string;
   mengetahuiName: string;
   kepalaSppgName: string;
+  sheetTitle?: string;
+  sheetSubtitle?: string;
+  fileNamePrefix?: string;
 }
 
 function formatDayCommaDate(dateStr?: string): string {
@@ -251,6 +259,181 @@ export function resolveOrganolepticAutoFields(
   };
 }
 
+export interface ResolvePlogChecklistParams {
+  menu?: MenuItem;
+  recipeIngredients?: RecipeIngredient[];
+  cookingRecords?: CookingInspectionRecord[];
+  portioningRecords?: PortioningInspectionRecord[];
+  masterVolunteers?: MasterVolunteer[];
+  sppgConfig: SPPGConfig;
+  date?: string;
+  blankMode?: boolean;
+  overrides?: {
+    namaPemeriksa?: string;
+    tempatPemeriksaan?: string;
+    tanggalPemeriksaan?: string;
+    waktuPemeriksaan?: string;
+    kesimpulan?: string;
+    mengetahuiName?: string;
+    kepalaSppgName?: string;
+    rows?: OrganolepticFoodRow[];
+  };
+}
+
+export function buildPlogGrammageOrganolepticRows(
+  menu?: MenuItem,
+  recipeIngredients: RecipeIngredient[] = [],
+  blankMode = false
+): OrganolepticFoodRow[] {
+  const grammages = resolveMenuGrammages(menu, recipeIngredients);
+  const foodNames = grammages
+    .map(g => (g.itemName || '').trim())
+    .filter(name => name !== '');
+
+  const finalNames =
+    foodNames.length > 0
+      ? foodNames
+      : ['Nasi Putih', 'Ayam Fillet Kecap Madu', 'Tempe Mendoan Gurih', 'Sop Sayur Kaldu Ayam', 'Pisang Cavendish'];
+
+  const filledRows: OrganolepticFoodRow[] = finalNames.map((name, idx) => ({
+    no: idx + 1,
+    foodName: name,
+    rasa: blankMode ? '' : '4',
+    warna: blankMode ? '' : '4',
+    aroma: blankMode ? '' : '4',
+    tekstur: blankMode ? '' : '4',
+    statusPengantaran: blankMode ? '' : 'Sebelum Pengantaran',
+    ket: '',
+  }));
+
+  while (filledRows.length < 7) {
+    filledRows.push({
+      no: '',
+      foodName: '',
+      rasa: '',
+      warna: '',
+      aroma: '',
+      tekstur: '',
+      statusPengantaran: '',
+      ket: '',
+    });
+  }
+
+  return filledRows;
+}
+
+export function resolvePlogChecklistAutoFields(
+  params: ResolvePlogChecklistParams
+): OrganolepticChecklistData {
+  const {
+    menu,
+    recipeIngredients = [],
+    cookingRecords = [],
+    portioningRecords = [],
+    masterVolunteers = [],
+    sppgConfig,
+    date,
+    blankMode = false,
+    overrides,
+  } = params;
+
+  const activeDate =
+    date ||
+    menu?.date ||
+    portioningRecords[0]?.date ||
+    cookingRecords[0]?.date ||
+    new Date().toISOString().slice(0, 10);
+
+  const matchedCooking =
+    cookingRecords.find(r => r.date === activeDate) || cookingRecords[0];
+  const matchedPortioning =
+    portioningRecords.find(r => r.date === activeDate) || portioningRecords[0];
+
+  const nutritionVolunteer = masterVolunteers.find(
+    v =>
+      v.isActive &&
+      /gizi|nutrisionis|plog/i.test(`${v.division} ${v.position}`)
+  );
+  const chefVolunteer = masterVolunteers.find(
+    v =>
+      v.isActive &&
+      (v.division === 'Pengolahan' || /chef|masak/i.test(v.position))
+  );
+
+  const autoInspectorName =
+    sppgConfig.nutritionOfficer?.trim() ||
+    nutritionVolunteer?.name ||
+    'Ahli Gizi / Petugas PLOG';
+
+  const sppgDisplayName = sppgConfig.sppgName || 'SPPG Probolinggo Krejengan Temenggungan 2';
+  const autoPlaceName = `Dapur & Ruang Pemorsian ${sppgDisplayName}`;
+  const autoDateLabel = formatDayCommaDate(activeDate);
+
+  const rawTime = matchedPortioning?.time || matchedCooking?.time || '06:30 WIB';
+  const autoTimeLabel =
+    rawTime.trim() !== '' && rawTime.trim() !== '-'
+      ? /wib/i.test(rawTime)
+        ? rawTime
+        : `${rawTime} WIB`
+      : '06:30 WIB';
+
+  const cleanSppgTitle = sppgDisplayName.replace(/^SPPG\s+/i, '').toUpperCase();
+
+  const addressLine = `${sppgConfig.address || 'Dusun Krajan RT/RW 003/004 Desa Temenggungan'}, Kecamatan ${
+    sppgConfig.district || 'Krejengan'
+  }, ${sppgConfig.regency || 'Kabupaten Probolinggo'}, ${
+    sppgConfig.province || 'Jawa Timur'
+  }, ID 67284. Email : ${sppgConfig.email}`;
+
+  const defaultRows = buildPlogGrammageOrganolepticRows(menu, recipeIngredients, blankMode);
+  const autoMengetahui =
+    matchedCooking?.officerName?.trim() ||
+    chefVolunteer?.name ||
+    'Head Chef Divisi Pengolahan';
+
+  return {
+    institutionId: menu?.id || 'plog-internal',
+    namaPemeriksa:
+      overrides?.namaPemeriksa !== undefined && overrides.namaPemeriksa.trim() !== ''
+        ? overrides.namaPemeriksa
+        : autoInspectorName,
+    tempatPemeriksaan:
+      overrides?.tempatPemeriksaan !== undefined && overrides.tempatPemeriksaan.trim() !== ''
+        ? overrides.tempatPemeriksaan
+        : autoPlaceName,
+    tanggalPemeriksaan:
+      overrides?.tanggalPemeriksaan !== undefined && overrides.tanggalPemeriksaan.trim() !== ''
+        ? overrides.tanggalPemeriksaan
+        : autoDateLabel,
+    waktuPemeriksaan:
+      overrides?.waktuPemeriksaan !== undefined && overrides.waktuPemeriksaan.trim() !== ''
+        ? overrides.waktuPemeriksaan
+        : autoTimeLabel,
+    rawDate: activeDate,
+    cityDateLabel: formatCityDate(sppgConfig.regency, activeDate),
+    sppgTitleLine: cleanSppgTitle,
+    addressLine,
+    rows: overrides?.rows && overrides.rows.length > 0 ? overrides.rows : defaultRows,
+    kesimpulan:
+      overrides?.kesimpulan && overrides.kesimpulan.trim() !== ''
+        ? overrides.kesimpulan
+        : blankMode
+        ? 'Aman/Tidak aman dikonsumsi'
+        : 'Aman dikonsumsi',
+    mengetahuiName:
+      overrides?.mengetahuiName && overrides.mengetahuiName.trim() !== ''
+        ? overrides.mengetahuiName
+        : autoMengetahui,
+    kepalaSppgName:
+      overrides?.kepalaSppgName && overrides.kepalaSppgName.trim() !== ''
+        ? overrides.kepalaSppgName
+        : sppgConfig.headOfSppg,
+    sheetTitle: 'CHECKLIST UJI ORGANOLEPTIK',
+    sheetSubtitle: 'Khusus PLOG (Pengawasan Mutu Internal Dapur)',
+    fileNamePrefix: 'Checklist_Uji_Organoleptik_PLOG',
+  };
+}
+
 export const OrganolepticChecklistSheet: React.FC<{
   data: OrganolepticChecklistData;
   className?: string;
@@ -283,8 +466,13 @@ export const OrganolepticChecklistSheet: React.FC<{
       {/* JUDUL FORM */}
       <div className="text-center pb-4">
         <h1 className="text-[13px] sm:text-[14.5px] font-bold uppercase tracking-wide text-black font-sans">
-          CHECKLIST UJI ORGANOLEPTIK
+          {data.sheetTitle || 'CHECKLIST UJI ORGANOLEPTIK'}
         </h1>
+        {data.sheetSubtitle && (
+          <p className="text-[10.5px] sm:text-[11px] font-medium text-black/80 font-sans mt-0.5">
+            {data.sheetSubtitle}
+          </p>
+        )}
       </div>
 
       {/* IDENTITAS PEMERIKSAAN (Terisi Otomatis dari Master Data Penerima Manfaat) */}
@@ -532,7 +720,13 @@ export async function exportOrganolepticChecklistPDF(data: OrganolepticChecklist
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11.5);
   doc.setTextColor(0, 0, 0);
-  doc.text('CHECKLIST UJI ORGANOLEPTIK', pageCenterX, y, { align: 'center' });
+  doc.text(data.sheetTitle || 'CHECKLIST UJI ORGANOLEPTIK', pageCenterX, y, { align: 'center' });
+  if (data.sheetSubtitle) {
+    y += 4.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(data.sheetSubtitle, pageCenterX, y, { align: 'center' });
+  }
 
   // BLOK IDENTITAS PEMERIKSA
   y += 8;
@@ -705,7 +899,8 @@ export async function exportOrganolepticChecklistPDF(data: OrganolepticChecklist
   doc.text(data.kepalaSppgName, pageCenterX, sigY + 49, { align: 'center' });
 
   const safePlace = data.tempatPemeriksaan.replace(/[^a-zA-Z0-9]+/g, '_');
-  doc.save(`Checklist_Uji_Organoleptik_${safePlace}_${data.rawDate}.pdf`);
+  const prefix = data.fileNamePrefix || 'Checklist_Uji_Organoleptik';
+  doc.save(`${prefix}_${safePlace}_${data.rawDate}.pdf`);
 }
 
 export function formatOrganolepticDateSimple(dateStr?: string): string {

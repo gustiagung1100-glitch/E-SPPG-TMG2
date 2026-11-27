@@ -108,6 +108,7 @@ export const ProductionModule: React.FC = () => {
     addFuelLog,
     washingWasteRecords,
     addWashingWasteRecord,
+    updateWashingWasteRecord,
     beneficiaryAttendance,
     masterVolunteers,
     masterUnits,
@@ -178,6 +179,7 @@ export const ProductionModule: React.FC = () => {
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
   const [isFuelModalOpen, setIsFuelModalOpen] = useState(false);
   const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
+  const [editingWasteId, setEditingWasteId] = useState<string | null>(null);
   const [viewPhotoUrl, setViewPhotoUrl] = useState<string | null>(null);
   const [selectedDeliveryForBast, setSelectedDeliveryForBast] = useState<DistributionDeliveryRecord | null>(null);
 
@@ -743,7 +745,7 @@ export const ProductionModule: React.FC = () => {
       addToast(
         'success',
         'Foto Ompreng Tersimpan',
-        `Foto Ompreng ${isSmall ? 'Porsi Kecil' : 'Porsi Besar'} tersimpan & tersinkron ke Flayer Menu.`
+        `Foto Ompreng ${isSmall ? 'Porsi Kecil' : 'Porsi Besar'} tersimpan & tersinkron ke Flayer Menu & Pemeriksaan Makanan.`
       );
     } else {
       setPortioningForm(f => ({
@@ -766,6 +768,8 @@ export const ProductionModule: React.FC = () => {
       date: new Date().toISOString().slice(0, 10),
       officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Pemorsian', f.officerName),
       menuId: menuItems[0]?.id || '',
+      smallPhoto: '',
+      largePhoto: '',
       facilityTemps: { ...defaultFacilityTemperatures },
     }));
     setIsPortioningModalOpen(true);
@@ -1227,32 +1231,90 @@ export const ProductionModule: React.FC = () => {
   // -------------------------------------------------------------
   // TAB E: Form State Divisi Cuci Ompreng & Food Waste
   // -------------------------------------------------------------
+  const resolveWasteMenuLabels = (targetDate: string) => {
+    const exact = menuItems.find(m => m.date === targetDate);
+    let matched = exact;
+    if (!matched && targetDate) {
+      const parsed = new Date(`${targetDate}T00:00:00`);
+      if (!Number.isNaN(parsed.getTime())) {
+        const dayName = new Intl.DateTimeFormat('id-ID', { weekday: 'long' })
+          .format(parsed)
+          .toLowerCase();
+        matched = menuItems.find(m => (m.dayName || '').trim().toLowerCase() === dayName);
+      }
+    }
+    const menu = matched || menuItems[0];
+    return {
+      stapleFood: menu?.stapleFood || 'Nasi Putih / Makanan Pokok',
+      animalProtein: menu?.animalProtein || 'Lauk Hewani',
+      plantProtein: menu?.plantProtein || 'Lauk Nabati',
+      vegetable: menu?.vegetable || 'Sayuran',
+      fruit: menu?.fruit || 'Buah Segar',
+    };
+  };
+
   const [wasteForm, setWasteForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     time: '14:15 WIB',
     officerName: 'Fahrur Rozi & Tim Cuci Ompreng',
-    wasteRice: 12.5,
-    ricePhoto: 'https://images.unsplash.com/photo-1516684732162-798a0062be99?auto=format&fit=crop&w=500&q=80',
-    wasteAnimal: 2.1,
-    animalPhoto: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=500&q=80',
-    wastePlant: 3.4,
-    plantPhoto: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
-    wasteVeg: 7.8,
-    vegPhoto: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=500&q=80',
-    wasteFruit: 1.2,
-    fruitPhoto: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=500&q=80',
+    wasteRice: 0,
+    ricePhoto: '',
+    wasteAnimal: 0,
+    animalPhoto: '',
+    wastePlant: 0,
+    plantPhoto: '',
+    wasteVeg: 0,
+    vegPhoto: '',
+    wasteFruit: 0,
+    fruitPhoto: '',
     unit: 'kg',
-    notes: 'Sisa nasi kelas 1-2 SD dan kuah sop. Seluruh sisa dialokasikan untuk pakan ternak warga sekitar (Zero Food Waste).',
+    notes: '',
     customFields: {} as Record<string, any>,
   });
 
   const handleOpenWasteModal = () => {
-    setWasteForm(prev => ({
-      ...prev,
+    setEditingWasteId(null);
+    setWasteForm({
       date: new Date().toISOString().slice(0, 10),
-      officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Cuci Ompreng', prev.officerName),
+      time: '14:15 WIB',
+      officerName: getDefaultDivisionOfficerName(masterVolunteers, 'Cuci Ompreng', 'Fahrur Rozi & Tim Cuci Ompreng'),
+      wasteRice: 0,
+      ricePhoto: '',
+      wasteAnimal: 0,
+      animalPhoto: '',
+      wastePlant: 0,
+      plantPhoto: '',
+      wasteVeg: 0,
+      vegPhoto: '',
+      wasteFruit: 0,
+      fruitPhoto: '',
+      unit: 'kg',
+      notes: '',
       customFields: getInitialCustomFieldValues(dynamicFormSchemas.production_waste_form),
-    }));
+    });
+    setIsWasteModalOpen(true);
+  };
+
+  const handleOpenEditWasteModal = (rec: (typeof washingWasteRecords)[number]) => {
+    setEditingWasteId(rec.id);
+    setWasteForm({
+      date: rec.date,
+      time: rec.time || '14:15 WIB',
+      officerName: rec.officerName || getDefaultDivisionOfficerName(masterVolunteers, 'Cuci Ompreng'),
+      wasteRice: rec.wasteRice?.weight || 0,
+      ricePhoto: rec.wasteRice?.photoUrl || '',
+      wasteAnimal: rec.wasteAnimalProtein?.weight || 0,
+      animalPhoto: rec.wasteAnimalProtein?.photoUrl || '',
+      wastePlant: rec.wastePlantProtein?.weight || 0,
+      plantPhoto: rec.wastePlantProtein?.photoUrl || '',
+      wasteVeg: rec.wasteVegetable?.weight || 0,
+      vegPhoto: rec.wasteVegetable?.photoUrl || '',
+      wasteFruit: rec.wasteFruit?.weight || 0,
+      fruitPhoto: rec.wasteFruit?.photoUrl || '',
+      unit: rec.unit || 'kg',
+      notes: rec.notes || '',
+      customFields: rec.customFields ? { ...rec.customFields } : {},
+    });
     setIsWasteModalOpen(true);
   };
 
@@ -1272,22 +1334,29 @@ export const ProductionModule: React.FC = () => {
     const wasteVeg = toNonNegativeNumber(wasteForm.wasteVeg, 0);
     const wasteFruit = toNonNegativeNumber(wasteForm.wasteFruit, 0);
     const total = wasteRice + wasteAnimal + wastePlant + wasteVeg + wasteFruit;
-    await addWashingWasteRecord({
+    const payload = {
       date: wasteForm.date,
       time: wasteForm.time,
       officerName: wasteForm.officerName,
-      wasteRice: { weight: wasteRice, unit: wasteForm.unit, photoUrl: wasteForm.ricePhoto },
-      wasteAnimalProtein: { weight: wasteAnimal, unit: wasteForm.unit, photoUrl: wasteForm.animalPhoto },
-      wastePlantProtein: { weight: wastePlant, unit: wasteForm.unit, photoUrl: wasteForm.plantPhoto },
-      wasteVegetable: { weight: wasteVeg, unit: wasteForm.unit, photoUrl: wasteForm.vegPhoto },
-      wasteFruit: { weight: wasteFruit, unit: wasteForm.unit, photoUrl: wasteForm.fruitPhoto },
+      wasteRice: { weight: wasteRice, unit: wasteForm.unit, photoUrl: wasteForm.ricePhoto || '' },
+      wasteAnimalProtein: { weight: wasteAnimal, unit: wasteForm.unit, photoUrl: wasteForm.animalPhoto || '' },
+      wastePlantProtein: { weight: wastePlant, unit: wasteForm.unit, photoUrl: wasteForm.plantPhoto || '' },
+      wasteVegetable: { weight: wasteVeg, unit: wasteForm.unit, photoUrl: wasteForm.vegPhoto || '' },
+      wasteFruit: { weight: wasteFruit, unit: wasteForm.unit, photoUrl: wasteForm.fruitPhoto || '' },
       totalWasteWeight: Number(total.toFixed(2)),
       unit: wasteForm.unit,
       notes: wasteForm.notes,
       sterilizationChecked: true,
       customFields: wasteForm.customFields || {},
-    });
+    };
+
+    if (editingWasteId) {
+      await updateWashingWasteRecord(editingWasteId, payload);
+    } else {
+      await addWashingWasteRecord(payload);
+    }
     setIsWasteModalOpen(false);
+    setEditingWasteId(null);
     setIsModalWasteSchemaEdit(false);
   };
 
@@ -1976,20 +2045,38 @@ export const ProductionModule: React.FC = () => {
                 </div>
 
                 <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
                       <Camera className="w-3.5 h-3.5" /> Foto Ompreng Porsi Kecil:
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPortioningCameraTarget({ portionType: 'small', targetMode: 'active_record' })
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Live Camera Landscape</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer border border-slate-200 dark:border-slate-700">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{portioningRecords[0].smallPortionPhoto ? 'Ganti Foto' : 'Upload Foto'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e =>
+                            handleFileUpload(e, async url => {
+                              await updatePortioningRecord(portioningRecords[0].id, {
+                                smallPortionPhoto: url,
+                              });
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPortioningCameraTarget({ portionType: 'small', targetMode: 'active_record' })
+                        }
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Live Camera Landscape</span>
+                      </button>
+                    </div>
                   </div>
                   {portioningRecords[0].smallPortionPhoto && (
                     <img
@@ -2030,20 +2117,38 @@ export const ProductionModule: React.FC = () => {
                 </div>
 
                 <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
                       <Camera className="w-3.5 h-3.5" /> Foto Ompreng Porsi Besar:
                     </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPortioningCameraTarget({ portionType: 'large', targetMode: 'active_record' })
-                      }
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Live Camera Landscape</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold transition cursor-pointer border border-slate-200 dark:border-slate-700">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{portioningRecords[0].largePortionPhoto ? 'Ganti Foto' : 'Upload Foto'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e =>
+                            handleFileUpload(e, async url => {
+                              await updatePortioningRecord(portioningRecords[0].id, {
+                                largePortionPhoto: url,
+                              });
+                            })
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPortioningCameraTarget({ portionType: 'large', targetMode: 'active_record' })
+                        }
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0D9488] hover:bg-teal-700 text-white text-[11px] font-bold transition shadow-xs"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Live Camera Landscape</span>
+                      </button>
+                    </div>
                   </div>
                   {portioningRecords[0].largePortionPhoto && (
                     <img
@@ -2445,93 +2550,127 @@ export const ProductionModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* 5 Waste Categories Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {/* Rice */}
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">1. Sisa Nasi</span>
-                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
-                    {washingWasteRecords[0].wasteRice.weight} kg
-                  </div>
-                  {washingWasteRecords[0].wasteRice.photoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoUrl(washingWasteRecords[0].wasteRice.photoUrl || null)}
-                      className="text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2 block"
-                    >
-                      Lihat Foto Sisa
-                    </button>
-                  )}
-                </div>
+              {/* 5 Waste Categories Cards — Sinkron Item Menu & Upload Foto Langsung */}
+              {(() => {
+                const latestWaste = washingWasteRecords[0];
+                const menuLabels = resolveWasteMenuLabels(latestWaste.date);
+                const cards = [
+                  {
+                    key: 'wasteRice' as const,
+                    title: '1. Makanan Pokok',
+                    menuName: menuLabels.stapleFood,
+                    item: latestWaste.wasteRice,
+                  },
+                  {
+                    key: 'wasteAnimalProtein' as const,
+                    title: '2. Lauk Hewani',
+                    menuName: menuLabels.animalProtein,
+                    item: latestWaste.wasteAnimalProtein,
+                  },
+                  {
+                    key: 'wastePlantProtein' as const,
+                    title: '3. Lauk Nabati',
+                    menuName: menuLabels.plantProtein,
+                    item: latestWaste.wastePlantProtein,
+                  },
+                  {
+                    key: 'wasteVegetable' as const,
+                    title: '4. Sayuran',
+                    menuName: menuLabels.vegetable,
+                    item: latestWaste.wasteVegetable,
+                  },
+                  {
+                    key: 'wasteFruit' as const,
+                    title: '5. Buah',
+                    menuName: menuLabels.fruit,
+                    item: latestWaste.wasteFruit,
+                  },
+                ];
 
-                {/* Animal Protein */}
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">2. Sisa Hewani</span>
-                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
-                    {washingWasteRecords[0].wasteAnimalProtein.weight} kg
-                  </div>
-                  {washingWasteRecords[0].wasteAnimalProtein.photoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoUrl(washingWasteRecords[0].wasteAnimalProtein.photoUrl || null)}
-                      className="text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2 block"
-                    >
-                      Lihat Foto Sisa
-                    </button>
-                  )}
-                </div>
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                    {cards.map(card => (
+                      <div
+                        key={card.key}
+                        className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col justify-between gap-2"
+                      >
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block">
+                            {card.title}
+                          </span>
+                          <span
+                            className="text-xs font-bold text-slate-900 dark:text-white block truncate"
+                            title={card.menuName}
+                          >
+                            {card.menuName}
+                          </span>
+                          <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
+                            {card.item.weight} {card.item.unit || latestWaste.unit || 'kg'}
+                          </div>
+                        </div>
 
-                {/* Plant Protein */}
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">3. Sisa Nabati</span>
-                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
-                    {washingWasteRecords[0].wastePlantProtein.weight} kg
-                  </div>
-                  {washingWasteRecords[0].wastePlantProtein.photoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoUrl(washingWasteRecords[0].wastePlantProtein.photoUrl || null)}
-                      className="text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2 block"
-                    >
-                      Lihat Foto Sisa
-                    </button>
-                  )}
-                </div>
+                        {card.item.photoUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setViewPhotoUrl(card.item.photoUrl || null)}
+                            className="group relative overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"
+                            title={`Perbesar foto sisa ${card.menuName}`}
+                          >
+                            <img
+                              src={card.item.photoUrl}
+                              alt={`Foto sisa ${card.menuName}`}
+                              className="w-full h-20 object-cover group-hover:scale-105 transition"
+                            />
+                          </button>
+                        ) : (
+                          <div className="w-full h-16 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-[10px] text-slate-400 italic">
+                            Belum ada foto
+                          </div>
+                        )}
 
-                {/* Vegetable */}
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">4. Sisa Sayur</span>
-                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
-                    {washingWasteRecords[0].wasteVegetable.weight} kg
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <label className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg bg-blue-900 hover:bg-blue-800 text-white text-[10px] font-bold cursor-pointer transition">
+                            <Upload className="w-3 h-3" />
+                            <span>{card.item.photoUrl ? 'Ganti Foto' : 'Upload Foto'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={e =>
+                                handleFileUpload(e, url => {
+                                  updateWashingWasteRecord(latestWaste.id, {
+                                    [card.key]: {
+                                      ...card.item,
+                                      photoUrl: url,
+                                    },
+                                  });
+                                })
+                              }
+                            />
+                          </label>
+                          {card.item.photoUrl && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateWashingWasteRecord(latestWaste.id, {
+                                  [card.key]: {
+                                    ...card.item,
+                                    photoUrl: '',
+                                  },
+                                })
+                              }
+                              title="Hapus foto item ini"
+                              className="p-1 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:hover:bg-rose-950/40"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  {washingWasteRecords[0].wasteVegetable.photoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoUrl(washingWasteRecords[0].wasteVegetable.photoUrl || null)}
-                      className="text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2 block"
-                    >
-                      Lihat Foto Sisa
-                    </button>
-                  )}
-                </div>
-
-                {/* Fruit */}
-                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">5. Sisa Buah</span>
-                  <div className="text-xl font-mono font-black text-slate-900 dark:text-white mt-1">
-                    {washingWasteRecords[0].wasteFruit.weight} kg
-                  </div>
-                  {washingWasteRecords[0].wasteFruit.photoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoUrl(washingWasteRecords[0].wasteFruit.photoUrl || null)}
-                      className="text-[10px] text-blue-900 dark:text-sky-400 hover:underline mt-2 block"
-                    >
-                      Lihat Foto Sisa
-                    </button>
-                  )}
-                </div>
-              </div>
+                );
+              })()}
 
               <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
                 <div>
@@ -2586,6 +2725,7 @@ export const ProductionModule: React.FC = () => {
                     <th className="py-2.5 px-4 text-right">Total Limbah</th>
                     <th className="py-2.5 px-4">Evaluasi / Alasan</th>
                     <th className="py-2.5 px-4">Foto Sisa Makanan</th>
+                    <th className="py-2.5 px-4 text-center">Aksi</th>
                     {getCustomTableFields(dynamicFormSchemas.production_waste_form).map(cf => (
                       <th key={cf.id} className="py-2.5 px-4 whitespace-nowrap">
                         {cf.label}
@@ -2595,12 +2735,13 @@ export const ProductionModule: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {washingWasteRecords.map(w => {
+                    const rowMenuLabels = resolveWasteMenuLabels(w.date);
                     const rowPhotos = [
-                      { label: 'Nasi', url: w.wasteRice?.photoUrl },
-                      { label: 'Hewani', url: w.wasteAnimalProtein?.photoUrl },
-                      { label: 'Nabati', url: w.wastePlantProtein?.photoUrl },
-                      { label: 'Sayur', url: w.wasteVegetable?.photoUrl },
-                      { label: 'Buah', url: w.wasteFruit?.photoUrl },
+                      { label: rowMenuLabels.stapleFood, url: w.wasteRice?.photoUrl },
+                      { label: rowMenuLabels.animalProtein, url: w.wasteAnimalProtein?.photoUrl },
+                      { label: rowMenuLabels.plantProtein, url: w.wastePlantProtein?.photoUrl },
+                      { label: rowMenuLabels.vegetable, url: w.wasteVegetable?.photoUrl },
+                      { label: rowMenuLabels.fruit, url: w.wasteFruit?.photoUrl },
                     ].filter((item): item is { label: string; url: string } => Boolean(item.url && item.url.trim() !== ''));
                     const customFields = getCustomTableFields(dynamicFormSchemas.production_waste_form);
 
@@ -2629,14 +2770,14 @@ export const ProductionModule: React.FC = () => {
                                   type="button"
                                   onClick={() => setViewPhotoUrl(p.url)}
                                   title={`Lihat foto sisa ${p.label}`}
-                                  className="flex flex-col items-center gap-0.5 p-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-blue-600 transition"
+                                  className="flex flex-col items-center gap-0.5 p-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-blue-600 transition max-w-[68px]"
                                 >
                                   <img
                                     src={p.url}
                                     alt={`Foto ${p.label}`}
                                     className="w-8 h-8 object-cover rounded-xs"
                                   />
-                                  <span className="text-[9px] text-slate-600 dark:text-slate-300 leading-none">
+                                  <span className="text-[9px] text-slate-600 dark:text-slate-300 leading-none truncate w-full text-center">
                                     {p.label}
                                   </span>
                                 </button>
@@ -2645,6 +2786,16 @@ export const ProductionModule: React.FC = () => {
                           ) : (
                             <span className="text-[11px] italic text-slate-400">Belum ada foto</span>
                           )}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditWasteModal(w)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-blue-900 hover:text-white text-slate-700 dark:bg-slate-800 dark:text-slate-200 text-[11px] font-semibold transition whitespace-nowrap"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit / Foto</span>
+                          </button>
                         </td>
                         {customFields.map(cf => {
                           const val = w.customFields?.[cf.key];
@@ -3628,7 +3779,7 @@ export const ProductionModule: React.FC = () => {
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold text-slate-800 dark:text-slate-200">Ompreng Porsi Besar</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      Sinkron Flyer Menu
+                      Sinkron Flayer &amp; Pemeriksaan Makanan
                     </span>
                   </div>
 
@@ -4537,9 +4688,14 @@ export const ProductionModule: React.FC = () => {
           isOpen={isWasteModalOpen}
           onClose={() => {
             setIsWasteModalOpen(false);
+            setEditingWasteId(null);
             setIsModalWasteSchemaEdit(false);
           }}
-          title="Input Audit Sampah Makanan (Food Waste) Cuci Ompreng"
+          title={
+            editingWasteId
+              ? 'Edit Audit & Upload Foto Sisa Makanan Cuci Ompreng'
+              : 'Input Audit Sampah Makanan (Food Waste) Cuci Ompreng'
+          }
           maxWidth="xl"
         >
           <form onSubmit={handleSaveWaste} className="space-y-4 text-xs">
@@ -4586,131 +4742,131 @@ export const ProductionModule: React.FC = () => {
               onUploadError={handleUploadError}
             />
 
-            {/* 5 Kategori Food Waste */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
-                  <Trash2 className="w-4 h-4 text-rose-500" />
-                  Berat Sampah Sisa Makanan ({wasteForm.unit}) & Upload Foto
-                </span>
-                <div className="flex items-center gap-2">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                    Satuan (Master):
-                  </label>
-                  <select
-                    value={wasteForm.unit}
-                    onChange={e => setWasteForm(f => ({ ...f, unit: e.target.value }))}
-                    className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
-                  >
-                    {masterUnits.map(u => (
-                      <option key={u.id} value={u.code}>
-                        {u.code} — {u.name}
-                      </option>
-                    ))}
-                    {wasteForm.unit && !masterUnits.some(u => u.code === wasteForm.unit) && (
-                      <option value={wasteForm.unit}>{wasteForm.unit}</option>
-                    )}
-                  </select>
-                </div>
-              </div>
+            {/* 5 Kategori Food Waste Sinkron Item Menu */}
+            {(() => {
+              const modalMenuLabels = resolveWasteMenuLabels(wasteForm.date);
+              const slots = [
+                {
+                  label: '1. Makanan Pokok',
+                  menuName: modalMenuLabels.stapleFood,
+                  weightKey: 'wasteRice' as const,
+                  photoKey: 'ricePhoto' as const,
+                },
+                {
+                  label: '2. Lauk Hewani',
+                  menuName: modalMenuLabels.animalProtein,
+                  weightKey: 'wasteAnimal' as const,
+                  photoKey: 'animalPhoto' as const,
+                },
+                {
+                  label: '3. Lauk Nabati',
+                  menuName: modalMenuLabels.plantProtein,
+                  weightKey: 'wastePlant' as const,
+                  photoKey: 'plantPhoto' as const,
+                },
+                {
+                  label: '4. Sayuran',
+                  menuName: modalMenuLabels.vegetable,
+                  weightKey: 'wasteVeg' as const,
+                  photoKey: 'vegPhoto' as const,
+                },
+                {
+                  label: '5. Buah',
+                  menuName: modalMenuLabels.fruit,
+                  weightKey: 'wasteFruit' as const,
+                  photoKey: 'fruitPhoto' as const,
+                },
+              ];
 
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
-                <div>
-                  <label className="block font-semibold mb-0.5">1. Sisa Nasi</label>
-                  <NumericInput
-                    min={0}
-                    value={wasteForm.wasteRice}
-                    onValueChange={val => setWasteForm(f => ({ ...f, wasteRice: val }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, ricePhoto: url })))}
-                    className="w-full text-[10px] mt-1"
-                  />
-                  {wasteForm.ricePhoto && (
-                    <img src={wasteForm.ricePhoto} alt="Preview Sisa Nasi" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
-                  )}
-                </div>
+              return (
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3 bg-slate-50 dark:bg-slate-800/40">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                      <Trash2 className="w-4 h-4 text-rose-500" />
+                      Berat Sisa Makanan ({wasteForm.unit}) &amp; Upload Foto per Item Menu
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                        Satuan (Master):
+                      </label>
+                      <select
+                        value={wasteForm.unit}
+                        onChange={e => setWasteForm(f => ({ ...f, unit: e.target.value }))}
+                        className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                      >
+                        {masterUnits.map(u => (
+                          <option key={u.id} value={u.code}>
+                            {u.code} — {u.name}
+                          </option>
+                        ))}
+                        {wasteForm.unit && !masterUnits.some(u => u.code === wasteForm.unit) && (
+                          <option value={wasteForm.unit}>{wasteForm.unit}</option>
+                        )}
+                      </select>
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block font-semibold mb-0.5">2. Sisa Hewani</label>
-                  <NumericInput
-                    min={0}
-                    value={wasteForm.wasteAnimal}
-                    onValueChange={val => setWasteForm(f => ({ ...f, wasteAnimal: val }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, animalPhoto: url })))}
-                    className="w-full text-[10px] mt-1"
-                  />
-                  {wasteForm.animalPhoto && (
-                    <img src={wasteForm.animalPhoto} alt="Preview Sisa Hewani" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
-                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                    {slots.map(slot => {
+                      const photoVal = wasteForm[slot.photoKey];
+                      return (
+                        <div key={slot.weightKey} className="flex flex-col justify-between p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase">
+                              {slot.label}
+                            </label>
+                            <span
+                              className="block font-bold text-slate-800 dark:text-slate-100 text-[11px] truncate mb-1"
+                              title={slot.menuName}
+                            >
+                              {slot.menuName}
+                            </span>
+                            <NumericInput
+                              min={0}
+                              value={wasteForm[slot.weightKey]}
+                              onValueChange={val =>
+                                setWasteForm(f => ({ ...f, [slot.weightKey]: val }))
+                              }
+                              className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
+                            />
+                          </div>
+                          <div className="mt-1.5 space-y-1">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={e =>
+                                handleFileUpload(e, url =>
+                                  setWasteForm(f => ({ ...f, [slot.photoKey]: url }))
+                                )
+                              }
+                              className="w-full text-[10px]"
+                            />
+                            {photoVal && (
+                              <div className="relative">
+                                <img
+                                  src={photoVal}
+                                  alt={`Preview ${slot.menuName}`}
+                                  className="w-full h-14 object-cover rounded-md border border-slate-200 dark:border-slate-700"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setWasteForm(f => ({ ...f, [slot.photoKey]: '' }))
+                                  }
+                                  className="mt-1 w-full py-0.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded border border-rose-200 dark:border-rose-800"
+                                >
+                                  Hapus Foto
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block font-semibold mb-0.5">3. Sisa Nabati</label>
-                  <NumericInput
-                    min={0}
-                    value={wasteForm.wastePlant}
-                    onValueChange={val => setWasteForm(f => ({ ...f, wastePlant: val }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, plantPhoto: url })))}
-                    className="w-full text-[10px] mt-1"
-                  />
-                  {wasteForm.plantPhoto && (
-                    <img src={wasteForm.plantPhoto} alt="Preview Sisa Nabati" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
-                  )}
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-0.5">4. Sisa Sayur</label>
-                  <NumericInput
-                    min={0}
-                    value={wasteForm.wasteVeg}
-                    onValueChange={val => setWasteForm(f => ({ ...f, wasteVeg: val }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, vegPhoto: url })))}
-                    className="w-full text-[10px] mt-1"
-                  />
-                  {wasteForm.vegPhoto && (
-                    <img src={wasteForm.vegPhoto} alt="Preview Sisa Sayur" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
-                  )}
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-0.5">5. Sisa Buah</label>
-                  <NumericInput
-                    min={0}
-                    value={wasteForm.wasteFruit}
-                    onValueChange={val => setWasteForm(f => ({ ...f, wasteFruit: val }))}
-                    className="w-full px-2 py-1.5 border rounded-lg font-mono dark:bg-slate-800"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={e => handleFileUpload(e, url => setWasteForm(f => ({ ...f, fruitPhoto: url })))}
-                    className="w-full text-[10px] mt-1"
-                  />
-                  {wasteForm.fruitPhoto && (
-                    <img src={wasteForm.fruitPhoto} alt="Preview Sisa Buah" className="w-full h-14 object-cover rounded-md mt-1 border border-slate-200 dark:border-slate-700" />
-                  )}
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {dynamicFormSchemas.production_waste_form.fields.some(f => f.key === 'notes') && (
               <div>
@@ -4735,6 +4891,7 @@ export const ProductionModule: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setIsWasteModalOpen(false);
+                  setEditingWasteId(null);
                   setIsModalWasteSchemaEdit(false);
                 }}
                 className="px-4 py-2 border rounded-xl"
@@ -4745,7 +4902,7 @@ export const ProductionModule: React.FC = () => {
                 type="submit"
                 className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold"
               >
-                Simpan Audit Food Waste
+                {editingWasteId ? 'Simpan Perubahan' : 'Simpan Audit Food Waste'}
               </button>
             </div>
           </form>

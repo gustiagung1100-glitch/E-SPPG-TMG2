@@ -121,6 +121,33 @@ export function resolvePlogOrganolepticData(
   const matchedPortioning =
     portioningRecords.find(r => r.date === activeDate) || portioningRecords[0];
 
+  const pickLargePortionPhoto = (rec?: PortioningInspectionRecord): string =>
+    (rec?.largePortionPhoto || '').trim();
+
+  const matchedPortioningWithLarge =
+    (menu?.id
+      ? portioningRecords.find(
+          r =>
+            r.date === activeDate &&
+            r.menuId === menu.id &&
+            Boolean(pickLargePortionPhoto(r))
+        )
+      : undefined) ||
+    portioningRecords.find(
+      r => r.date === activeDate && Boolean(pickLargePortionPhoto(r))
+    ) ||
+    (menu?.id
+      ? portioningRecords.find(
+          r => r.menuId === menu.id && Boolean(pickLargePortionPhoto(r))
+        )
+      : undefined) ||
+    (menu?.date
+      ? portioningRecords.find(
+          r => r.date === menu.date && Boolean(pickLargePortionPhoto(r))
+        )
+      : undefined) ||
+    portioningRecords.find(r => Boolean(pickLargePortionPhoto(r)));
+
   const chefVolunteer = masterVolunteers.find(
     v =>
       v.isActive &&
@@ -296,7 +323,8 @@ export function resolvePlogOrganolepticData(
     : [];
 
   const defaultWetPhoto =
-    matchedPortioning?.largePortionPhoto ||
+    pickLargePortionPhoto(matchedPortioningWithLarge) ||
+    matchedPortioning?.foodTemps?.rice?.photoUrl ||
     matchedPortioning?.smallPortionPhoto ||
     matchedCooking?.itemEntries?.find(e => e.categoryKey === 'animalProtein')?.photoUrl ||
     matchedCooking?.cookedFoods?.animalProtein?.photoUrl ||
@@ -380,10 +408,10 @@ export const PlogOrganolepticSheet: React.FC<PlogOrganolepticSheetProps> = ({
         </div>
       </div>
 
-      {/* JUDUL FORM KOMBINASI */}
+      {/* JUDUL FORM PEMERIKSAAN MAKANAN */}
       <div className="text-center pt-4 pb-3">
         <h1 className="text-[13px] sm:text-[14.5px] font-bold uppercase tracking-wide text-black font-sans">
-          PEMERIKSAAN MAKANAN &amp; UJI ORGANOLEPTIK (PLOG)
+          PEMERIKSAAN MAKANAN
         </h1>
         <p className="text-[10.5px] text-slate-700 font-sans mt-0.5">
           Pengujian Mutu Organoleptik Internal Dapur (Nutrisionis &amp; Head Chef) • Retensi Sampel 2 x 24 Jam
@@ -505,18 +533,18 @@ export const PlogOrganolepticSheet: React.FC<PlogOrganolepticSheetProps> = ({
                         type="button"
                         onClick={() =>
                           onPreviewPhoto?.({
-                            label: 'Dokumentasi Sampel Menu Basah (Ompreng PLOG)',
+                            label: 'Dokumentasi Foto Porsi Besar (Divisi Pemorsian)',
                             url: data.wetPhotoUrl || '',
                             caption: `Tanggal: ${data.samplePreparedDateLabel} • Petugas: ${data.officerName}`,
                           })
                         }
                         className="group block mx-auto focus:outline-none"
-                        title="Klik untuk memperbesar foto menu"
+                        title="Klik untuk memperbesar foto Porsi Besar"
                       >
                         <img
                           src={data.wetPhotoUrl}
-                          alt="Foto Sampel Menu Basah"
-                          className="w-24 h-24 object-cover rounded border border-slate-300 mx-auto group-hover:scale-105 transition-transform"
+                          alt="Foto Porsi Besar Menu Basah"
+                          className="w-24 aspect-[4/3] object-cover rounded border border-slate-300 mx-auto group-hover:scale-105 transition-transform"
                         />
                         <span className="block text-[9px] text-slate-500 mt-1 print:hidden">
                           Klik perbesar
@@ -660,17 +688,23 @@ export const PlogOrganolepticSheet: React.FC<PlogOrganolepticSheetProps> = ({
   );
 };
 
-async function loadImageForPdf(url: string): Promise<string | null> {
+interface LoadedPdfImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+async function loadImageForPdf(url: string): Promise<LoadedPdfImage | null> {
   if (!url || typeof url !== 'string') return null;
   return new Promise(resolve => {
     let done = false;
-    const finish = (val: string | null) => {
+    const finish = (val: LoadedPdfImage | null) => {
       if (!done) {
         done = true;
         resolve(val);
       }
     };
-    const timer = window.setTimeout(() => finish(null), 4000);
+    const timer = window.setTimeout(() => finish(null), 5000);
     const img = new Image();
     if (!url.startsWith('data:')) {
       img.crossOrigin = 'anonymous';
@@ -678,18 +712,28 @@ async function loadImageForPdf(url: string): Promise<string | null> {
     img.onload = () => {
       window.clearTimeout(timer);
       try {
+        const natW = img.naturalWidth || 240;
+        const natH = img.naturalHeight || 240;
+        const maxDim = 900;
+        const scale = Math.min(1, maxDim / Math.max(natW, natH));
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || 240;
-        canvas.height = img.naturalHeight || 240;
+        canvas.width = Math.max(1, Math.round(natW * scale));
+        canvas.height = Math.max(1, Math.round(natH * scale));
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/jpeg', 0.88));
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          finish({
+            dataUrl: canvas.toDataURL('image/jpeg', 0.88),
+            width: canvas.width,
+            height: canvas.height,
+          });
         } else {
-          resolve(null);
+          finish(null);
         }
       } catch {
-        resolve(null);
+        finish(null);
       }
     };
     img.onerror = () => {
@@ -711,15 +755,15 @@ export async function exportPlogOrganolepticPDF(data: PlogOrganolepticData) {
   const right = 196;
   const pageCenterX = 105;
 
-  const [bgnLogoUrl, wetPhotoDataUrl, dryPhotoDataUrl] = await Promise.all([
+  const [bgnLogoImg, wetPhotoImg, dryPhotoImg] = await Promise.all([
     loadImageForPdf('/assets/aistudio/Badan_Gizi_Nasional__BGN__Logo_-_Colored_-_zonalogo.com_5e10d066.png'),
     data.wetPhotoUrl ? loadImageForPdf(data.wetPhotoUrl) : Promise.resolve(null),
     data.dryPhotoUrl ? loadImageForPdf(data.dryPhotoUrl) : Promise.resolve(null),
   ]);
 
   // KOP SURAT BGN
-  if (bgnLogoUrl) {
-    doc.addImage(bgnLogoUrl, 'JPEG', left, 11, 17, 17);
+  if (bgnLogoImg) {
+    doc.addImage(bgnLogoImg.dataUrl, 'JPEG', left, 11, 17, 17);
   } else {
     doc.setFillColor(30, 58, 138);
     doc.circle(left + 8.5, 19.5, 8, 'F');
@@ -755,7 +799,7 @@ export async function exportPlogOrganolepticPDF(data: PlogOrganolepticData) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(0, 0, 0);
-  doc.text('PEMERIKSAAN MAKANAN & UJI ORGANOLEPTIK (PLOG)', pageCenterX, y, {
+  doc.text('PEMERIKSAAN MAKANAN', pageCenterX, y, {
     align: 'center',
   });
   y += 4;
@@ -945,21 +989,27 @@ export async function exportPlogOrganolepticPDF(data: PlogOrganolepticData) {
     },
   });
 
-  if (wetPhotoDataUrl && wetImageCellBounds) {
-    const b: { x: number; y: number; w: number; h: number } = wetImageCellBounds;
-    const size = Math.min(b.w - 4, b.h - 4, 28);
-    const imgX = b.x + (b.w - size) / 2;
-    const imgY = b.y + (b.h - size) / 2;
-    doc.addImage(wetPhotoDataUrl, 'JPEG', imgX, imgY, size, size);
-  }
+  const drawProportionalPdfPhoto = (
+    img: LoadedPdfImage | null,
+    bounds: { x: number; y: number; w: number; h: number } | null
+  ) => {
+    if (!img || !bounds) return;
+    const maxW = Math.max(4, bounds.w - 3);
+    const maxH = Math.max(4, bounds.h - 3);
+    const ratio = img.width / Math.max(1, img.height);
+    let drawW = maxW;
+    let drawH = drawW / ratio;
+    if (drawH > maxH) {
+      drawH = maxH;
+      drawW = drawH * ratio;
+    }
+    const imgX = bounds.x + (bounds.w - drawW) / 2;
+    const imgY = bounds.y + (bounds.h - drawH) / 2;
+    doc.addImage(img.dataUrl, 'JPEG', imgX, imgY, drawW, drawH);
+  };
 
-  if (dryPhotoDataUrl && dryImageCellBounds) {
-    const b: { x: number; y: number; w: number; h: number } = dryImageCellBounds;
-    const size = Math.min(b.w - 4, b.h - 4, 28);
-    const imgX = b.x + (b.w - size) / 2;
-    const imgY = b.y + (b.h - size) / 2;
-    doc.addImage(dryPhotoDataUrl, 'JPEG', imgX, imgY, size, size);
-  }
+  drawProportionalPdfPhoto(wetPhotoImg, wetImageCellBounds);
+  drawProportionalPdfPhoto(dryPhotoImg, dryImageCellBounds);
 
   // CATATAN SECTION
   const finalY = (doc as any).lastAutoTable?.finalY || y + 110;
@@ -1018,5 +1068,5 @@ export async function exportPlogOrganolepticPDF(data: PlogOrganolepticData) {
     doc.text(`ID SPPG: ${data.sppgId}`, rightColCenter, sigY + 28.5, { align: 'center' });
   }
 
-  doc.save(`Laporan_Pemeriksaan_Makanan_Organoleptik_PLOG_${data.rawDate}.pdf`);
+  doc.save(`Laporan_Pemeriksaan_Makanan_${data.rawDate}.pdf`);
 }
